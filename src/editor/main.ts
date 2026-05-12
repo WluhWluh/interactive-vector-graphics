@@ -3,13 +3,20 @@ import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
 import { CanvasStage } from "../core/stage/canvasStage";
 import { drawCenteredStatus } from "../core/stage/primitivePreview";
 import {
+  createScene,
   createProject,
   deleteAsset,
   deleteProject,
+  deleteScene,
+  getScene,
   listAssets,
   listProjects,
+  listScenes,
+  saveScene,
   uploadAsset,
   type ProjectRecord,
+  type SceneDocument,
+  type SceneRecord,
 } from "./api";
 import {
   ThreeEditorViewport,
@@ -25,6 +32,12 @@ type EditorElements = {
   projectNameInput: HTMLInputElement;
   projectList: HTMLUListElement;
   deleteProjectButton: HTMLButtonElement;
+  sceneNameInput: HTMLInputElement;
+  sceneList: HTMLUListElement;
+  createSceneButton: HTMLButtonElement;
+  loadSceneButton: HTMLButtonElement;
+  saveSceneButton: HTMLButtonElement;
+  deleteSceneButton: HTMLButtonElement;
   fileInput: HTMLInputElement;
   assetList: HTMLUListElement;
   addNodeButton: HTMLButtonElement;
@@ -45,9 +58,12 @@ const elements = getEditorElements();
 
 let projects: ProjectRecord[] = [];
 let assets: PrimitiveSvgAsset[] = [];
+let scenes: SceneRecord[] = [];
 let sceneNodes: EditorSceneNode[] = [];
 let selectedProjectId: string | null = null;
 let selectedAssetId: string | null = null;
+let selectedSceneId: string | null = null;
+let loadedSceneId: string | null = null;
 let selectedNodeId: string | null = null;
 let lastImportError: string | null = null;
 let lastFrameTime = performance.now();
@@ -60,6 +76,18 @@ elements.projectForm.addEventListener("submit", (event) => {
 });
 elements.deleteProjectButton.addEventListener("click", () => {
   void deleteSelectedProject();
+});
+elements.createSceneButton.addEventListener("click", () => {
+  void createSceneFromInput();
+});
+elements.loadSceneButton.addEventListener("click", () => {
+  void loadSelectedScene();
+});
+elements.saveSceneButton.addEventListener("click", () => {
+  void saveSelectedScene();
+});
+elements.deleteSceneButton.addEventListener("click", () => {
+  void deleteSelectedScene();
 });
 elements.fileInput.addEventListener("change", () => {
   void importSelectedFile();
@@ -84,6 +112,7 @@ elements.transformScaleButton.addEventListener("click", () => {
 });
 elements.resetViewButton.addEventListener("click", () => {
   threeViewport.resetView();
+  loadedSceneId = null;
   renderEditorShell();
   exposeEditorDebugHooks();
 });
@@ -101,6 +130,7 @@ threeViewport.setCallbacks({
     }
 
     threeViewport.syncNodeFromProxy(node);
+    loadedSceneId = null;
     renderEditorShell();
     exposeEditorDebugHooks();
   },
@@ -131,13 +161,18 @@ declare global {
           target: [number, number, number];
           fov: number;
           zoom: number;
+          near: number;
+          far: number;
         };
         nodes: EditorSceneNode[];
         selectedNodeId: string | null;
         transformMode: TransformMode;
       };
+      getScenes: () => SceneRecord[];
       getSelectedProjectId: () => string | null;
       getSelectedAssetId: () => string | null;
+      getSelectedSceneId: () => string | null;
+      getLoadedSceneId: () => string | null;
       getLastImportError: () => string | null;
     };
   }
@@ -154,10 +189,13 @@ async function refreshProjects(): Promise<void> {
     if (selectedProjectId !== nextSelectedProjectId) {
       clearExperimentScene();
       selectedAssetId = null;
+      selectedSceneId = null;
+      loadedSceneId = null;
     }
 
     selectedProjectId = nextSelectedProjectId;
     await refreshAssets();
+    await refreshScenes();
   } catch (error) {
     setImportError(error);
   }
@@ -168,6 +206,8 @@ async function refreshAssets(): Promise<void> {
     assets = [];
     selectedAssetId = null;
     clearExperimentScene();
+    selectedSceneId = null;
+    loadedSceneId = null;
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
@@ -178,6 +218,30 @@ async function refreshAssets(): Promise<void> {
     selectedAssetId,
     assets.map((asset) => asset.id),
   );
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+async function refreshScenes(): Promise<void> {
+  if (!selectedProjectId) {
+    scenes = [];
+    selectedSceneId = null;
+    loadedSceneId = null;
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return;
+  }
+
+  scenes = await listScenes(selectedProjectId);
+  selectedSceneId = chooseStableSelection(
+    selectedSceneId,
+    scenes.map((scene) => scene.id),
+  );
+
+  if (loadedSceneId && !scenes.some((scene) => scene.id === loadedSceneId)) {
+    loadedSceneId = null;
+  }
+
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -196,6 +260,8 @@ async function createProjectFromInput(): Promise<void> {
     if (selectedProjectId !== project.id) {
       clearExperimentScene();
       selectedAssetId = null;
+      selectedSceneId = null;
+      loadedSceneId = null;
     }
     selectedProjectId = project.id;
     lastImportError = null;
@@ -215,10 +281,111 @@ async function deleteSelectedProject(): Promise<void> {
     await deleteProject(selectedProjectId);
     selectedProjectId = null;
     selectedAssetId = null;
+    selectedSceneId = null;
+    loadedSceneId = null;
     clearExperimentScene();
     lastImportError = null;
     hideError();
     await refreshProjects();
+  } catch (error) {
+    setImportError(error);
+  }
+}
+
+async function createSceneFromInput(): Promise<void> {
+  if (!selectedProjectId) {
+    setImportError(new Error("Create or select a project before creating a scene."));
+    return;
+  }
+
+  const name = elements.sceneNameInput.value.trim();
+
+  if (!name) {
+    setImportError(new Error("Scene name is required."));
+    return;
+  }
+
+  try {
+    const result = await createScene(
+      selectedProjectId,
+      name,
+      createCurrentSceneDocument(),
+    );
+
+    elements.sceneNameInput.value = "";
+    selectedSceneId = result.scene.id;
+    loadedSceneId = result.scene.id;
+    lastImportError = null;
+    hideError();
+    await refreshScenes();
+  } catch (error) {
+    setImportError(error);
+  }
+}
+
+async function saveSelectedScene(): Promise<void> {
+  if (!selectedProjectId || !selectedSceneId) {
+    setImportError(new Error("Select a saved scene before saving."));
+    return;
+  }
+
+  try {
+    const result = await saveScene(
+      selectedProjectId,
+      selectedSceneId,
+      createCurrentSceneDocument(),
+    );
+
+    selectedSceneId = result.scene.id;
+    loadedSceneId = result.scene.id;
+    lastImportError = null;
+    hideError();
+    await refreshScenes();
+  } catch (error) {
+    setImportError(error);
+  }
+}
+
+async function loadSelectedScene(): Promise<void> {
+  if (!selectedProjectId || !selectedSceneId) {
+    setImportError(new Error("Select a saved scene before loading."));
+    return;
+  }
+
+  try {
+    const result = await getScene(selectedProjectId, selectedSceneId);
+
+    applySceneDocument(result.document);
+    selectedSceneId = result.scene.id;
+    loadedSceneId = result.scene.id;
+    lastImportError = null;
+    hideError();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  } catch (error) {
+    setImportError(error);
+  }
+}
+
+async function deleteSelectedScene(): Promise<void> {
+  if (!selectedProjectId || !selectedSceneId) {
+    return;
+  }
+
+  try {
+    const deletedSceneId = selectedSceneId;
+
+    await deleteScene(selectedProjectId, deletedSceneId);
+
+    if (loadedSceneId === deletedSceneId) {
+      clearExperimentScene();
+      loadedSceneId = null;
+    }
+
+    selectedSceneId = null;
+    lastImportError = null;
+    hideError();
+    await refreshScenes();
   } catch (error) {
     setImportError(error);
   }
@@ -288,6 +455,7 @@ function addSelectedAssetToScene(): void {
   nextSceneNodeNumber += 1;
   sceneNodes = [...sceneNodes, node];
   selectedNodeId = node.id;
+  loadedSceneId = null;
   threeViewport.addOrUpdateNode(node, selectedAsset);
   threeViewport.setSelectedNode(node.id);
   lastImportError = null;
@@ -298,6 +466,7 @@ function addSelectedAssetToScene(): void {
 
 function toggleProjection(): void {
   threeViewport.toggleProjection();
+  loadedSceneId = null;
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -315,6 +484,43 @@ function clearExperimentScene(): void {
 
   sceneNodes = [];
   selectedNodeId = null;
+  threeViewport.setSelectedNode(null);
+}
+
+function createCurrentSceneDocument(): SceneDocument {
+  return {
+    version: 1,
+    camera: threeViewport.getCameraSnapshot(),
+    nodes: sceneNodes.map(cloneSceneNode),
+    animation: {
+      fps: 24,
+      duration: 0,
+      tracks: [],
+    },
+  };
+}
+
+function applySceneDocument(document: SceneDocument): void {
+  clearExperimentScene();
+  threeViewport.applyCameraSnapshot(document.camera);
+  sceneNodes = document.nodes.map(cloneSceneNode);
+  selectedNodeId = sceneNodes[0]?.id ?? null;
+  nextSceneNodeNumber = getNextSceneNodeNumber(sceneNodes);
+
+  /**
+   * A scene may refer to assets that were deleted after it was saved. The node
+   * data is still useful, so only create Three proxies for assets that are
+   * currently available and let Canvas skip the missing visual path.
+   */
+  for (const node of sceneNodes) {
+    const asset = getAssetById(node.assetId);
+
+    if (asset) {
+      threeViewport.addOrUpdateNode(node, asset);
+    }
+  }
+
+  threeViewport.setSelectedNode(selectedNodeId);
 }
 
 function removeSceneNodesForAsset(assetId: string): void {
@@ -330,6 +536,8 @@ function removeSceneNodesForAsset(assetId: string): void {
     selectedNodeId = null;
     threeViewport.setSelectedNode(null);
   }
+
+  loadedSceneId = null;
 }
 
 function getEditorElements(): EditorElements {
@@ -341,6 +549,27 @@ function getEditorElements(): EditorElements {
   const projectList = getRequiredElement("project-list", HTMLUListElement);
   const deleteProjectButton = getRequiredElement(
     "delete-project-button",
+    HTMLButtonElement,
+  );
+  const sceneNameInput = getRequiredElement(
+    "scene-name-input",
+    HTMLInputElement,
+  );
+  const sceneList = getRequiredElement("scene-list", HTMLUListElement);
+  const createSceneButton = getRequiredElement(
+    "create-scene-button",
+    HTMLButtonElement,
+  );
+  const loadSceneButton = getRequiredElement(
+    "load-scene-button",
+    HTMLButtonElement,
+  );
+  const saveSceneButton = getRequiredElement(
+    "save-scene-button",
+    HTMLButtonElement,
+  );
+  const deleteSceneButton = getRequiredElement(
+    "delete-scene-button",
     HTMLButtonElement,
   );
   const fileInput = getRequiredElement("svg-file-input", HTMLInputElement);
@@ -382,6 +611,12 @@ function getEditorElements(): EditorElements {
     projectNameInput,
     projectList,
     deleteProjectButton,
+    sceneNameInput,
+    sceneList,
+    createSceneButton,
+    loadSceneButton,
+    saveSceneButton,
+    deleteSceneButton,
     fileInput,
     assetList,
     addNodeButton,
@@ -412,11 +647,17 @@ function getRequiredElement<T extends HTMLElement>(
 
 function renderEditorShell(): void {
   renderProjectList();
+  renderSceneList();
   renderAssetList();
   renderSceneNodeList();
   renderInspector();
   elements.fileInput.disabled = !selectedProjectId;
   elements.deleteProjectButton.disabled = !selectedProjectId;
+  elements.sceneNameInput.disabled = !selectedProjectId;
+  elements.createSceneButton.disabled = !selectedProjectId;
+  elements.loadSceneButton.disabled = !selectedProjectId || !selectedSceneId;
+  elements.saveSceneButton.disabled = !selectedProjectId || !selectedSceneId;
+  elements.deleteSceneButton.disabled = !selectedProjectId || !selectedSceneId;
   elements.addNodeButton.disabled = !selectedAssetId;
   elements.deleteAssetButton.disabled = !selectedProjectId || !selectedAssetId;
   elements.projectionToggleButton.textContent =
@@ -451,7 +692,34 @@ function renderProjectList(): void {
         }
         selectedProjectId = project.id;
         selectedAssetId = null;
+        selectedSceneId = null;
+        loadedSceneId = null;
         void refreshAssets();
+        void refreshScenes();
+      });
+
+      item.append(button);
+      return item;
+    }),
+  );
+}
+
+function renderSceneList(): void {
+  elements.sceneList.replaceChildren(
+    ...scenes.map((scene) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      const loadedMarker = scene.id === loadedSceneId ? " *" : "";
+
+      button.type = "button";
+      button.className = "asset-list-item";
+      button.dataset.sceneId = scene.id;
+      button.dataset.selected = String(scene.id === selectedSceneId);
+      button.textContent = `${scene.name}${loadedMarker}`;
+      button.addEventListener("click", () => {
+        selectedSceneId = scene.id;
+        renderEditorShell();
+        exposeEditorDebugHooks();
       });
 
       item.append(button);
@@ -494,7 +762,9 @@ function renderSceneNodeList(): void {
       button.className = "asset-list-item";
       button.dataset.nodeId = node.id;
       button.dataset.selected = String(node.id === selectedNodeId);
-      button.textContent = `${node.id} · ${asset?.name ?? node.assetId}`;
+      button.textContent = asset
+        ? `${node.id} · ${asset.name}`
+        : `${node.id} · Missing ${node.assetId}`;
       button.addEventListener("click", () => {
         selectedNodeId = node.id;
         threeViewport.setSelectedNode(node.id);
@@ -523,6 +793,8 @@ function renderInspector(): void {
 
   appendInspectorRow("Project", selectedProject.name);
   appendInspectorRow("Project ID", selectedProject.id);
+  appendInspectorRow("Selected Scene", selectedSceneId ?? "None");
+  appendInspectorRow("Loaded Scene", loadedSceneId ?? "None");
   appendInspectorRow("Projection", camera.projection);
   appendInspectorRow("Camera Pos", camera.position.join(", "));
   appendInspectorRow("Camera Target", camera.target.join(", "));
@@ -546,6 +818,9 @@ function renderInspector(): void {
 
   appendInspectorRow("Scene Node", selectedNode.id);
   appendInspectorRow("Node Asset", selectedNode.assetId);
+  if (!getAssetById(selectedNode.assetId)) {
+    appendInspectorRow("Missing Asset", selectedNode.assetId);
+  }
   appendTransformInspectorRow("Position", selectedNode, "position");
   appendTransformInspectorRow("Rotation", selectedNode, "rotation");
   appendTransformInspectorRow("Scale", selectedNode, "scale");
@@ -634,6 +909,7 @@ function applyTransformInput(
   const nextValue = [...node[property]] as Vector3Tuple;
   nextValue[axisIndex] = roundTransformValue(parsedValue);
   node[property] = nextValue;
+  loadedSceneId = null;
   threeViewport.syncProxyFromNode(node);
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -767,6 +1043,28 @@ function chooseStableSelection(
   return availableIds[0] ?? null;
 }
 
+function cloneSceneNode(node: EditorSceneNode): EditorSceneNode {
+  return {
+    id: node.id,
+    assetId: node.assetId,
+    position: [...node.position],
+    rotation: [...node.rotation],
+    scale: [...node.scale],
+    billboardMode: node.billboardMode,
+  };
+}
+
+function getNextSceneNodeNumber(nodes: EditorSceneNode[]): number {
+  const largestExistingNumber = nodes.reduce((largest, node) => {
+    const match = /^node-(\d+)$/.exec(node.id);
+    const value = match ? Number(match[1]) : 0;
+
+    return Number.isFinite(value) ? Math.max(largest, value) : largest;
+  }, 0);
+
+  return largestExistingNumber + 1;
+}
+
 function formatTransformValue(value: number): string {
   return String(roundTransformValue(value));
 }
@@ -814,6 +1112,8 @@ function exposeEditorDebugHooks(): void {
           target: camera.target,
           fov: camera.fov,
           zoom: camera.zoom,
+          near: camera.near,
+          far: camera.far,
         },
         nodes: sceneNodes.map((node) => ({
           id: node.id,
@@ -827,8 +1127,11 @@ function exposeEditorDebugHooks(): void {
         transformMode: threeViewport.currentTransformMode,
       };
     },
+    getScenes: () => [...scenes],
     getSelectedProjectId: () => selectedProjectId,
     getSelectedAssetId: () => selectedAssetId,
+    getSelectedSceneId: () => selectedSceneId,
+    getLoadedSceneId: () => loadedSceneId,
     getLastImportError: () => lastImportError,
   };
 }

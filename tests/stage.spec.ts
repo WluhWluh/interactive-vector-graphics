@@ -87,7 +87,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await expect(page.getByRole("heading", { name: "Inspector" })).toBeVisible();
 
   await page.locator("#project-name-input").fill("Playwright Project");
-  await page.getByRole("button", { name: "Create" }).click();
+  await page.locator("#project-form").getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("button", { name: "Playwright Project" })).toBeVisible();
 
   const fileInput = page.locator("#svg-file-input");
@@ -166,6 +166,77 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editedTransformState?.scale).toEqual([1, 1, 1]);
   await expect(page.getByLabel("Scale Y")).toHaveValue("1");
 
+  await page.locator("#scene-name-input").fill("Opening Scene");
+  await page.locator("#create-scene-button").click();
+  await expect(page.getByRole("button", { name: /Opening Scene/ })).toBeVisible();
+
+  const createdSceneState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      scenes: debug.getScenes(),
+      selectedSceneId: debug.getSelectedSceneId(),
+      loadedSceneId: debug.getLoadedSceneId(),
+    };
+  });
+
+  expect(createdSceneState?.scenes).toHaveLength(1);
+  expect(createdSceneState?.scenes[0]?.id).toBe("opening-scene");
+  expect(createdSceneState?.selectedSceneId).toBe("opening-scene");
+  expect(createdSceneState?.loadedSceneId).toBe("opening-scene");
+
+  await page.getByLabel("Position X").fill("2");
+  await page.getByLabel("Position X").blur();
+  await page.getByRole("button", { name: "Save Scene" }).click();
+  await expect.poll(async () =>
+    page.evaluate(() => window.__vectorEditorDebug?.getLoadedSceneId() ?? null),
+  ).toBe("opening-scene");
+
+  await page.getByLabel("Position X").fill("0");
+  await page.getByLabel("Position X").blur();
+
+  const unsavedSceneState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      node: debug.getExperimentScene().nodes[0] ?? null,
+      loadedSceneId: debug.getLoadedSceneId(),
+    };
+  });
+
+  expect(unsavedSceneState?.node?.position).toEqual([0, 1, 0]);
+  expect(unsavedSceneState?.loadedSceneId).toBeNull();
+
+  await page.getByRole("button", { name: "Load Scene" }).click();
+  await expect(page.getByLabel("Position X")).toHaveValue("2");
+
+  const loadedSceneState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      node: debug.getExperimentScene().nodes[0] ?? null,
+      loadedSceneId: debug.getLoadedSceneId(),
+      camera: debug.getExperimentScene().camera,
+    };
+  });
+
+  expect(loadedSceneState?.node?.position).toEqual([2, 1, 0]);
+  expect(loadedSceneState?.loadedSceneId).toBe("opening-scene");
+  expect(loadedSceneState?.camera.near).toBe(0.05);
+  expect(loadedSceneState?.camera.far).toBe(120);
+
   await page.screenshot({
     path: "test-results/editor-import.png",
     fullPage: true,
@@ -226,6 +297,29 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   expect(invalidImportState?.hasBadAsset).toBe(false);
   expect(invalidImportState?.lastImportError).toContain("bad-asset");
+
+  await page.getByRole("button", { name: "Delete Scene" }).click();
+  await expect(page.getByRole("button", { name: /Opening Scene/ })).toHaveCount(0);
+
+  const afterSceneDeleteState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      sceneCount: debug.getScenes().length,
+      selectedSceneId: debug.getSelectedSceneId(),
+      loadedSceneId: debug.getLoadedSceneId(),
+      nodeCount: debug.getExperimentScene().nodes.length,
+    };
+  });
+
+  expect(afterSceneDeleteState?.sceneCount).toBe(0);
+  expect(afterSceneDeleteState?.selectedSceneId).toBeNull();
+  expect(afterSceneDeleteState?.loadedSceneId).toBeNull();
+  expect(afterSceneDeleteState?.nodeCount).toBe(1);
 
   await page.getByRole("button", { name: "Delete Asset" }).click();
   await expect(page.getByRole("button", { name: "uploaded-face" })).toHaveCount(0);

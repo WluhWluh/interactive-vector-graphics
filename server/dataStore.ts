@@ -1,11 +1,17 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import type { ProjectRecord, StoredPrimitiveAsset } from "./types";
+import type {
+  ProjectRecord,
+  SceneDocument,
+  SceneRecord,
+  StoredPrimitiveAsset,
+} from "./types";
 
 const PROJECTS_DIR_NAME = "projects";
 const DATABASE_FILE_NAME = "ivg.sqlite";
+const SCENES_DIR_NAME = "scenes";
 
 type StoredPrimitiveAssetRow = Omit<StoredPrimitiveAsset, "viewBox"> & {
   viewBox: string;
@@ -22,6 +28,12 @@ export type CreatePrimitiveAssetInput = {
   fillRule: "nonzero" | "evenodd";
 };
 
+export type CreateSceneInput = {
+  projectId: string;
+  name: string;
+  document: SceneDocument;
+};
+
 export type DataStore = {
   dataDir: string;
   ensureReady: () => Promise<void>;
@@ -35,6 +47,18 @@ export type DataStore = {
     input: CreatePrimitiveAssetInput,
   ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
+  listScenes: (projectId: string) => SceneRecord[];
+  createScene: (input: CreateSceneInput) => Promise<SceneRecord>;
+  getScene: (
+    projectId: string,
+    sceneId: string,
+  ) => Promise<{ scene: SceneRecord; document: SceneDocument }>;
+  updateScene: (
+    projectId: string,
+    sceneId: string,
+    document: SceneDocument,
+  ) => Promise<SceneRecord>;
+  deleteScene: (projectId: string, sceneId: string) => Promise<void>;
 };
 
 export function createDataStore(dataDir: string): DataStore {
@@ -72,6 +96,17 @@ export function createDataStore(dataDir: string): DataStore {
         pathD TEXT NOT NULL,
         fill TEXT NOT NULL,
         fillRule TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        PRIMARY KEY (projectId, id),
+        FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS scenes (
+        id TEXT NOT NULL,
+        projectId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        dataPath TEXT NOT NULL,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
         PRIMARY KEY (projectId, id),
@@ -231,6 +266,102 @@ export function createDataStore(dataDir: string): DataStore {
     }
   }
 
+  function listScenes(projectId: string): SceneRecord[] {
+    assertProjectExists(projectId);
+
+    return database
+      .prepare(
+        `
+        SELECT id, projectId, name, dataPath, createdAt, updatedAt
+        FROM scenes
+        WHERE projectId = ?
+        ORDER BY createdAt
+      `,
+      )
+      .all(projectId) as SceneRecord[];
+  }
+
+  async function createScene(input: CreateSceneInput): Promise<SceneRecord> {
+    assertProjectExists(input.projectId);
+
+    const sceneId = createUniqueSceneId(input.projectId, input.name);
+    const timestamp = new Date().toISOString();
+    const dataPath = join(getScenesDir(input.projectId), `${sceneId}.json`);
+    const relativeDataPath = toDataRelativePath(dataPath);
+    const scene: SceneRecord = {
+      id: sceneId,
+      projectId: input.projectId,
+      name: input.name.trim(),
+      dataPath: relativeDataPath,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await writeSceneDocument(dataPath, input.document);
+    database
+      .prepare(
+        `
+        INSERT INTO scenes (id, projectId, name, dataPath, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        scene.id,
+        scene.projectId,
+        scene.name,
+        scene.dataPath,
+        scene.createdAt,
+        scene.updatedAt,
+      );
+
+    return scene;
+  }
+
+  async function getScene(
+    projectId: string,
+    sceneId: string,
+  ): Promise<{ scene: SceneRecord; document: SceneDocument }> {
+    const scene = getSceneRecord(projectId, sceneId);
+    const rawDocument = JSON.parse(
+      await readFile(join(resolvedDataDir, scene.dataPath), "utf8"),
+    ) as SceneDocument;
+
+    return {
+      scene,
+      document: rawDocument,
+    };
+  }
+
+  async function updateScene(
+    projectId: string,
+    sceneId: string,
+    document: SceneDocument,
+  ): Promise<SceneRecord> {
+    const scene = getSceneRecord(projectId, sceneId);
+    const timestamp = new Date().toISOString();
+
+    await writeSceneDocument(join(resolvedDataDir, scene.dataPath), document);
+    database
+      .prepare(
+        "UPDATE scenes SET updatedAt = ? WHERE projectId = ? AND id = ?",
+      )
+      .run(timestamp, projectId, sceneId);
+
+    return {
+      ...scene,
+      updatedAt: timestamp,
+    };
+  }
+
+  async function deleteScene(projectId: string, sceneId: string): Promise<void> {
+    const scene = getSceneRecord(projectId, sceneId);
+
+    database
+      .prepare("DELETE FROM scenes WHERE projectId = ? AND id = ?")
+      .run(projectId, sceneId);
+    await rm(join(resolvedDataDir, scene.dataPath), { force: true });
+  }
+
   function createUniqueProjectId(name: string): string {
     const baseId = slugifyName(name);
     const existingIds = new Set(listProjects().map((project) => project.id));
@@ -247,6 +378,33 @@ export function createDataStore(dataDir: string): DataStore {
     return createUniqueId(baseId, existingIds);
   }
 
+  function createUniqueSceneId(projectId: string, name: string): string {
+    const baseId = slugifyName(name);
+    const existingIds = new Set(listScenes(projectId).map((scene) => scene.id));
+
+    return createUniqueId(baseId, existingIds);
+  }
+
+  function getSceneRecord(projectId: string, sceneId: string): SceneRecord {
+    assertProjectExists(projectId);
+
+    const row = database
+      .prepare(
+        `
+        SELECT id, projectId, name, dataPath, createdAt, updatedAt
+        FROM scenes
+        WHERE projectId = ? AND id = ?
+      `,
+      )
+      .get(projectId, sceneId) as SceneRecord | undefined;
+
+    if (!row) {
+      throw new Error(`Scene "${sceneId}" does not exist.`);
+    }
+
+    return row;
+  }
+
   function assertProjectExists(projectId: string): void {
     const row = database
       .prepare("SELECT id FROM projects WHERE id = ?")
@@ -259,6 +417,18 @@ export function createDataStore(dataDir: string): DataStore {
 
   function getProjectDir(projectId: string): string {
     return join(projectsDir, projectId);
+  }
+
+  function getScenesDir(projectId: string): string {
+    return join(getProjectDir(projectId), SCENES_DIR_NAME);
+  }
+
+  async function writeSceneDocument(
+    path: string,
+    document: SceneDocument,
+  ): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, "utf8");
   }
 
   function toDataRelativePath(path: string): string {
@@ -276,6 +446,11 @@ export function createDataStore(dataDir: string): DataStore {
     listPrimitiveAssets,
     createPrimitiveAsset,
     deletePrimitiveAsset,
+    listScenes,
+    createScene,
+    getScene,
+    updateScene,
+    deleteScene,
   };
 }
 

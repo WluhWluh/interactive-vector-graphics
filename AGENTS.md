@@ -57,8 +57,9 @@ than to the heavier 3D/game look of Star Birds.
   behavior belongs under `src/stage` or `src/editor`.
 - Editor-only Three.js helpers may live under `src/editor`; keep them separate
   from the clean Path2D stage runtime.
-- The camera/transform experiment scene is currently in memory only. Do not add
-  backend scene or animation persistence until the editable data shape is tested.
+- The camera/transform experiment scene can now be saved as a backend scene
+  document. Keep `/editor.html` as the only authoring surface for this until a
+  clean runtime scene loader is explicitly planned.
 - Canvas billboard rendering should remain the source of visual truth for SVG
   primitives; Three.js proxies are for editing, picking, and transform handles.
 
@@ -74,6 +75,12 @@ than to the heavier 3D/game look of Star Birds.
   directly into repository files.
 - Project metadata currently lives in SQLite at `data/ivg.sqlite`; uploaded SVG
   sources live beside their project under `data/projects/<project-id>/`.
+- Scene metadata lives in the same SQLite database; scene documents are JSON
+  files under `data/projects/<project-id>/scenes/`.
+- Scene document v1 stores camera, nodes, and an empty animation placeholder.
+  Save and load whole documents; do not add partial patch persistence yet.
+- Loading scenes must tolerate missing asset references so deleting an asset does
+  not make old scene documents unreadable.
 - Validate primitive SVG imports on the server before saving them. Browser-side
   preview logic may help UX, but it must not be the persistence authority.
 - Treat runtime data as disposable experiment data until explicit export/import

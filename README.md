@@ -30,7 +30,8 @@ remove that directory yourself.
 
 ## Local Data Server
 
-The backend provides a small Fastify API for project and primitive asset data:
+The backend provides a small Fastify API for project, primitive asset, and scene
+document data:
 
 - `GET /api/health`
 - `GET /api/projects`
@@ -39,16 +40,22 @@ The backend provides a small Fastify API for project and primitive asset data:
 - `GET /api/projects/:projectId/assets`
 - `POST /api/projects/:projectId/assets` as `multipart/form-data`
 - `DELETE /api/projects/:projectId/assets/:assetId`
+- `GET /api/projects/:projectId/scenes`
+- `POST /api/projects/:projectId/scenes`
+- `GET /api/projects/:projectId/scenes/:sceneId`
+- `PUT /api/projects/:projectId/scenes/:sceneId`
+- `DELETE /api/projects/:projectId/scenes/:sceneId`
 
 By default, runtime data is stored in `data/` at the repository root. That folder
 is ignored by Git. Set `IVG_DATA_DIR` to use another folder, and
 `IVG_SERVER_PORT` to override the default API port `4317`. Vite's local `/api`
 proxy reads the same port value.
 
-Project metadata is stored in `data/ivg.sqlite`. Uploaded SVG source files are
-stored under `data/projects/<project-id>/primitives/`. Project assets and
-animation data are intentionally separate from source code. Only code, fixtures,
-and built-in demos should enter Git.
+Project and scene metadata is stored in `data/ivg.sqlite`. Uploaded SVG source
+files are stored under `data/projects/<project-id>/primitives/`. Scene documents
+are stored under `data/projects/<project-id>/scenes/` as JSON files. Project
+assets, scenes, and future animation data are intentionally separate from source
+code. Only code, fixtures, and built-in demos should enter Git.
 
 For local development, run both servers:
 
@@ -71,8 +78,9 @@ Then open:
 - In the editor, Three.js also provides camera math, grid/axes helpers,
   selection proxies, OrbitControls, and TransformControls. SVG primitives still
   render through Canvas Path2D so this does not change the visual runtime target.
-- The current editor scene/camera/nodes are intentionally in memory only. They
-  are a proving ground for the future backend scene and animation schema.
+- The editor can save and load the current camera and scene nodes as scene
+  document v1. Animation data is reserved as an empty `{ fps: 24, duration: 0,
+  tracks: [] }` block until the timeline exists.
 
 ## Primitive SVG Assets
 

@@ -130,6 +130,22 @@ body {
   gap: 8px;
 }
 
+.scene-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.scene-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scene-action-grid .danger-button {
+  grid-column: 1 / -1;
+}
+
 .text-input {
   min-width: 0;
   height: 34px;

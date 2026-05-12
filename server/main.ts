@@ -2,12 +2,16 @@ import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { createDataStore, getDefaultDataDir, getServerPort } from "./dataStore";
 import { importPrimitiveSvgOnServer } from "./primitiveSvgImport";
+import { validateSceneDocument } from "./sceneDocument";
 import type {
   AssetsResponse,
   CreateAssetResponse,
   CreateProjectResponse,
+  CreateSceneResponse,
   HealthResponse,
   ProjectsResponse,
+  SceneDetailResponse,
+  ScenesResponse,
 } from "./types";
 
 const dataStore = createDataStore(getDefaultDataDir());
@@ -149,6 +153,108 @@ server.delete<{
   } catch (error) {
     reply.code(404);
     return { error: error instanceof Error ? error.message : "Asset not found." };
+  }
+});
+
+server.get<{
+  Params: { projectId: string };
+  Reply: ScenesResponse | { error: string };
+}>("/api/projects/:projectId/scenes", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    return {
+      scenes: dataStore.listScenes(request.params.projectId),
+    };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Project not found." };
+  }
+});
+
+server.post<{
+  Params: { projectId: string };
+  Body: { name?: unknown; document?: unknown };
+  Reply: CreateSceneResponse | { error: string };
+}>("/api/projects/:projectId/scenes", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  if (typeof request.body?.name !== "string" || !request.body.name.trim()) {
+    reply.code(400);
+    return { error: "Scene name is required." };
+  }
+
+  try {
+    const document = validateSceneDocument(request.body.document, {
+      projectId: request.params.projectId,
+    });
+    const scene = await dataStore.createScene({
+      projectId: request.params.projectId,
+      name: request.body.name,
+      document,
+    });
+
+    return { scene, document };
+  } catch (error) {
+    reply.code(400);
+    return { error: error instanceof Error ? error.message : "Scene create failed." };
+  }
+});
+
+server.get<{
+  Params: { projectId: string; sceneId: string };
+  Reply: SceneDetailResponse | { error: string };
+}>("/api/projects/:projectId/scenes/:sceneId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    return await dataStore.getScene(
+      request.params.projectId,
+      request.params.sceneId,
+    );
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Scene not found." };
+  }
+});
+
+server.put<{
+  Params: { projectId: string; sceneId: string };
+  Body: { document?: unknown };
+  Reply: SceneDetailResponse | { error: string };
+}>("/api/projects/:projectId/scenes/:sceneId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const document = validateSceneDocument(request.body.document, {
+      projectId: request.params.projectId,
+      sceneId: request.params.sceneId,
+    });
+    const scene = await dataStore.updateScene(
+      request.params.projectId,
+      request.params.sceneId,
+      document,
+    );
+
+    return { scene, document };
+  } catch (error) {
+    reply.code(400);
+    return { error: error instanceof Error ? error.message : "Scene update failed." };
+  }
+});
+
+server.delete<{
+  Params: { projectId: string; sceneId: string };
+  Reply: { ok: true } | { error: string };
+}>("/api/projects/:projectId/scenes/:sceneId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    await dataStore.deleteScene(request.params.projectId, request.params.sceneId);
+    return { ok: true };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Scene not found." };
   }
 });
 

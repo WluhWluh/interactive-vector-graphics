@@ -40,6 +40,8 @@ declare global {
           target: [number, number, number];
           fov: number;
           zoom: number;
+          near: number;
+          far: number;
         };
         nodes: Array<{
           id: string;
@@ -52,6 +54,16 @@ declare global {
         selectedNodeId: string | null;
         transformMode: "translate" | "rotate" | "scale";
       };
+      getScenes: () => Array<{
+        id: string;
+        projectId: string;
+        name: string;
+        dataPath: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      getSelectedSceneId: () => string | null;
+      getLoadedSceneId: () => string | null;
     };
   }
 }

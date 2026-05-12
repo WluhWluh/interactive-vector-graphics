@@ -121,7 +121,7 @@ export class ThreeEditorViewport {
     this.lookAtDefaultTarget();
 
     this.orbitControls = new OrbitControls(this.activeCamera, this.overlayCanvas);
-    this.configureOrbitControls();
+    this.configureOrbitControls(DEFAULT_CAMERA_TARGET);
 
     this.transformControls = new TransformControls(
       this.activeCamera,
@@ -286,13 +286,14 @@ export class ThreeEditorViewport {
     }
 
     const previousCamera = this.activeCamera;
+    const previousTarget = this.orbitControls.target.clone();
     this.projection = projection;
     this.activeCamera.position.copy(previousCamera.position);
     this.activeCamera.quaternion.copy(previousCamera.quaternion);
     this.updateActiveProjectionMatrix();
     this.orbitControls.object = this.activeCamera;
     this.transformControls.camera = this.activeCamera;
-    this.configureOrbitControls();
+    this.configureOrbitControls(previousTarget);
   }
 
   toggleProjection(): CameraProjection {
@@ -311,7 +312,7 @@ export class ThreeEditorViewport {
     this.perspectiveCamera.position.copy(DEFAULT_CAMERA_POSITION);
     this.orthographicCamera.position.copy(DEFAULT_CAMERA_POSITION);
     this.lookAtDefaultTarget();
-    this.configureOrbitControls();
+    this.configureOrbitControls(DEFAULT_CAMERA_TARGET);
   }
 
   getCameraSnapshot(): EditorViewportCameraSnapshot {
@@ -330,6 +331,37 @@ export class ThreeEditorViewport {
       near: CAMERA_NEAR,
       far: CAMERA_FAR,
     };
+  }
+
+  applyCameraSnapshot(snapshot: EditorViewportCameraSnapshot): void {
+    const target = tupleToVector(snapshot.target);
+    const position = tupleToVector(snapshot.position);
+
+    /**
+     * Scene documents store the editor camera independently from the current
+     * helper state. Rehydrating both camera objects keeps projection switching
+     * predictable after a load: the user can toggle modes without jumping back
+     * to an old position.
+     */
+    this.projection = snapshot.projection;
+    this.perspectiveCamera.position.copy(position);
+    this.orthographicCamera.position.copy(position);
+    this.perspectiveCamera.fov = snapshot.fov;
+    this.perspectiveCamera.zoom =
+      snapshot.projection === "perspective" ? snapshot.zoom : 1;
+    this.orthographicCamera.zoom =
+      snapshot.projection === "orthographic" ? snapshot.zoom : 1;
+    this.perspectiveCamera.near = snapshot.near;
+    this.perspectiveCamera.far = snapshot.far;
+    this.orthographicCamera.near = snapshot.near;
+    this.orthographicCamera.far = snapshot.far;
+    this.perspectiveCamera.lookAt(target);
+    this.orthographicCamera.lookAt(target);
+    this.perspectiveCamera.updateProjectionMatrix();
+    this.orthographicCamera.updateProjectionMatrix();
+    this.orbitControls.object = this.activeCamera;
+    this.transformControls.camera = this.activeCamera;
+    this.configureOrbitControls(target);
   }
 
   projectWorldPosition(
@@ -409,9 +441,9 @@ export class ThreeEditorViewport {
     this.orthographicCamera.lookAt(DEFAULT_CAMERA_TARGET);
   }
 
-  private configureOrbitControls(): void {
+  private configureOrbitControls(target: Vector3): void {
     this.orbitControls.object = this.activeCamera;
-    this.orbitControls.target.copy(DEFAULT_CAMERA_TARGET);
+    this.orbitControls.target.copy(target);
     this.orbitControls.enableDamping = true;
     this.orbitControls.dampingFactor = 0.08;
     this.orbitControls.update();

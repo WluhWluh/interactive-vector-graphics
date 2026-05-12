@@ -32,6 +32,35 @@
         </button>
 
         <header class="editor-panel-header">
+          <h2>Scenes</h2>
+          <span>Saved scene documents</span>
+        </header>
+        <div class="scene-create-row">
+          <input
+            id="scene-name-input"
+            class="text-input"
+            type="text"
+            placeholder="New scene name"
+            autocomplete="off"
+          />
+          <button id="create-scene-button" class="editor-button" type="button">
+            Create
+          </button>
+        </div>
+        <ul id="scene-list" class="asset-list" aria-label="Saved scenes"></ul>
+        <div class="scene-action-grid">
+          <button id="load-scene-button" class="editor-button" type="button">
+            Load Scene
+          </button>
+          <button id="save-scene-button" class="editor-button" type="button">
+            Save Scene
+          </button>
+          <button id="delete-scene-button" class="danger-button" type="button">
+            Delete Scene
+          </button>
+        </div>
+
+        <header class="editor-panel-header">
           <h2>Assets</h2>
           <span>Primitive SVG</span>
         </header>
