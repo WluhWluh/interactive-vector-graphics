@@ -254,6 +254,30 @@ body {
   color: rgba(238, 244, 255, 0.9);
 }
 
+.transform-input-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.transform-number-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  color: rgba(238, 244, 255, 0.9);
+  background: rgba(238, 244, 255, 0.06);
+  border: 1px solid rgba(238, 244, 255, 0.16);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.transform-number-input:focus {
+  outline: none;
+  border-color: #5bc4bf;
+  box-shadow: 0 0 0 2px rgba(91, 196, 191, 0.18);
+}
+
 .stage-layer {
   position: absolute;
   inset: 0;

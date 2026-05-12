@@ -149,6 +149,23 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editorDebugState?.experimentScene.camera.projection).toBe("perspective");
   expect(editorDebugState?.lastImportError).toBeNull();
 
+  await page.getByLabel("Position X").fill("2.5");
+  await page.getByLabel("Position X").blur();
+  await page.getByLabel("Rotation Z").fill("0.75");
+  await page.getByLabel("Rotation Z").blur();
+  await page.getByLabel("Scale Y").fill("not-a-number");
+  await page.getByLabel("Scale Y").blur();
+
+  const editedTransformState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getExperimentScene().nodes[0] ?? null;
+  });
+
+  expect(editedTransformState?.position).toEqual([2.5, 1, 0]);
+  expect(editedTransformState?.rotation).toEqual([0, 0, 0.75]);
+  expect(editedTransformState?.scale).toEqual([1, 1, 1]);
+  await expect(page.getByLabel("Scale Y")).toHaveValue("1");
+
   await page.screenshot({
     path: "test-results/editor-import.png",
     fullPage: true,

@@ -92,6 +92,8 @@ export class ThreeEditorViewport {
   private readonly pointer = new Vector2();
   private readonly proxies = new Map<string, NodeProxy>();
   private readonly pointerDownPosition = new Vector2();
+  private readonly scaleDragStart = new Vector3(1, 1, 1);
+  private shiftKeyPressed = false;
   private projection: CameraProjection = "perspective";
   private transformMode: TransformMode = "translate";
   private selectedNodeId: string | null = null;
@@ -128,11 +130,29 @@ export class ThreeEditorViewport {
     this.transformControls.setMode(this.transformMode);
     this.transformControls.detach();
     this.overlayScene.add(this.transformControls.getHelper());
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Shift") {
+        this.shiftKeyPressed = true;
+      }
+    });
+    window.addEventListener("keyup", (event) => {
+      if (event.key === "Shift") {
+        this.shiftKeyPressed = false;
+      }
+    });
     this.transformControls.addEventListener("dragging-changed", (event) => {
       this.orbitControls.enabled = !Boolean(event.value);
     });
+    this.transformControls.addEventListener("mouseDown", () => {
+      const proxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
+
+      if (proxy) {
+        this.scaleDragStart.copy(proxy.root.scale);
+      }
+    });
     this.transformControls.addEventListener("objectChange", () => {
       if (this.selectedNodeId) {
+        this.applyShiftUniformScale();
         this.onObjectTransform?.(this.selectedNodeId);
       }
     });
@@ -233,6 +253,16 @@ export class ThreeEditorViewport {
     node.position = vectorToTuple(proxy.root.position);
     node.rotation = eulerToTuple(proxy.root.rotation);
     node.scale = vectorToTuple(proxy.root.scale);
+  }
+
+  syncProxyFromNode(node: EditorSceneNode): void {
+    const proxy = this.proxies.get(node.id);
+
+    if (!proxy) {
+      return;
+    }
+
+    applyNodeTransform(proxy.root, node);
   }
 
   setSelectedNode(nodeId: string | null): void {
@@ -387,6 +417,34 @@ export class ThreeEditorViewport {
     this.orbitControls.update();
   }
 
+  private applyShiftUniformScale(): void {
+    if (
+      this.transformMode !== "scale" ||
+      !this.shiftKeyPressed ||
+      !this.selectedNodeId
+    ) {
+      return;
+    }
+
+    const proxy = this.proxies.get(this.selectedNodeId);
+
+    if (!proxy) {
+      return;
+    }
+
+    const scaleRatio = largestAbsoluteScaleRatio(
+      proxy.root.scale,
+      this.scaleDragStart,
+    );
+
+    proxy.root.scale.set(
+      this.scaleDragStart.x * scaleRatio,
+      this.scaleDragStart.y * scaleRatio,
+      this.scaleDragStart.z * scaleRatio,
+    );
+    proxy.root.updateMatrixWorld();
+  }
+
   private updateActiveProjectionMatrix(): void {
     if (this.projection === "perspective") {
       this.perspectiveCamera.updateProjectionMatrix();
@@ -521,4 +579,20 @@ function getRequiredCanvas(id: string): HTMLCanvasElement {
 
 function roundNumber(value: number): number {
   return Number(value.toFixed(4));
+}
+
+function largestAbsoluteScaleRatio(current: Vector3, start: Vector3): number {
+  const ratios = [
+    current.x / safeScaleBase(start.x),
+    current.y / safeScaleBase(start.y),
+    current.z / safeScaleBase(start.z),
+  ];
+
+  return ratios.reduce((best, candidate) =>
+    Math.abs(candidate - 1) > Math.abs(best - 1) ? candidate : best,
+  );
+}
+
+function safeScaleBase(value: number): number {
+  return Math.abs(value) < 0.0001 ? 0.0001 : value;
 }

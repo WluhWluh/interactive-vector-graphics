@@ -17,6 +17,7 @@ import {
   type CameraProjection,
   type EditorSceneNode,
   type TransformMode,
+  type Vector3Tuple,
 } from "./threeEditorViewport";
 
 type EditorElements = {
@@ -545,9 +546,9 @@ function renderInspector(): void {
 
   appendInspectorRow("Scene Node", selectedNode.id);
   appendInspectorRow("Node Asset", selectedNode.assetId);
-  appendInspectorRow("Position", selectedNode.position.join(", "));
-  appendInspectorRow("Rotation", selectedNode.rotation.join(", "));
-  appendInspectorRow("Scale", selectedNode.scale.join(", "));
+  appendTransformInspectorRow("Position", selectedNode, "position");
+  appendTransformInspectorRow("Rotation", selectedNode, "rotation");
+  appendTransformInspectorRow("Scale", selectedNode, "scale");
   appendInspectorRow("Billboard", selectedNode.billboardMode);
   appendInspectorRow(
     "Rotation Note",
@@ -562,6 +563,91 @@ function appendInspectorRow(label: string, value: string): void {
   term.textContent = label;
   description.textContent = value;
   elements.inspectorFields.append(term, description);
+}
+
+function appendTransformInspectorRow(
+  label: string,
+  node: EditorSceneNode,
+  property: "position" | "rotation" | "scale",
+): void {
+  const term = document.createElement("dt");
+  const description = document.createElement("dd");
+  const editor = document.createElement("div");
+
+  term.textContent = label;
+  editor.className = "transform-input-row";
+
+  node[property].forEach((value, axisIndex) => {
+    const input = document.createElement("input");
+    const axisName = ["X", "Y", "Z"][axisIndex] ?? "?";
+
+    input.className = "transform-number-input";
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.dataset.transformProperty = property;
+    input.dataset.transformAxis = axisName.toLowerCase();
+    input.ariaLabel = `${label} ${axisName}`;
+    input.value = formatTransformValue(value);
+    input.addEventListener("focus", () => {
+      input.dataset.previousValue = input.value;
+    });
+    input.addEventListener("blur", () => {
+      applyTransformInput(input, node.id, property, axisIndex);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        input.blur();
+      }
+
+      if (event.key === "Escape") {
+        input.value = input.dataset.previousValue ?? formatTransformValue(value);
+        input.blur();
+      }
+    });
+
+    editor.append(input);
+  });
+
+  description.append(editor);
+  elements.inspectorFields.append(term, description);
+}
+
+function applyTransformInput(
+  input: HTMLInputElement,
+  nodeId: string,
+  property: "position" | "rotation" | "scale",
+  axisIndex: number,
+): void {
+  const node = getSceneNode(nodeId);
+  const parsedValue = Number(input.value.trim());
+
+  if (!node || !Number.isFinite(parsedValue)) {
+    restoreTransformInput(input, node, property, axisIndex);
+    return;
+  }
+
+  if (property === "scale" && Math.abs(parsedValue) < 0.0001) {
+    restoreTransformInput(input, node, property, axisIndex);
+    return;
+  }
+
+  const nextValue = [...node[property]] as Vector3Tuple;
+  nextValue[axisIndex] = roundTransformValue(parsedValue);
+  node[property] = nextValue;
+  threeViewport.syncProxyFromNode(node);
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function restoreTransformInput(
+  input: HTMLInputElement,
+  node: EditorSceneNode | null,
+  property: "position" | "rotation" | "scale",
+  axisIndex: number,
+): void {
+  input.value = node
+    ? formatTransformValue(node[property][axisIndex] ?? 0)
+    : (input.dataset.previousValue ?? "");
 }
 
 function tick(now: DOMHighResTimeStamp): void {
@@ -679,6 +765,14 @@ function chooseStableSelection(
   }
 
   return availableIds[0] ?? null;
+}
+
+function formatTransformValue(value: number): string {
+  return String(roundTransformValue(value));
+}
+
+function roundTransformValue(value: number): number {
+  return Number(value.toFixed(4));
 }
 
 function setImportError(error: unknown): void {
