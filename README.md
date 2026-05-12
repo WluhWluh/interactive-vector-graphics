@@ -14,6 +14,15 @@ experiments.
 - `npm run test:visual` runs the Playwright visual smoke test in headless Edge.
 - `npm run preview` serves the production build locally.
 
+## Entrypoints
+
+- `/index.html` is the clean stage runtime for embedding or presentation.
+- `/editor.html` is the early editor shell with an asset list, SVG import button,
+  live preview, and read-only Inspector.
+
+The editor stores imported SVG primitives only in memory for now. Refreshing the
+page clears uploaded assets.
+
 ## Architecture Direction
 
 - SVG/path assets remain the source of truth for authored graphics.

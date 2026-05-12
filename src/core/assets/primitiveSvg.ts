@@ -22,7 +22,7 @@ export type PrimitiveSvgAsset = {
   fillRule: PrimitiveFillRule;
 };
 
-type SvgImportContext = {
+export type SvgImportContext = {
   id: string;
   name: string;
   sourceUrl: string;
@@ -96,6 +96,28 @@ export class PrimitiveAssetRegistry {
     this.assets.set(asset.id, asset);
   }
 
+  has(id: string): boolean {
+    return this.assets.has(id);
+  }
+
+  createUniqueId(baseId: string): string {
+    const safeBaseId = toSafeAssetId(baseId);
+
+    if (!this.has(safeBaseId)) {
+      return safeBaseId;
+    }
+
+    let suffix = 2;
+    let candidate = `${safeBaseId}-${suffix}`;
+
+    while (this.has(candidate)) {
+      suffix += 1;
+      candidate = `${safeBaseId}-${suffix}`;
+    }
+
+    return candidate;
+  }
+
   get(id: string): PrimitiveSvgAsset {
     const asset = this.assets.get(id);
 
@@ -109,6 +131,17 @@ export class PrimitiveAssetRegistry {
   snapshot(): PrimitiveSvgAsset[] {
     return [...this.assets.values()];
   }
+}
+
+export function toSafeAssetId(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "primitive-asset";
 }
 
 export async function loadPrimitiveSvgAsset(

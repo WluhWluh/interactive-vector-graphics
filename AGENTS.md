@@ -47,3 +47,11 @@ than to the heavier 3D/game look of Star Birds.
   symbols, class styles, opacity, and basic shape elements.
 - Compose birds, characters, props, and animated forms later in the editor from
   multiple primitive assets rather than exporting grouped character SVGs.
+
+## Entrypoint Rules
+
+- Keep `/index.html` as the clean runtime stage without editor UI.
+- Use `/editor.html` for authoring UI experiments such as asset import, selection,
+  preview, and future scene editing.
+- Shared rendering and asset code belongs under `src/core`; entrypoint-specific
+  behavior belongs under `src/stage` or `src/editor`.
