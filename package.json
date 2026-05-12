@@ -5,16 +5,24 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server:dev": "tsx server/main.ts",
+    "dev:all": "concurrently -k -n server,client -c cyan,magenta \"npm run server:dev\" \"npm run dev\"",
+    "check": "tsc --noEmit",
     "build": "tsc && vite build",
+    "test:server": "tsx tests/server-smoke.ts",
     "test:visual": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
+    "fastify": "^5.8.5",
     "paper": "^0.12.18",
     "three": "^0.184.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "@types/node": "^25.7.0",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.12"
   }

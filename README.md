@@ -10,7 +10,11 @@ experiments.
 ## Scripts
 
 - `npm run dev` starts the local development server.
+- `npm run server:dev` starts the local API server.
+- `npm run dev:all` starts both the API server and Vite.
+- `npm run check` runs TypeScript without emitting files.
 - `npm run build` type-checks and builds the project.
+- `npm run test:server` runs the backend data-store smoke test.
 - `npm run test:visual` runs the Playwright visual smoke test in headless Edge.
 - `npm run preview` serves the production build locally.
 
@@ -22,6 +26,21 @@ experiments.
 
 The editor stores imported SVG primitives only in memory for now. Refreshing the
 page clears uploaded assets.
+
+## Local Data Server
+
+The first backend stage provides a small Fastify API for project metadata:
+
+- `GET /api/health`
+- `GET /api/projects`
+- `POST /api/projects` with `{ "name": "My Test Project" }`
+
+By default, runtime data is stored in `data/` at the repository root. That folder
+is ignored by Git. Set `IVG_DATA_DIR` to use another folder, and
+`IVG_SERVER_PORT` to override the default API port `4317`.
+
+Project assets and animation data are intentionally separate from source code.
+Only code, fixtures, and built-in demos should enter Git.
 
 ## Architecture Direction
 

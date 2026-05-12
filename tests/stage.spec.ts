@@ -170,13 +170,14 @@ test("imports a primitive SVG in the editor and rejects invalid SVG", async ({
 
 async function countWarmYellowPixels(vectorCanvas: Locator): Promise<number> {
   return vectorCanvas.evaluate((canvas) => {
-    const context = canvas.getContext("2d");
+    const target = canvas as HTMLCanvasElement;
+    const context = target.getContext("2d");
 
     if (!context) {
       return 0;
     }
 
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    const { data } = context.getImageData(0, 0, target.width, target.height);
     let matchingPixels = 0;
 
     for (let index = 0; index < data.length; index += 4) {

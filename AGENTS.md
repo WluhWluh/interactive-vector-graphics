@@ -55,3 +55,14 @@ than to the heavier 3D/game look of Star Birds.
   preview, and future scene editing.
 - Shared rendering and asset code belongs under `src/core`; entrypoint-specific
   behavior belongs under `src/stage` or `src/editor`.
+
+## Runtime Data Rules
+
+- Source code, built-in fixtures, and documentation are tracked in Git.
+- User-created project data, imported assets, scenes, and animation outputs live
+  under the runtime data directory and must not enter Git.
+- The default local data directory is repo-root `data/`, which is ignored.
+- `IVG_DATA_DIR` may point the backend at another data directory when switching
+  machines, deployments, or long-running experiments.
+- Keep backend persistence APIs under `server/`; do not make frontend code write
+  directly into repository files.
