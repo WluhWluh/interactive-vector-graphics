@@ -78,13 +78,17 @@ test("renders the empty stage and visible Path2D sample object", async ({
   expect(samplePixelCount).toBeGreaterThan(2_000);
 });
 
-test("imports a primitive SVG in the editor and rejects invalid SVG", async ({
+test("creates a project, imports a primitive SVG, and deletes data", async ({
   page,
 }) => {
   await page.goto("/editor.html");
 
-  await expect(page.getByRole("heading", { name: "Assets" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Inspector" })).toBeVisible();
+
+  await page.locator("#project-name-input").fill("Playwright Project");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("button", { name: "Playwright Project" })).toBeVisible();
 
   const fileInput = page.locator("#svg-file-input");
   const validSvg = [
@@ -111,6 +115,7 @@ test("imports a primitive SVG in the editor and rejects invalid SVG", async ({
     }
 
     return {
+      selectedProjectId: debug.getSelectedProjectId(),
       selectedAssetId: debug.getSelectedAssetId(),
       importedAsset: debug
         .getAssets()
@@ -119,9 +124,12 @@ test("imports a primitive SVG in the editor and rejects invalid SVG", async ({
     };
   });
 
+  expect(editorDebugState?.selectedProjectId).toBe("playwright-project");
   expect(editorDebugState?.selectedAssetId).toBe("uploaded-face");
   expect(editorDebugState?.importedAsset?.viewBox).toEqual([-50, -50, 100, 100]);
-  expect(editorDebugState?.importedAsset?.sourceUrl).toBe("local:uploaded-face.svg");
+  expect(editorDebugState?.importedAsset?.sourceUrl).toBe(
+    "projects/playwright-project/primitives/uploaded-face.svg",
+  );
   expect(editorDebugState?.lastImportError).toBeNull();
 
   await page.screenshot({
@@ -166,6 +174,52 @@ test("imports a primitive SVG in the editor and rejects invalid SVG", async ({
 
   expect(invalidImportState?.hasBadAsset).toBe(false);
   expect(invalidImportState?.lastImportError).toContain("bad-asset");
+
+  await page.getByRole("button", { name: "Delete Asset" }).click();
+  await expect(page.getByRole("button", { name: "uploaded-face" })).toHaveCount(0);
+
+  const afterAssetDeleteState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return {
+        assetCount: -1,
+        selectedAssetId: "missing-debug",
+      };
+    }
+
+    return {
+      assetCount: debug.getAssets().length,
+      selectedAssetId: debug.getSelectedAssetId(),
+    };
+  });
+
+  expect(afterAssetDeleteState.assetCount).toBe(0);
+  expect(afterAssetDeleteState.selectedAssetId).toBeNull();
+
+  await page.getByRole("button", { name: "Delete Project" }).click();
+  await expect(page.getByRole("button", { name: "Playwright Project" })).toHaveCount(
+    0,
+  );
+
+  const afterProjectDeleteState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return {
+        projectCount: -1,
+        selectedProjectId: "missing-debug",
+      };
+    }
+
+    return {
+      projectCount: debug.getProjects().length,
+      selectedProjectId: debug.getSelectedProjectId(),
+    };
+  });
+
+  expect(afterProjectDeleteState.projectCount).toBe(0);
+  expect(afterProjectDeleteState.selectedProjectId).toBeNull();
 });
 
 async function countWarmYellowPixels(vectorCanvas: Locator): Promise<number> {

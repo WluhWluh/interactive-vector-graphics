@@ -15,6 +15,12 @@ declare global {
       getAssetLoadState: () => "loading" | "ready" | "error";
     };
     __vectorEditorDebug?: {
+      getProjects: () => Array<{
+        id: string;
+        name: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
       getAssets: () => Array<{
         id: string;
         name: string;
@@ -24,6 +30,7 @@ declare global {
         fillRule: string;
         pathD: string;
       }>;
+      getSelectedProjectId: () => string | null;
       getSelectedAssetId: () => string | null;
       getLastImportError: () => string | null;
     };

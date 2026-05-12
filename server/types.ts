@@ -5,9 +5,18 @@ export type ProjectRecord = {
   updatedAt: string;
 };
 
-export type ProjectIndexFile = {
-  version: 1;
-  projects: ProjectRecord[];
+export type StoredPrimitiveAsset = {
+  id: string;
+  projectId: string;
+  name: string;
+  sourceFilename: string;
+  sourcePath: string;
+  viewBox: [number, number, number, number];
+  pathD: string;
+  fill: string;
+  fillRule: "nonzero" | "evenodd";
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type HealthResponse = {
@@ -22,4 +31,12 @@ export type ProjectsResponse = {
 
 export type CreateProjectResponse = {
   project: ProjectRecord;
+};
+
+export type AssetsResponse = {
+  assets: StoredPrimitiveAsset[];
+};
+
+export type CreateAssetResponse = {
+  asset: StoredPrimitiveAsset;
 };

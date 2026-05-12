@@ -3,9 +3,9 @@
 An SVG-first playground for interactive vector graphics experiments inspired by
 clean science-explainer motion graphics.
 
-The first milestone is intentionally small: a Vite + TypeScript base with three
-stacked canvas layers ready for future Canvas Path2D, Paper.js, and Three.js
-experiments.
+The current milestone is still deliberately compact: a Vite + TypeScript
+frontend, a Fastify API server, SQLite-backed project metadata, and uploaded SVG
+primitive files stored in a Git-ignored runtime data directory.
 
 ## Scripts
 
@@ -24,23 +24,42 @@ experiments.
 - `/editor.html` is the early editor shell with an asset list, SVG import button,
   live preview, and read-only Inspector.
 
-The editor stores imported SVG primitives only in memory for now. Refreshing the
-page clears uploaded assets.
+The editor now works against the backend API. Projects and imported primitive
+assets persist in the runtime data directory until you delete them from the UI or
+remove that directory yourself.
 
 ## Local Data Server
 
-The first backend stage provides a small Fastify API for project metadata:
+The backend provides a small Fastify API for project and primitive asset data:
 
 - `GET /api/health`
 - `GET /api/projects`
 - `POST /api/projects` with `{ "name": "My Test Project" }`
+- `DELETE /api/projects/:projectId`
+- `GET /api/projects/:projectId/assets`
+- `POST /api/projects/:projectId/assets` as `multipart/form-data`
+- `DELETE /api/projects/:projectId/assets/:assetId`
 
 By default, runtime data is stored in `data/` at the repository root. That folder
 is ignored by Git. Set `IVG_DATA_DIR` to use another folder, and
-`IVG_SERVER_PORT` to override the default API port `4317`.
+`IVG_SERVER_PORT` to override the default API port `4317`. Vite's local `/api`
+proxy reads the same port value.
 
-Project assets and animation data are intentionally separate from source code.
-Only code, fixtures, and built-in demos should enter Git.
+Project metadata is stored in `data/ivg.sqlite`. Uploaded SVG source files are
+stored under `data/projects/<project-id>/primitives/`. Project assets and
+animation data are intentionally separate from source code. Only code, fixtures,
+and built-in demos should enter Git.
+
+For local development, run both servers:
+
+```sh
+npm run dev:all
+```
+
+Then open:
+
+- `http://127.0.0.1:5173/editor.html` for the editor.
+- `http://127.0.0.1:5173/index.html` for the clean display stage.
 
 ## Architecture Direction
 

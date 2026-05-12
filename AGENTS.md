@@ -66,3 +66,9 @@ than to the heavier 3D/game look of Star Birds.
   machines, deployments, or long-running experiments.
 - Keep backend persistence APIs under `server/`; do not make frontend code write
   directly into repository files.
+- Project metadata currently lives in SQLite at `data/ivg.sqlite`; uploaded SVG
+  sources live beside their project under `data/projects/<project-id>/`.
+- Validate primitive SVG imports on the server before saving them. Browser-side
+  preview logic may help UX, but it must not be the persistence authority.
+- Treat runtime data as disposable experiment data until explicit export/import
+  tooling exists.

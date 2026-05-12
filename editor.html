@@ -13,7 +13,26 @@
     <main id="editor-app" class="editor-shell" aria-label="Scene editor">
       <aside class="editor-panel editor-assets" aria-label="Assets">
         <header class="editor-panel-header">
-          <h1>Assets</h1>
+          <h1>Projects</h1>
+          <span>Persistent workspace</span>
+        </header>
+        <form id="project-form" class="project-form">
+          <input
+            id="project-name-input"
+            class="text-input"
+            type="text"
+            placeholder="New project name"
+            autocomplete="off"
+          />
+          <button class="editor-button" type="submit">Create</button>
+        </form>
+        <ul id="project-list" class="asset-list" aria-label="Projects"></ul>
+        <button id="delete-project-button" class="danger-button" type="button">
+          Delete Project
+        </button>
+
+        <header class="editor-panel-header">
+          <h2>Assets</h2>
           <span>Primitive SVG</span>
         </header>
         <label class="file-import-button" for="svg-file-input">
@@ -27,6 +46,9 @@
         />
         <p id="import-error" class="editor-error" role="alert" hidden></p>
         <ul id="asset-list" class="asset-list" aria-label="Primitive assets"></ul>
+        <button id="delete-asset-button" class="danger-button" type="button">
+          Delete Asset
+        </button>
       </aside>
 
       <section class="editor-preview" aria-label="Live preview">

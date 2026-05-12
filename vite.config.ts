@@ -3,11 +3,12 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
+const apiServerPort = process.env.IVG_SERVER_PORT ?? "4317";
 
 export default defineConfig({
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:4317",
+      "/api": `http://127.0.0.1:${apiServerPort}`,
     },
   },
   build: {
