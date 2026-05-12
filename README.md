@@ -11,6 +11,7 @@ experiments.
 
 - `npm run dev` starts the local development server.
 - `npm run build` type-checks and builds the project.
+- `npm run test:visual` runs the Playwright visual smoke test in headless Edge.
 - `npm run preview` serves the production build locally.
 
 ## Architecture Direction

@@ -60,6 +60,14 @@ function createLayer(id: StageLayerId): StageLayer {
     throw new Error(`Could not create a 2D rendering context for #${id}.`);
   }
 
+  if (id === "vector-canvas") {
+    /**
+     * This marker gives Playwright a stable hook for checking that the intended
+     * visual layer is present before it inspects canvas pixels.
+     */
+    canvas.dataset.visualCheck = "sample-path2d";
+  }
+
   return { id, canvas, context };
 }
 
@@ -171,10 +179,37 @@ function drawRuntimePlaceholder(
 
   context.save();
   context.translate(centerX, centerY);
+
+  /**
+   * The sample object is deliberately authored as Path2D instead of immediate
+   * canvas arc commands. It is a tiny rehearsal for the future SVG-path runtime:
+   * imported Illustrator parts should eventually land in this same drawing path.
+   */
+  const bodyPath = new Path2D(
+    [
+      `M ${-radius} 0`,
+      `C ${-radius} ${-radius * 0.66}, ${-radius * 0.42} ${-radius}, 0 ${-radius}`,
+      `C ${radius * 0.42} ${-radius}, ${radius} ${-radius * 0.66}, ${radius} 0`,
+      `C ${radius} ${radius * 0.66}, ${radius * 0.42} ${radius}, 0 ${radius}`,
+      `C ${-radius * 0.42} ${radius}, ${-radius} ${radius * 0.66}, ${-radius} 0`,
+      "Z",
+    ].join(" "),
+  );
+
+  const highlightPath = new Path2D(
+    [
+      `M ${-radius * 0.56} ${-radius * 0.44}`,
+      `C ${-radius * 0.28} ${-radius * 0.72}, ${radius * 0.12} ${-radius * 0.72}, ${radius * 0.34} ${-radius * 0.42}`,
+      `C ${radius * 0.06} ${-radius * 0.5}, ${-radius * 0.3} ${-radius * 0.48}, ${-radius * 0.56} ${-radius * 0.44}`,
+      "Z",
+    ].join(" "),
+  );
+
   context.fillStyle = "#ffcf4a";
-  context.beginPath();
-  context.arc(0, 0, radius, 0, Math.PI * 2);
-  context.fill();
+  context.fill(bodyPath);
+
+  context.fillStyle = "rgba(255, 246, 176, 0.7)";
+  context.fill(highlightPath);
 
   context.fillStyle = "#111827";
   context.beginPath();
