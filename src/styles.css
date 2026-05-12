@@ -202,6 +202,33 @@ body {
     linear-gradient(135deg, #111827 0%, #16202e 48%, #10151f 100%);
 }
 
+.viewport-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 8px;
+  background: rgba(17, 24, 39, 0.66);
+  border: 1px solid rgba(238, 244, 255, 0.14);
+  border-radius: 8px;
+  backdrop-filter: blur(12px);
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 4px;
+}
+
+.editor-button[data-selected="true"] {
+  color: #111827;
+  background: #5bc4bf;
+  border-color: #5bc4bf;
+}
+
 .editor-stage {
   position: absolute;
   inset: 0;
@@ -235,17 +262,23 @@ body {
   height: 100%;
 }
 
-#three-canvas {
+#three-background-canvas {
   z-index: 0;
+  pointer-events: none;
 }
 
 #vector-canvas {
   z-index: 1;
+  pointer-events: none;
 }
 
 #paper-canvas {
   z-index: 2;
   pointer-events: none;
+}
+
+#three-overlay-canvas {
+  z-index: 3;
 }
 
 .stage-hud {

@@ -55,6 +55,12 @@ than to the heavier 3D/game look of Star Birds.
   preview, and future scene editing.
 - Shared rendering and asset code belongs under `src/core`; entrypoint-specific
   behavior belongs under `src/stage` or `src/editor`.
+- Editor-only Three.js helpers may live under `src/editor`; keep them separate
+  from the clean Path2D stage runtime.
+- The camera/transform experiment scene is currently in memory only. Do not add
+  backend scene or animation persistence until the editable data shape is tested.
+- Canvas billboard rendering should remain the source of visual truth for SVG
+  primitives; Three.js proxies are for editing, picking, and transform handles.
 
 ## Runtime Data Rules
 

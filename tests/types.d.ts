@@ -33,6 +33,25 @@ declare global {
       getSelectedProjectId: () => string | null;
       getSelectedAssetId: () => string | null;
       getLastImportError: () => string | null;
+      getExperimentScene: () => {
+        camera: {
+          projection: "perspective" | "orthographic";
+          position: [number, number, number];
+          target: [number, number, number];
+          fov: number;
+          zoom: number;
+        };
+        nodes: Array<{
+          id: string;
+          assetId: string;
+          position: [number, number, number];
+          rotation: [number, number, number];
+          scale: [number, number, number];
+          billboardMode: "spherical";
+        }>;
+        selectedNodeId: string | null;
+        transformMode: "translate" | "rotate" | "scale";
+      };
     };
   }
 }

@@ -106,6 +106,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
   await expect(page.locator("#inspector-fields")).toContainText("uploaded-face");
   await expect(page.locator("#inspector-fields")).toContainText("#ffcf4a");
+  await page.getByRole("button", { name: "Add to Scene" }).click();
+  await expect(page.getByRole("button", { name: /node-1/ })).toBeVisible();
+  await expect(page.locator("#inspector-fields")).toContainText("node-1");
 
   const editorDebugState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -120,6 +123,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       importedAsset: debug
         .getAssets()
         .find((candidate) => candidate.id === "uploaded-face"),
+      experimentScene: debug.getExperimentScene(),
       lastImportError: debug.getLastImportError(),
     };
   });
@@ -130,6 +134,19 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editorDebugState?.importedAsset?.sourceUrl).toBe(
     "projects/playwright-project/primitives/uploaded-face.svg",
   );
+  expect(editorDebugState?.experimentScene.nodes).toEqual([
+    {
+      id: "node-1",
+      assetId: "uploaded-face",
+      position: [0, 1, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      billboardMode: "spherical",
+    },
+  ]);
+  expect(editorDebugState?.experimentScene.selectedNodeId).toBe("node-1");
+  expect(editorDebugState?.experimentScene.transformMode).toBe("translate");
+  expect(editorDebugState?.experimentScene.camera.projection).toBe("perspective");
   expect(editorDebugState?.lastImportError).toBeNull();
 
   await page.screenshot({
@@ -140,6 +157,24 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   const vectorCanvas = page.locator("#vector-canvas");
   const yellowPixels = await countWarmYellowPixels(vectorCanvas);
   expect(yellowPixels).toBeGreaterThan(2_000);
+
+  await page.screenshot({
+    path: "test-results/editor-camera-transform.png",
+    fullPage: true,
+  });
+
+  await page.getByRole("button", { name: "Perspective" }).click();
+  await expect(page.getByRole("button", { name: "Orthographic" })).toBeVisible();
+  await page.getByRole("button", { name: "Rotate" }).click();
+  await page.getByRole("button", { name: "Scale" }).click();
+
+  const transformState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getExperimentScene() ?? null;
+  });
+
+  expect(transformState?.camera.projection).toBe("orthographic");
+  expect(transformState?.transformMode).toBe("scale");
 
   const invalidSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
@@ -177,6 +212,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   await page.getByRole("button", { name: "Delete Asset" }).click();
   await expect(page.getByRole("button", { name: "uploaded-face" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /node-1/ })).toHaveCount(0);
 
   const afterAssetDeleteState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -190,11 +226,13 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
     return {
       assetCount: debug.getAssets().length,
+      nodeCount: debug.getExperimentScene().nodes.length,
       selectedAssetId: debug.getSelectedAssetId(),
     };
   });
 
   expect(afterAssetDeleteState.assetCount).toBe(0);
+  expect(afterAssetDeleteState.nodeCount).toBe(0);
   expect(afterAssetDeleteState.selectedAssetId).toBeNull();
 
   await page.getByRole("button", { name: "Delete Project" }).click();

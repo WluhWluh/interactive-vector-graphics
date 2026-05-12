@@ -21,8 +21,8 @@ primitive files stored in a Git-ignored runtime data directory.
 ## Entrypoints
 
 - `/index.html` is the clean stage runtime for embedding or presentation.
-- `/editor.html` is the early editor shell with an asset list, SVG import button,
-  live preview, and read-only Inspector.
+- `/editor.html` is the early editor shell with project/asset management, SVG
+  import, an in-memory camera/transform experiment viewport, and Inspector.
 
 The editor now works against the backend API. Projects and imported primitive
 assets persist in the runtime data directory until you delete them from the UI or
@@ -68,6 +68,11 @@ Then open:
 - Paper.js will be used for local vector geometry experiments and deformation.
 - Three.js/WebGL will be reserved for optional background, depth, or high-volume
   simple objects such as particles or boids.
+- In the editor, Three.js also provides camera math, grid/axes helpers,
+  selection proxies, OrbitControls, and TransformControls. SVG primitives still
+  render through Canvas Path2D so this does not change the visual runtime target.
+- The current editor scene/camera/nodes are intentionally in memory only. They
+  are a proving ground for the future backend scene and animation schema.
 
 ## Primitive SVG Assets
 

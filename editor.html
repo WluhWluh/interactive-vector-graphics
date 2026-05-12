@@ -46,15 +46,55 @@
         />
         <p id="import-error" class="editor-error" role="alert" hidden></p>
         <ul id="asset-list" class="asset-list" aria-label="Primitive assets"></ul>
+        <button id="add-node-button" class="editor-button" type="button">
+          Add to Scene
+        </button>
         <button id="delete-asset-button" class="danger-button" type="button">
           Delete Asset
         </button>
+
+        <header class="editor-panel-header">
+          <h2>Scene</h2>
+          <span>In-memory experiment</span>
+        </header>
+        <ul id="scene-node-list" class="asset-list" aria-label="Scene nodes"></ul>
       </aside>
 
       <section class="editor-preview" aria-label="Live preview">
+        <div id="viewport-toolbar" class="viewport-toolbar" aria-label="Viewport tools">
+          <button id="projection-toggle-button" class="editor-button" type="button">
+            Perspective
+          </button>
+          <div class="toolbar-group" role="group" aria-label="Transform mode">
+            <button
+              id="transform-translate-button"
+              class="editor-button"
+              type="button"
+            >
+              Move
+            </button>
+            <button
+              id="transform-rotate-button"
+              class="editor-button"
+              type="button"
+            >
+              Rotate
+            </button>
+            <button
+              id="transform-scale-button"
+              class="editor-button"
+              type="button"
+            >
+              Scale
+            </button>
+          </div>
+          <button id="reset-view-button" class="editor-button" type="button">
+            Reset View
+          </button>
+        </div>
         <div id="editor-stage" class="editor-stage">
           <canvas
-            id="three-canvas"
+            id="three-background-canvas"
             class="stage-layer"
             aria-hidden="true"
           ></canvas>
@@ -67,6 +107,11 @@
             id="paper-canvas"
             class="stage-layer"
             aria-hidden="true"
+          ></canvas>
+          <canvas
+            id="three-overlay-canvas"
+            class="stage-layer"
+            aria-label="3D transform helper canvas"
           ></canvas>
         </div>
       </section>

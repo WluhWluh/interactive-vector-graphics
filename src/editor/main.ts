@@ -1,11 +1,7 @@
 import "../styles.css";
 import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
 import { CanvasStage } from "../core/stage/canvasStage";
-import {
-  drawCenteredStatus,
-  drawPrimitivePreview,
-  drawStageGrid,
-} from "../core/stage/primitivePreview";
+import { drawCenteredStatus } from "../core/stage/primitivePreview";
 import {
   createProject,
   deleteAsset,
@@ -15,6 +11,13 @@ import {
   uploadAsset,
   type ProjectRecord,
 } from "./api";
+import {
+  ThreeEditorViewport,
+  tupleToVector,
+  type CameraProjection,
+  type EditorSceneNode,
+  type TransformMode,
+} from "./threeEditorViewport";
 
 type EditorElements = {
   projectForm: HTMLFormElement;
@@ -23,20 +26,31 @@ type EditorElements = {
   deleteProjectButton: HTMLButtonElement;
   fileInput: HTMLInputElement;
   assetList: HTMLUListElement;
+  addNodeButton: HTMLButtonElement;
   deleteAssetButton: HTMLButtonElement;
+  sceneNodeList: HTMLUListElement;
+  projectionToggleButton: HTMLButtonElement;
+  transformTranslateButton: HTMLButtonElement;
+  transformRotateButton: HTMLButtonElement;
+  transformScaleButton: HTMLButtonElement;
+  resetViewButton: HTMLButtonElement;
   importError: HTMLParagraphElement;
   inspectorFields: HTMLDListElement;
 };
 
-const stage = new CanvasStage();
+const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
+const threeViewport = new ThreeEditorViewport();
 const elements = getEditorElements();
 
 let projects: ProjectRecord[] = [];
 let assets: PrimitiveSvgAsset[] = [];
+let sceneNodes: EditorSceneNode[] = [];
 let selectedProjectId: string | null = null;
 let selectedAssetId: string | null = null;
+let selectedNodeId: string | null = null;
 let lastImportError: string | null = null;
 let lastFrameTime = performance.now();
+let nextSceneNodeNumber = 1;
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 elements.projectForm.addEventListener("submit", (event) => {
@@ -49,8 +63,46 @@ elements.deleteProjectButton.addEventListener("click", () => {
 elements.fileInput.addEventListener("change", () => {
   void importSelectedFile();
 });
+elements.addNodeButton.addEventListener("click", () => {
+  addSelectedAssetToScene();
+});
 elements.deleteAssetButton.addEventListener("click", () => {
   void deleteSelectedAsset();
+});
+elements.projectionToggleButton.addEventListener("click", () => {
+  toggleProjection();
+});
+elements.transformTranslateButton.addEventListener("click", () => {
+  setTransformMode("translate");
+});
+elements.transformRotateButton.addEventListener("click", () => {
+  setTransformMode("rotate");
+});
+elements.transformScaleButton.addEventListener("click", () => {
+  setTransformMode("scale");
+});
+elements.resetViewButton.addEventListener("click", () => {
+  threeViewport.resetView();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+});
+threeViewport.setCallbacks({
+  onSelectionChange: (nodeId) => {
+    selectedNodeId = nodeId;
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  },
+  onObjectTransform: (nodeId) => {
+    const node = getSceneNode(nodeId);
+
+    if (!node) {
+      return;
+    }
+
+    threeViewport.syncNodeFromProxy(node);
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  },
 });
 
 void refreshProjects();
@@ -71,6 +123,18 @@ declare global {
         fillRule: string;
         pathD: string;
       }>;
+      getExperimentScene: () => {
+        camera: {
+          projection: CameraProjection;
+          position: [number, number, number];
+          target: [number, number, number];
+          fov: number;
+          zoom: number;
+        };
+        nodes: EditorSceneNode[];
+        selectedNodeId: string | null;
+        transformMode: TransformMode;
+      };
       getSelectedProjectId: () => string | null;
       getSelectedAssetId: () => string | null;
       getLastImportError: () => string | null;
@@ -81,10 +145,17 @@ declare global {
 async function refreshProjects(): Promise<void> {
   try {
     projects = await listProjects();
-    selectedProjectId = chooseStableSelection(
+    const nextSelectedProjectId = chooseStableSelection(
       selectedProjectId,
       projects.map((project) => project.id),
     );
+
+    if (selectedProjectId !== nextSelectedProjectId) {
+      clearExperimentScene();
+      selectedAssetId = null;
+    }
+
+    selectedProjectId = nextSelectedProjectId;
     await refreshAssets();
   } catch (error) {
     setImportError(error);
@@ -95,6 +166,7 @@ async function refreshAssets(): Promise<void> {
   if (!selectedProjectId) {
     assets = [];
     selectedAssetId = null;
+    clearExperimentScene();
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
@@ -120,6 +192,10 @@ async function createProjectFromInput(): Promise<void> {
   try {
     const project = await createProject(name);
     elements.projectNameInput.value = "";
+    if (selectedProjectId !== project.id) {
+      clearExperimentScene();
+      selectedAssetId = null;
+    }
     selectedProjectId = project.id;
     lastImportError = null;
     hideError();
@@ -138,6 +214,7 @@ async function deleteSelectedProject(): Promise<void> {
     await deleteProject(selectedProjectId);
     selectedProjectId = null;
     selectedAssetId = null;
+    clearExperimentScene();
     lastImportError = null;
     hideError();
     await refreshProjects();
@@ -178,13 +255,79 @@ async function deleteSelectedAsset(): Promise<void> {
   }
 
   try {
-    await deleteAsset(selectedProjectId, selectedAssetId);
+    const deletedAssetId = selectedAssetId;
+    await deleteAsset(selectedProjectId, deletedAssetId);
+    removeSceneNodesForAsset(deletedAssetId);
     selectedAssetId = null;
     lastImportError = null;
     hideError();
     await refreshAssets();
   } catch (error) {
     setImportError(error);
+  }
+}
+
+function addSelectedAssetToScene(): void {
+  const selectedAsset = getSelectedAsset();
+
+  if (!selectedAsset) {
+    setImportError(new Error("Select an SVG primitive asset before adding a node."));
+    return;
+  }
+
+  const node: EditorSceneNode = {
+    id: `node-${nextSceneNodeNumber}`,
+    assetId: selectedAsset.id,
+    position: [0, 1, 0],
+    rotation: [0, 0, 0],
+    scale: [1, 1, 1],
+    billboardMode: "spherical",
+  };
+
+  nextSceneNodeNumber += 1;
+  sceneNodes = [...sceneNodes, node];
+  selectedNodeId = node.id;
+  threeViewport.addOrUpdateNode(node, selectedAsset);
+  threeViewport.setSelectedNode(node.id);
+  lastImportError = null;
+  hideError();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function toggleProjection(): void {
+  threeViewport.toggleProjection();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function setTransformMode(mode: TransformMode): void {
+  threeViewport.setTransformMode(mode);
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function clearExperimentScene(): void {
+  for (const node of sceneNodes) {
+    threeViewport.removeNode(node.id);
+  }
+
+  sceneNodes = [];
+  selectedNodeId = null;
+}
+
+function removeSceneNodesForAsset(assetId: string): void {
+  const nodesToRemove = sceneNodes.filter((node) => node.assetId === assetId);
+
+  for (const node of nodesToRemove) {
+    threeViewport.removeNode(node.id);
+  }
+
+  sceneNodes = sceneNodes.filter((node) => node.assetId !== assetId);
+
+  if (selectedNodeId && !sceneNodes.some((node) => node.id === selectedNodeId)) {
+    selectedNodeId = null;
+    threeViewport.setSelectedNode(null);
   }
 }
 
@@ -201,8 +344,30 @@ function getEditorElements(): EditorElements {
   );
   const fileInput = getRequiredElement("svg-file-input", HTMLInputElement);
   const assetList = getRequiredElement("asset-list", HTMLUListElement);
+  const addNodeButton = getRequiredElement("add-node-button", HTMLButtonElement);
   const deleteAssetButton = getRequiredElement(
     "delete-asset-button",
+    HTMLButtonElement,
+  );
+  const sceneNodeList = getRequiredElement("scene-node-list", HTMLUListElement);
+  const projectionToggleButton = getRequiredElement(
+    "projection-toggle-button",
+    HTMLButtonElement,
+  );
+  const transformTranslateButton = getRequiredElement(
+    "transform-translate-button",
+    HTMLButtonElement,
+  );
+  const transformRotateButton = getRequiredElement(
+    "transform-rotate-button",
+    HTMLButtonElement,
+  );
+  const transformScaleButton = getRequiredElement(
+    "transform-scale-button",
+    HTMLButtonElement,
+  );
+  const resetViewButton = getRequiredElement(
+    "reset-view-button",
     HTMLButtonElement,
   );
   const importError = getRequiredElement("import-error", HTMLParagraphElement);
@@ -218,7 +383,14 @@ function getEditorElements(): EditorElements {
     deleteProjectButton,
     fileInput,
     assetList,
+    addNodeButton,
     deleteAssetButton,
+    sceneNodeList,
+    projectionToggleButton,
+    transformTranslateButton,
+    transformRotateButton,
+    transformScaleButton,
+    resetViewButton,
     importError,
     inspectorFields,
   };
@@ -240,10 +412,25 @@ function getRequiredElement<T extends HTMLElement>(
 function renderEditorShell(): void {
   renderProjectList();
   renderAssetList();
+  renderSceneNodeList();
   renderInspector();
   elements.fileInput.disabled = !selectedProjectId;
   elements.deleteProjectButton.disabled = !selectedProjectId;
+  elements.addNodeButton.disabled = !selectedAssetId;
   elements.deleteAssetButton.disabled = !selectedProjectId || !selectedAssetId;
+  elements.projectionToggleButton.textContent =
+    threeViewport.currentProjection === "perspective"
+      ? "Perspective"
+      : "Orthographic";
+  elements.transformTranslateButton.dataset.selected = String(
+    threeViewport.currentTransformMode === "translate",
+  );
+  elements.transformRotateButton.dataset.selected = String(
+    threeViewport.currentTransformMode === "rotate",
+  );
+  elements.transformScaleButton.dataset.selected = String(
+    threeViewport.currentTransformMode === "scale",
+  );
 }
 
 function renderProjectList(): void {
@@ -258,6 +445,9 @@ function renderProjectList(): void {
       button.dataset.selected = String(project.id === selectedProjectId);
       button.textContent = project.name;
       button.addEventListener("click", () => {
+        if (selectedProjectId !== project.id) {
+          clearExperimentScene();
+        }
         selectedProjectId = project.id;
         selectedAssetId = null;
         void refreshAssets();
@@ -292,11 +482,38 @@ function renderAssetList(): void {
   );
 }
 
+function renderSceneNodeList(): void {
+  elements.sceneNodeList.replaceChildren(
+    ...sceneNodes.map((node) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      const asset = getAssetById(node.assetId);
+
+      button.type = "button";
+      button.className = "asset-list-item";
+      button.dataset.nodeId = node.id;
+      button.dataset.selected = String(node.id === selectedNodeId);
+      button.textContent = `${node.id} · ${asset?.name ?? node.assetId}`;
+      button.addEventListener("click", () => {
+        selectedNodeId = node.id;
+        threeViewport.setSelectedNode(node.id);
+        renderEditorShell();
+        exposeEditorDebugHooks();
+      });
+
+      item.append(button);
+      return item;
+    }),
+  );
+}
+
 function renderInspector(): void {
   elements.inspectorFields.replaceChildren();
 
   const selectedProject = getSelectedProject();
   const selectedAsset = getSelectedAsset();
+  const camera = threeViewport.getCameraSnapshot();
+  const selectedNode = getSelectedNode();
 
   if (!selectedProject) {
     appendInspectorRow("Status", "Create or select a project");
@@ -305,19 +522,37 @@ function renderInspector(): void {
 
   appendInspectorRow("Project", selectedProject.name);
   appendInspectorRow("Project ID", selectedProject.id);
+  appendInspectorRow("Projection", camera.projection);
+  appendInspectorRow("Camera Pos", camera.position.join(", "));
+  appendInspectorRow("Camera Target", camera.target.join(", "));
 
   if (!selectedAsset) {
     appendInspectorRow("Asset", "No primitive selected");
+  } else {
+    appendInspectorRow("Asset ID", selectedAsset.id);
+    appendInspectorRow("Name", selectedAsset.name);
+    appendInspectorRow("Source", selectedAsset.sourceUrl);
+    appendInspectorRow("ViewBox", selectedAsset.viewBox.join(", "));
+    appendInspectorRow("Fill", selectedAsset.fill);
+    appendInspectorRow("Fill Rule", selectedAsset.fillRule);
+    appendInspectorRow("Path Length", `${selectedAsset.pathD.length} chars`);
+  }
+
+  if (!selectedNode) {
+    appendInspectorRow("Scene Node", "No node selected");
     return;
   }
 
-  appendInspectorRow("Asset ID", selectedAsset.id);
-  appendInspectorRow("Name", selectedAsset.name);
-  appendInspectorRow("Source", selectedAsset.sourceUrl);
-  appendInspectorRow("ViewBox", selectedAsset.viewBox.join(", "));
-  appendInspectorRow("Fill", selectedAsset.fill);
-  appendInspectorRow("Fill Rule", selectedAsset.fillRule);
-  appendInspectorRow("Path Length", `${selectedAsset.pathD.length} chars`);
+  appendInspectorRow("Scene Node", selectedNode.id);
+  appendInspectorRow("Node Asset", selectedNode.assetId);
+  appendInspectorRow("Position", selectedNode.position.join(", "));
+  appendInspectorRow("Rotation", selectedNode.rotation.join(", "));
+  appendInspectorRow("Scale", selectedNode.scale.join(", "));
+  appendInspectorRow("Billboard", selectedNode.billboardMode);
+  appendInspectorRow(
+    "Rotation Note",
+    "Canvas shows local Z roll; X/Y stay in the Three proxy.",
+  );
 }
 
 function appendInspectorRow(label: string, value: string): void {
@@ -340,22 +575,21 @@ function tick(now: DOMHighResTimeStamp): void {
 
 function renderPreviewFrame(): void {
   stage.clearAll();
-  drawStageGrid(stage.getLayer("three-canvas"), stage.size);
+  threeViewport.render(stage.size);
 
   const context = stage.getLayer("vector-canvas").context;
-  const selectedAsset = getSelectedAsset();
 
   if (!selectedProjectId) {
     drawCenteredStatus(context, stage.size, "Create or select a project");
     return;
   }
 
-  if (!selectedAsset) {
-    drawCenteredStatus(context, stage.size, "Import or select a primitive SVG");
+  if (sceneNodes.length === 0) {
+    drawCenteredStatus(context, stage.size, "Import an SVG and add it to the scene");
     return;
   }
 
-  drawPrimitivePreview(context, stage.size, selectedAsset);
+  drawSceneBillboards(context);
 }
 
 function getSelectedProject(): ProjectRecord | null {
@@ -364,6 +598,76 @@ function getSelectedProject(): ProjectRecord | null {
 
 function getSelectedAsset(): PrimitiveSvgAsset | null {
   return assets.find((asset) => asset.id === selectedAssetId) ?? null;
+}
+
+function getSelectedNode(): EditorSceneNode | null {
+  return selectedNodeId ? getSceneNode(selectedNodeId) : null;
+}
+
+function getSceneNode(nodeId: string): EditorSceneNode | null {
+  return sceneNodes.find((node) => node.id === nodeId) ?? null;
+}
+
+function getAssetById(assetId: string): PrimitiveSvgAsset | null {
+  return assets.find((asset) => asset.id === assetId) ?? null;
+}
+
+function drawSceneBillboards(context: CanvasRenderingContext2D): void {
+  const drawableNodes = sceneNodes
+    .map((node) => {
+      const asset = getAssetById(node.assetId);
+      const worldPosition = tupleToVector(node.position);
+      const projected = threeViewport.projectWorldPosition(worldPosition, stage.size);
+
+      if (!asset || !projected) {
+        return null;
+      }
+
+      return {
+        asset,
+        node,
+        projected,
+        scale: threeViewport.getDistanceScale(worldPosition, 1),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    .sort((a, b) => b.projected.depth - a.projected.depth);
+
+  for (const entry of drawableNodes) {
+    drawBillboardNode(context, entry.asset, entry.node, entry.projected, entry.scale);
+  }
+}
+
+function drawBillboardNode(
+  context: CanvasRenderingContext2D,
+  asset: PrimitiveSvgAsset,
+  node: EditorSceneNode,
+  projected: { x: number; y: number },
+  screenScale: number,
+): void {
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
+  const assetScale = screenScale / largestDimension;
+  const selected = node.id === selectedNodeId;
+
+  context.save();
+  context.translate(projected.x, projected.y);
+  context.rotate(node.rotation[2]);
+  context.scale(assetScale * node.scale[0], assetScale * node.scale[1]);
+  context.translate(
+    -(viewBoxX + viewBoxWidth / 2),
+    -(viewBoxY + viewBoxHeight / 2),
+  );
+  context.fillStyle = asset.fill;
+  context.fill(asset.path, asset.fillRule);
+
+  if (selected) {
+    context.lineWidth = 3 / Math.max(assetScale, 0.001);
+    context.strokeStyle = "#ffcf4a";
+    context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
+  }
+
+  context.restore();
 }
 
 function chooseStableSelection(
@@ -406,6 +710,29 @@ function exposeEditorDebugHooks(): void {
         fillRule: asset.fillRule,
         pathD: asset.pathD,
       })),
+    getExperimentScene: () => {
+      const camera = threeViewport.getCameraSnapshot();
+
+      return {
+        camera: {
+          projection: camera.projection,
+          position: camera.position,
+          target: camera.target,
+          fov: camera.fov,
+          zoom: camera.zoom,
+        },
+        nodes: sceneNodes.map((node) => ({
+          id: node.id,
+          assetId: node.assetId,
+          position: [...node.position],
+          rotation: [...node.rotation],
+          scale: [...node.scale],
+          billboardMode: node.billboardMode,
+        })),
+        selectedNodeId,
+        transformMode: threeViewport.currentTransformMode,
+      };
+    },
     getSelectedProjectId: () => selectedProjectId,
     getSelectedAssetId: () => selectedAssetId,
     getLastImportError: () => lastImportError,
