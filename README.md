@@ -21,3 +21,29 @@ experiments.
 - Paper.js will be used for local vector geometry experiments and deformation.
 - Three.js/WebGL will be reserved for optional background, depth, or high-volume
   simple objects such as particles or boids.
+
+## Primitive SVG Assets
+
+The first import pipeline is deliberately strict. Each primitive SVG should be a
+single solid-color closed path exported from Illustrator:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -100 200 200">
+  <path fill="#ffcf4a" d="M ... Z" />
+</svg>
+```
+
+Allowed:
+
+- One `<path>` with `d`, `fill`, and optional `fill-rule`.
+- One wrapper `<g>` only when it has no `transform`, `class`, or `style`.
+- `fill` and `fill-rule` may also come from the path `style` attribute.
+
+Rejected:
+
+- Multiple paths, open paths, strokes, transforms, class-based styles, opacity,
+  gradients, filters, masks, clips, text, images, symbols, and basic shape
+  elements such as rect/circle/polygon.
+
+Built-in primitive assets are listed in `public/assets/primitive-assets.json`.
+The runtime loads that manifest, imports each SVG, and registers it in memory.

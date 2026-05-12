@@ -1,4 +1,8 @@
 import "./styles.css";
+import {
+  PrimitiveAssetRegistry,
+  type PrimitiveSvgAsset,
+} from "./core/assets/primitiveSvg";
 
 type StageLayerId = "three-canvas" | "vector-canvas" | "paper-canvas";
 
@@ -24,6 +28,21 @@ const LAYER_IDS: StageLayerId[] = [
 
 const MAX_DEVICE_PIXEL_RATIO = 2;
 const MIN_STAGE_WIDTH = 1;
+const PRIMITIVE_ASSET_MANIFEST_URL = "/assets/primitive-assets.json";
+const DEMO_ASSET_ID = "demo-face";
+
+type AssetLoadState =
+  | {
+      status: "loading";
+    }
+  | {
+      status: "ready";
+      asset: PrimitiveSvgAsset;
+    }
+  | {
+      status: "error";
+      message: string;
+    };
 const MIN_STAGE_HEIGHT = 1;
 
 /**
@@ -34,15 +53,35 @@ const MIN_STAGE_HEIGHT = 1;
  * rendering architecture forward too early.
  */
 const layers = LAYER_IDS.map(createLayer);
+const assetRegistry = new PrimitiveAssetRegistry();
 
 let stageSize = resizeStage(layers);
 let lastFrameTime = performance.now();
+let assetLoadState: AssetLoadState = { status: "loading" };
 
 window.addEventListener("resize", () => {
   stageSize = resizeStage(layers);
 });
 
+void loadInitialAssets();
 requestAnimationFrame(tick);
+
+declare global {
+  interface Window {
+    __vectorStageDebug?: {
+      getPrimitiveAssets: () => Array<{
+        id: string;
+        name: string;
+        sourceUrl: string;
+        viewBox: [number, number, number, number];
+        fill: string;
+        fillRule: string;
+        pathD: string;
+      }>;
+      getAssetLoadState: () => AssetLoadState["status"];
+    };
+  }
+}
 
 function createLayer(id: StageLayerId): StageLayer {
   const canvas = document.getElementById(id);
@@ -65,10 +104,42 @@ function createLayer(id: StageLayerId): StageLayer {
      * This marker gives Playwright a stable hook for checking that the intended
      * visual layer is present before it inspects canvas pixels.
      */
-    canvas.dataset.visualCheck = "sample-path2d";
+    canvas.dataset.visualCheck = "loading";
   }
 
   return { id, canvas, context };
+}
+
+async function loadInitialAssets(): Promise<void> {
+  try {
+    await assetRegistry.loadManifest(PRIMITIVE_ASSET_MANIFEST_URL);
+    const asset = assetRegistry.get(DEMO_ASSET_ID);
+    assetLoadState = { status: "ready", asset };
+    getLayer("vector-canvas").canvas.dataset.visualCheck = "imported-primitive";
+    exposeDebugHooks();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown asset error";
+    assetLoadState = { status: "error", message };
+    getLayer("vector-canvas").canvas.dataset.visualCheck = "import-error";
+    console.error(error);
+    exposeDebugHooks();
+  }
+}
+
+function exposeDebugHooks(): void {
+  window.__vectorStageDebug = {
+    getPrimitiveAssets: () =>
+      assetRegistry.snapshot().map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        sourceUrl: asset.sourceUrl,
+        viewBox: asset.viewBox,
+        fill: asset.fill,
+        fillRule: asset.fillRule,
+        pathD: asset.pathD,
+      })),
+    getAssetLoadState: () => assetLoadState.status,
+  };
 }
 
 function resizeStage(stageLayers: StageLayer[]): StageSize {
@@ -123,7 +194,14 @@ function renderFoundationFrame(
   clearLayer("paper-canvas", size);
 
   drawStageGrid(getLayer("three-canvas"), size);
-  drawRuntimePlaceholder(getLayer("vector-canvas"), size, deltaSeconds);
+  drawRuntimePlaceholder(getLayer("vector-canvas"), size, assetLoadState);
+
+  /**
+   * Keep deltaSeconds referenced while asset loading is the only asynchronous
+   * behavior in the loop. The next milestone can replace this line with real
+   * animation-system sampling.
+   */
+  void deltaSeconds;
 }
 
 function clearLayer(id: StageLayerId, size: StageSize): void {
@@ -170,64 +248,69 @@ function drawStageGrid(layer: StageLayer, size: StageSize): void {
 function drawRuntimePlaceholder(
   layer: StageLayer,
   size: StageSize,
-  deltaSeconds: number,
+  loadState: AssetLoadState,
 ): void {
   const { context } = layer;
+
+  if (loadState.status === "loading") {
+    drawCenteredStatus(context, size, "Loading primitive assets...");
+    return;
+  }
+
+  if (loadState.status === "error") {
+    drawCenteredStatus(context, size, "Primitive asset import failed");
+    return;
+  }
+
+  drawImportedPrimitive(context, size, loadState.asset);
+}
+
+function drawImportedPrimitive(
+  context: CanvasRenderingContext2D,
+  size: StageSize,
+  asset: PrimitiveSvgAsset,
+): void {
   const centerX = size.cssWidth / 2;
   const centerY = size.cssHeight / 2;
-  const radius = Math.max(42, Math.min(size.cssWidth, size.cssHeight) * 0.08);
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const targetSize = Math.max(84, Math.min(size.cssWidth, size.cssHeight) * 0.16);
+  const assetScale = targetSize / Math.max(viewBoxWidth, viewBoxHeight);
 
   context.save();
   context.translate(centerX, centerY);
-
-  /**
-   * The sample object is deliberately authored as Path2D instead of immediate
-   * canvas arc commands. It is a tiny rehearsal for the future SVG-path runtime:
-   * imported Illustrator parts should eventually land in this same drawing path.
-   */
-  const bodyPath = new Path2D(
-    [
-      `M ${-radius} 0`,
-      `C ${-radius} ${-radius * 0.66}, ${-radius * 0.42} ${-radius}, 0 ${-radius}`,
-      `C ${radius * 0.42} ${-radius}, ${radius} ${-radius * 0.66}, ${radius} 0`,
-      `C ${radius} ${radius * 0.66}, ${radius * 0.42} ${radius}, 0 ${radius}`,
-      `C ${-radius * 0.42} ${radius}, ${-radius} ${radius * 0.66}, ${-radius} 0`,
-      "Z",
-    ].join(" "),
+  context.scale(assetScale, assetScale);
+  context.translate(
+    -(viewBoxX + viewBoxWidth / 2),
+    -(viewBoxY + viewBoxHeight / 2),
   );
-
-  const highlightPath = new Path2D(
-    [
-      `M ${-radius * 0.56} ${-radius * 0.44}`,
-      `C ${-radius * 0.28} ${-radius * 0.72}, ${radius * 0.12} ${-radius * 0.72}, ${radius * 0.34} ${-radius * 0.42}`,
-      `C ${radius * 0.06} ${-radius * 0.5}, ${-radius * 0.3} ${-radius * 0.48}, ${-radius * 0.56} ${-radius * 0.44}`,
-      "Z",
-    ].join(" "),
-  );
-
-  context.fillStyle = "#ffcf4a";
-  context.fill(bodyPath);
-
-  context.fillStyle = "rgba(255, 246, 176, 0.7)";
-  context.fill(highlightPath);
+  context.fillStyle = asset.fill;
+  context.fill(asset.path, asset.fillRule);
 
   context.fillStyle = "#111827";
   context.beginPath();
-  context.arc(-radius * 0.32, -radius * 0.12, radius * 0.1, 0, Math.PI * 2);
-  context.arc(radius * 0.32, -radius * 0.12, radius * 0.1, 0, Math.PI * 2);
+  context.arc(-32, -12, 10, 0, Math.PI * 2);
+  context.arc(32, -12, 10, 0, Math.PI * 2);
   context.fill();
 
   context.strokeStyle = "#111827";
-  context.lineWidth = Math.max(3, radius * 0.07);
+  context.lineWidth = 7;
   context.lineCap = "round";
   context.beginPath();
-  context.arc(0, radius * 0.04, radius * 0.42, 0.18 * Math.PI, 0.82 * Math.PI);
+  context.arc(0, 4, 42, 0.18 * Math.PI, 0.82 * Math.PI);
   context.stroke();
   context.restore();
+}
 
-  /**
-   * Keep deltaSeconds referenced while the loop is still a placeholder. The
-   * next milestone can replace this line with real animation-system sampling.
-   */
-  void deltaSeconds;
+function drawCenteredStatus(
+  context: CanvasRenderingContext2D,
+  size: StageSize,
+  message: string,
+): void {
+  context.save();
+  context.fillStyle = "rgba(238, 244, 255, 0.82)";
+  context.font = "600 16px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(message, size.cssWidth / 2, size.cssHeight / 2);
+  context.restore();
 }

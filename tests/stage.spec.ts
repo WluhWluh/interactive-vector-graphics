@@ -6,7 +6,30 @@ test("renders the empty stage and visible Path2D sample object", async ({
   await page.goto("/");
 
   const vectorCanvas = page.locator("#vector-canvas");
-  await expect(vectorCanvas).toHaveAttribute("data-visual-check", "sample-path2d");
+  await expect(vectorCanvas).toHaveAttribute(
+    "data-visual-check",
+    "imported-primitive",
+  );
+
+  const debugState = await page.evaluate(() => {
+    const debug = window.__vectorStageDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    const assets = debug.getPrimitiveAssets();
+
+    return {
+      loadState: debug.getAssetLoadState(),
+      asset: assets.find((candidate) => candidate.id === "demo-face") ?? null,
+    };
+  });
+
+  expect(debugState?.loadState).toBe("ready");
+  expect(debugState?.asset?.viewBox).toEqual([-100, -100, 200, 200]);
+  expect(debugState?.asset?.fill).toBe("#ffcf4a");
+  expect(debugState?.asset?.pathD).toContain("C -100 -66");
 
   await page.screenshot({
     path: "test-results/stage-sample.png",

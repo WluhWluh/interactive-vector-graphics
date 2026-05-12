@@ -33,3 +33,17 @@ than to the heavier 3D/game look of Star Birds.
   demos.
 - Preserve a clear separation between the vector runtime layer, the Paper.js
   experiment layer, and the optional Three.js/WebGL layer.
+
+## Primitive SVG Import Rules
+
+- First-stage SVG assets are strict primitives: one file, one solid-color closed
+  `<path>`, no stroke.
+- A single wrapper `<g>` is allowed only when it has no transform, class, or
+  style.
+- `fill` and `fill-rule` may be read from attributes or from the path `style`
+  attribute.
+- Reject complex SVG features instead of trying to clean them automatically:
+  multiple paths, transforms, gradients, filters, masks, clips, text, images,
+  symbols, class styles, opacity, and basic shape elements.
+- Compose birds, characters, props, and animated forms later in the editor from
+  multiple primitive assets rather than exporting grouped character SVGs.

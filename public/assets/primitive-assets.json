@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "demo-face",
+      "name": "Demo Face",
+      "url": "/assets/primitives/demo-face.svg"
+    }
+  ]
+}
