@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A playground for SVG-first interactive vector graphics experiments."
+    />
+    <title>Interactive Vector Graphics</title>
+  </head>
+  <body>
+    <main id="app" aria-label="Interactive vector graphics stage">
+      <canvas
+        id="three-canvas"
+        class="stage-layer"
+        aria-hidden="true"
+      ></canvas>
+      <canvas
+        id="vector-canvas"
+        class="stage-layer"
+        aria-label="Main vector runtime canvas"
+      ></canvas>
+      <canvas
+        id="paper-canvas"
+        class="stage-layer"
+        aria-hidden="true"
+      ></canvas>
+      <aside class="stage-hud" aria-label="Stage status">
+        <strong>Interactive Vector Graphics</strong>
+        <span>SVG-first playground foundation</span>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
