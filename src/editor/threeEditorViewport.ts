@@ -99,6 +99,7 @@ export class ThreeEditorViewport {
   private selectedNodeId: string | null = null;
   private onSelectionChange: ((nodeId: string | null) => void) | null = null;
   private onObjectTransform: ((nodeId: string) => void) | null = null;
+  private onCameraChange: (() => void) | null = null;
 
   constructor() {
     this.backgroundCanvas = getRequiredCanvas("three-background-canvas");
@@ -182,9 +183,11 @@ export class ThreeEditorViewport {
   setCallbacks(callbacks: {
     onSelectionChange: (nodeId: string | null) => void;
     onObjectTransform: (nodeId: string) => void;
+    onCameraChange?: () => void;
   }): void {
     this.onSelectionChange = callbacks.onSelectionChange;
     this.onObjectTransform = callbacks.onObjectTransform;
+    this.onCameraChange = callbacks.onCameraChange ?? null;
   }
 
   resize(size: StageSize): void {
@@ -206,7 +209,10 @@ export class ThreeEditorViewport {
 
   render(size: StageSize): void {
     this.resize(size);
-    this.orbitControls.update();
+    const cameraChanged = this.orbitControls.update();
+    if (cameraChanged) {
+      this.onCameraChange?.();
+    }
     this.backgroundRenderer.render(this.backgroundScene, this.activeCamera);
     this.overlayRenderer.render(this.overlayScene, this.activeCamera);
   }
@@ -328,6 +334,18 @@ export class ThreeEditorViewport {
         this.projection === "perspective"
           ? this.perspectiveCamera.zoom
           : this.orthographicCamera.zoom,
+      near: CAMERA_NEAR,
+      far: CAMERA_FAR,
+    };
+  }
+
+  getDefaultCameraSnapshot(): EditorViewportCameraSnapshot {
+    return {
+      projection: "perspective",
+      position: vectorToTuple(DEFAULT_CAMERA_POSITION),
+      target: vectorToTuple(DEFAULT_CAMERA_TARGET),
+      fov: PERSPECTIVE_FOV,
+      zoom: 1,
       near: CAMERA_NEAR,
       far: CAMERA_FAR,
     };

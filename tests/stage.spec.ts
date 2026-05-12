@@ -166,9 +166,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editedTransformState?.scale).toEqual([1, 1, 1]);
   await expect(page.getByLabel("Scale Y")).toHaveValue("1");
 
-  await page.locator("#scene-name-input").fill("Opening Scene");
+  await page.locator("#scene-name-input").fill("Empty Scene");
   await page.locator("#create-scene-button").click();
-  await expect(page.getByRole("button", { name: /Opening Scene/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Empty Scene/ })).toBeVisible();
 
   const createdSceneState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -185,9 +185,65 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   expect(createdSceneState?.scenes).toHaveLength(1);
-  expect(createdSceneState?.scenes[0]?.id).toBe("opening-scene");
-  expect(createdSceneState?.selectedSceneId).toBe("opening-scene");
-  expect(createdSceneState?.loadedSceneId).toBe("opening-scene");
+  expect(createdSceneState?.scenes[0]?.id).toBe("empty-scene");
+  expect(createdSceneState?.selectedSceneId).toBe("empty-scene");
+  expect(createdSceneState?.loadedSceneId).toBe("empty-scene");
+
+  await page.getByRole("button", { name: "Load Scene" }).click();
+
+  const emptyLoadedState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      nodeCount: debug.getExperimentScene().nodes.length,
+      loadedSceneId: debug.getLoadedSceneId(),
+    };
+  });
+
+  expect(emptyLoadedState?.nodeCount).toBe(0);
+  expect(emptyLoadedState?.loadedSceneId).toBe("empty-scene");
+
+  await page.getByRole("button", { name: "Add to Scene" }).click();
+  await expect.poll(async () =>
+    page.evaluate(() => window.__vectorEditorDebug?.getExperimentScene().nodes.length ?? 0),
+  ).toBe(1);
+  await expect(page.locator("#inspector-fields")).toContainText("node-1");
+  await page.getByLabel("Position X").fill("2.5");
+  await page.getByLabel("Position X").blur();
+  await page.getByLabel("Rotation Z").fill("0.75");
+  await page.getByLabel("Rotation Z").blur();
+  await expect.poll(async () =>
+    page.evaluate(() =>
+      window.__vectorEditorDebug?.getExperimentScene().nodes[0]?.position[0] ?? null,
+    ),
+  ).toBe(2.5);
+  await page.locator("#scene-name-input").fill("Opening Scene");
+  await page.locator("#clone-scene-button").click();
+  await expect(page.getByRole("button", { name: /Opening Scene/ })).toBeVisible();
+
+  const clonedSceneState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      scenes: debug.getScenes(),
+      selectedSceneId: debug.getSelectedSceneId(),
+      loadedSceneId: debug.getLoadedSceneId(),
+      node: debug.getExperimentScene().nodes[0] ?? null,
+    };
+  });
+
+  expect(clonedSceneState?.scenes).toHaveLength(2);
+  expect(clonedSceneState?.selectedSceneId).toBe("opening-scene");
+  expect(clonedSceneState?.loadedSceneId).toBe("opening-scene");
+  expect(clonedSceneState?.node?.position).toEqual([2.5, 1, 0]);
 
   await page.getByLabel("Position X").fill("2");
   await page.getByLabel("Position X").blur();
@@ -298,7 +354,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(invalidImportState?.hasBadAsset).toBe(false);
   expect(invalidImportState?.lastImportError).toContain("bad-asset");
 
-  await page.getByRole("button", { name: "Delete Scene" }).click();
+  await page.locator("#delete-scene-button").click();
   await expect(page.getByRole("button", { name: /Opening Scene/ })).toHaveCount(0);
 
   const afterSceneDeleteState = await page.evaluate(() => {
@@ -316,14 +372,34 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     };
   });
 
-  expect(afterSceneDeleteState?.sceneCount).toBe(0);
-  expect(afterSceneDeleteState?.selectedSceneId).toBeNull();
+  expect(afterSceneDeleteState?.sceneCount).toBe(1);
+  expect(afterSceneDeleteState?.selectedSceneId).toBe("empty-scene");
   expect(afterSceneDeleteState?.loadedSceneId).toBeNull();
   expect(afterSceneDeleteState?.nodeCount).toBe(1);
 
-  await page.getByRole("button", { name: "Delete Asset" }).click();
-  await expect(page.getByRole("button", { name: "uploaded-face" })).toHaveCount(0);
+  await page.locator("#delete-scene-node-button").click();
   await expect(page.getByRole("button", { name: /node-1/ })).toHaveCount(0);
+
+  const afterNodeDeleteState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      assetCount: debug.getAssets().length,
+      nodeCount: debug.getExperimentScene().nodes.length,
+      selectedNodeId: debug.getExperimentScene().selectedNodeId,
+    };
+  });
+
+  expect(afterNodeDeleteState?.assetCount).toBe(1);
+  expect(afterNodeDeleteState?.nodeCount).toBe(0);
+  expect(afterNodeDeleteState?.selectedNodeId).toBeNull();
+
+  await page.getByRole("button", { name: "Delete Imported Asset" }).click();
+  await expect(page.getByRole("button", { name: "uploaded-face" })).toHaveCount(0);
 
   const afterAssetDeleteState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;

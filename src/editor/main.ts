@@ -35,6 +35,7 @@ type EditorElements = {
   sceneNameInput: HTMLInputElement;
   sceneList: HTMLUListElement;
   createSceneButton: HTMLButtonElement;
+  cloneSceneButton: HTMLButtonElement;
   loadSceneButton: HTMLButtonElement;
   saveSceneButton: HTMLButtonElement;
   deleteSceneButton: HTMLButtonElement;
@@ -43,6 +44,7 @@ type EditorElements = {
   addNodeButton: HTMLButtonElement;
   deleteAssetButton: HTMLButtonElement;
   sceneNodeList: HTMLUListElement;
+  deleteSceneNodeButton: HTMLButtonElement;
   projectionToggleButton: HTMLButtonElement;
   transformTranslateButton: HTMLButtonElement;
   transformRotateButton: HTMLButtonElement;
@@ -78,7 +80,10 @@ elements.deleteProjectButton.addEventListener("click", () => {
   void deleteSelectedProject();
 });
 elements.createSceneButton.addEventListener("click", () => {
-  void createSceneFromInput();
+  void createSceneFromInput("empty");
+});
+elements.cloneSceneButton.addEventListener("click", () => {
+  void createSceneFromInput("current");
 });
 elements.loadSceneButton.addEventListener("click", () => {
   void loadSelectedScene();
@@ -97,6 +102,9 @@ elements.addNodeButton.addEventListener("click", () => {
 });
 elements.deleteAssetButton.addEventListener("click", () => {
   void deleteSelectedAsset();
+});
+elements.deleteSceneNodeButton.addEventListener("click", () => {
+  deleteSelectedSceneNode();
 });
 elements.projectionToggleButton.addEventListener("click", () => {
   toggleProjection();
@@ -119,6 +127,8 @@ elements.resetViewButton.addEventListener("click", () => {
 threeViewport.setCallbacks({
   onSelectionChange: (nodeId) => {
     selectedNodeId = nodeId;
+    const selectedNode = nodeId ? getSceneNode(nodeId) : null;
+    selectedAssetId = selectedNode?.assetId ?? selectedAssetId;
     renderEditorShell();
     exposeEditorDebugHooks();
   },
@@ -132,6 +142,11 @@ threeViewport.setCallbacks({
     threeViewport.syncNodeFromProxy(node);
     loadedSceneId = null;
     renderEditorShell();
+    exposeEditorDebugHooks();
+  },
+  onCameraChange: () => {
+    loadedSceneId = null;
+    renderInspector();
     exposeEditorDebugHooks();
   },
 });
@@ -292,7 +307,7 @@ async function deleteSelectedProject(): Promise<void> {
   }
 }
 
-async function createSceneFromInput(): Promise<void> {
+async function createSceneFromInput(source: "empty" | "current"): Promise<void> {
   if (!selectedProjectId) {
     setImportError(new Error("Create or select a project before creating a scene."));
     return;
@@ -309,8 +324,12 @@ async function createSceneFromInput(): Promise<void> {
     const result = await createScene(
       selectedProjectId,
       name,
-      createCurrentSceneDocument(),
+      source === "empty" ? createEmptySceneDocument() : createCurrentSceneDocument(),
     );
+
+    if (source === "empty") {
+      applySceneDocument(result.document);
+    }
 
     elements.sceneNameInput.value = "";
     selectedSceneId = result.scene.id;
@@ -455,6 +474,7 @@ function addSelectedAssetToScene(): void {
   nextSceneNodeNumber += 1;
   sceneNodes = [...sceneNodes, node];
   selectedNodeId = node.id;
+  selectedAssetId = selectedAsset.id;
   loadedSceneId = null;
   threeViewport.addOrUpdateNode(node, selectedAsset);
   threeViewport.setSelectedNode(node.id);
@@ -492,6 +512,19 @@ function createCurrentSceneDocument(): SceneDocument {
     version: 1,
     camera: threeViewport.getCameraSnapshot(),
     nodes: sceneNodes.map(cloneSceneNode),
+    animation: {
+      fps: 24,
+      duration: 0,
+      tracks: [],
+    },
+  };
+}
+
+function createEmptySceneDocument(): SceneDocument {
+  return {
+    version: 1,
+    camera: threeViewport.getDefaultCameraSnapshot(),
+    nodes: [],
     animation: {
       fps: 24,
       duration: 0,
@@ -540,6 +573,21 @@ function removeSceneNodesForAsset(assetId: string): void {
   loadedSceneId = null;
 }
 
+function deleteSelectedSceneNode(): void {
+  if (!selectedNodeId) {
+    return;
+  }
+
+  const deletedNodeId = selectedNodeId;
+
+  threeViewport.removeNode(deletedNodeId);
+  sceneNodes = sceneNodes.filter((node) => node.id !== deletedNodeId);
+  selectedNodeId = null;
+  loadedSceneId = null;
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
 function getEditorElements(): EditorElements {
   const projectForm = getRequiredElement("project-form", HTMLFormElement);
   const projectNameInput = getRequiredElement(
@@ -558,6 +606,10 @@ function getEditorElements(): EditorElements {
   const sceneList = getRequiredElement("scene-list", HTMLUListElement);
   const createSceneButton = getRequiredElement(
     "create-scene-button",
+    HTMLButtonElement,
+  );
+  const cloneSceneButton = getRequiredElement(
+    "clone-scene-button",
     HTMLButtonElement,
   );
   const loadSceneButton = getRequiredElement(
@@ -580,6 +632,10 @@ function getEditorElements(): EditorElements {
     HTMLButtonElement,
   );
   const sceneNodeList = getRequiredElement("scene-node-list", HTMLUListElement);
+  const deleteSceneNodeButton = getRequiredElement(
+    "delete-scene-node-button",
+    HTMLButtonElement,
+  );
   const projectionToggleButton = getRequiredElement(
     "projection-toggle-button",
     HTMLButtonElement,
@@ -614,6 +670,7 @@ function getEditorElements(): EditorElements {
     sceneNameInput,
     sceneList,
     createSceneButton,
+    cloneSceneButton,
     loadSceneButton,
     saveSceneButton,
     deleteSceneButton,
@@ -622,6 +679,7 @@ function getEditorElements(): EditorElements {
     addNodeButton,
     deleteAssetButton,
     sceneNodeList,
+    deleteSceneNodeButton,
     projectionToggleButton,
     transformTranslateButton,
     transformRotateButton,
@@ -655,11 +713,13 @@ function renderEditorShell(): void {
   elements.deleteProjectButton.disabled = !selectedProjectId;
   elements.sceneNameInput.disabled = !selectedProjectId;
   elements.createSceneButton.disabled = !selectedProjectId;
+  elements.cloneSceneButton.disabled = !selectedProjectId;
   elements.loadSceneButton.disabled = !selectedProjectId || !selectedSceneId;
   elements.saveSceneButton.disabled = !selectedProjectId || !selectedSceneId;
   elements.deleteSceneButton.disabled = !selectedProjectId || !selectedSceneId;
   elements.addNodeButton.disabled = !selectedAssetId;
   elements.deleteAssetButton.disabled = !selectedProjectId || !selectedAssetId;
+  elements.deleteSceneNodeButton.disabled = !selectedNodeId;
   elements.projectionToggleButton.textContent =
     threeViewport.currentProjection === "perspective"
       ? "Perspective"
@@ -741,6 +801,8 @@ function renderAssetList(): void {
       button.textContent = asset.name;
       button.addEventListener("click", () => {
         selectedAssetId = asset.id;
+        selectedNodeId = null;
+        threeViewport.setSelectedNode(null);
         renderEditorShell();
         exposeEditorDebugHooks();
       });
@@ -767,6 +829,7 @@ function renderSceneNodeList(): void {
         : `${node.id} · Missing ${node.assetId}`;
       button.addEventListener("click", () => {
         selectedNodeId = node.id;
+        selectedAssetId = node.assetId;
         threeViewport.setSelectedNode(node.id);
         renderEditorShell();
         exposeEditorDebugHooks();
@@ -782,9 +845,11 @@ function renderInspector(): void {
   elements.inspectorFields.replaceChildren();
 
   const selectedProject = getSelectedProject();
-  const selectedAsset = getSelectedAsset();
   const camera = threeViewport.getCameraSnapshot();
   const selectedNode = getSelectedNode();
+  const inspectedAsset = selectedNode
+    ? getAssetById(selectedNode.assetId)
+    : getSelectedAsset();
 
   if (!selectedProject) {
     appendInspectorRow("Status", "Create or select a project");
@@ -799,16 +864,16 @@ function renderInspector(): void {
   appendInspectorRow("Camera Pos", camera.position.join(", "));
   appendInspectorRow("Camera Target", camera.target.join(", "));
 
-  if (!selectedAsset) {
+  if (!inspectedAsset) {
     appendInspectorRow("Asset", "No primitive selected");
   } else {
-    appendInspectorRow("Asset ID", selectedAsset.id);
-    appendInspectorRow("Name", selectedAsset.name);
-    appendInspectorRow("Source", selectedAsset.sourceUrl);
-    appendInspectorRow("ViewBox", selectedAsset.viewBox.join(", "));
-    appendInspectorRow("Fill", selectedAsset.fill);
-    appendInspectorRow("Fill Rule", selectedAsset.fillRule);
-    appendInspectorRow("Path Length", `${selectedAsset.pathD.length} chars`);
+    appendInspectorRow("Asset ID", inspectedAsset.id);
+    appendInspectorRow("Name", inspectedAsset.name);
+    appendInspectorRow("Source", inspectedAsset.sourceUrl);
+    appendInspectorRow("ViewBox", inspectedAsset.viewBox.join(", "));
+    appendInspectorRow("Fill", inspectedAsset.fill);
+    appendInspectorRow("Fill Rule", inspectedAsset.fillRule);
+    appendInspectorRow("Path Length", `${inspectedAsset.pathD.length} chars`);
   }
 
   if (!selectedNode) {

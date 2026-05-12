@@ -44,7 +44,10 @@
             autocomplete="off"
           />
           <button id="create-scene-button" class="editor-button" type="button">
-            Create
+            Create Empty
+          </button>
+          <button id="clone-scene-button" class="editor-button" type="button">
+            Clone Current
           </button>
         </div>
         <ul id="scene-list" class="asset-list" aria-label="Saved scenes"></ul>
@@ -79,7 +82,7 @@
           Add to Scene
         </button>
         <button id="delete-asset-button" class="danger-button" type="button">
-          Delete Asset
+          Delete Imported Asset
         </button>
 
         <header class="editor-panel-header">
@@ -87,6 +90,9 @@
           <span>In-memory experiment</span>
         </header>
         <ul id="scene-node-list" class="asset-list" aria-label="Scene nodes"></ul>
+        <button id="delete-scene-node-button" class="danger-button" type="button">
+          Delete Scene Node
+        </button>
       </aside>
 
       <section class="editor-preview" aria-label="Live preview">

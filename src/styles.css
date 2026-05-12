@@ -132,8 +132,12 @@ body {
 
 .scene-create-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+}
+
+.scene-create-row .editor-button {
+  width: 100%;
 }
 
 .scene-action-grid {
