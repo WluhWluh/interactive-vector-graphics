@@ -20,9 +20,19 @@ export type StoredPrimitiveAsset = {
 };
 
 export type Vector3Tuple = [number, number, number];
+export type SceneTrackEasing = "linear" | "step" | "easeInOut";
+export type SceneTrackTargetKind = "node" | "camera";
+export type SceneTrackProperty =
+  | "position"
+  | "rotation"
+  | "scale"
+  | "target"
+  | "fov"
+  | "zoom";
+export type SceneKeyframeValue = number | Vector3Tuple;
 
 export type SceneDocument = {
-  version: 1;
+  version: 2;
   camera: {
     projection: "perspective" | "orthographic";
     position: Vector3Tuple;
@@ -42,8 +52,25 @@ export type SceneDocument = {
   }>;
   animation: {
     fps: 24;
-    duration: 0;
-    tracks: [];
+    activeClipId: string | null;
+    clips: Array<{
+      id: string;
+      name: string;
+      duration: number;
+      tracks: Array<{
+        id: string;
+        target: {
+          kind: SceneTrackTargetKind;
+          nodeId?: string;
+          property: SceneTrackProperty;
+        };
+        keyframes: Array<{
+          time: number;
+          value: SceneKeyframeValue;
+          easing: SceneTrackEasing;
+        }>;
+      }>;
+    }>;
   };
 };
 

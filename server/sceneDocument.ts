@@ -1,4 +1,9 @@
-import type { SceneDocument, Vector3Tuple } from "./types";
+import type {
+  SceneDocument,
+  SceneKeyframeValue,
+  SceneTrackProperty,
+  Vector3Tuple,
+} from "./types";
 
 type SceneDocumentContext = {
   projectId: string;
@@ -25,8 +30,8 @@ export function validateSceneDocument(
     throw new SceneDocumentValidationError(context, "document must be an object");
   }
 
-  if (value.version !== 1) {
-    throw new SceneDocumentValidationError(context, "version must be 1");
+  if (value.version !== 2) {
+    throw new SceneDocumentValidationError(context, "version must be 2");
   }
 
   const camera = validateCamera(value.camera, context);
@@ -34,7 +39,7 @@ export function validateSceneDocument(
   const animation = validateAnimation(value.animation, context);
 
   return {
-    version: 1,
+    version: 2,
     camera,
     nodes,
     animation,
@@ -151,25 +156,231 @@ function validateAnimation(
     throw new SceneDocumentValidationError(context, "animation must be an object");
   }
 
-  if (value.fps !== 24 || value.duration !== 0) {
+  if (value.fps !== 24) {
     throw new SceneDocumentValidationError(
       context,
-      "animation must use fps 24 and duration 0 in this phase",
+      "animation.fps must be 24",
     );
   }
 
-  if (!Array.isArray(value.tracks) || value.tracks.length !== 0) {
+  if (value.activeClipId !== null && typeof value.activeClipId !== "string") {
     throw new SceneDocumentValidationError(
       context,
-      "animation.tracks must be an empty array in this phase",
+      "animation.activeClipId must be null or a string",
+    );
+  }
+
+  if (!Array.isArray(value.clips)) {
+    throw new SceneDocumentValidationError(context, "animation.clips must be an array");
+  }
+
+  const clips = value.clips.map((clip, index) =>
+    validateAnimationClip(clip, `animation.clips[${index}]`, context),
+  );
+
+  if (
+    typeof value.activeClipId === "string" &&
+    !clips.some((clip) => clip.id === value.activeClipId)
+  ) {
+    throw new SceneDocumentValidationError(
+      context,
+      "animation.activeClipId must match an existing clip id",
     );
   }
 
   return {
     fps: 24,
-    duration: 0,
-    tracks: [],
+    activeClipId: value.activeClipId,
+    clips,
   };
+}
+
+function validateAnimationClip(
+  value: unknown,
+  path: string,
+  context: SceneDocumentContext,
+): SceneDocument["animation"]["clips"][number] {
+  if (!isRecord(value)) {
+    throw new SceneDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const id = readRequiredString(value.id, `${path}.id`, context);
+  const name = readRequiredString(value.name, `${path}.name`, context);
+  const duration = readFiniteNumber(value.duration, `${path}.duration`, context);
+
+  if (duration < 0) {
+    throw new SceneDocumentValidationError(
+      context,
+      `${path}.duration must be greater than or equal to 0`,
+    );
+  }
+
+  if (!Array.isArray(value.tracks)) {
+    throw new SceneDocumentValidationError(context, `${path}.tracks must be an array`);
+  }
+
+  return {
+    id,
+    name,
+    duration,
+    tracks: value.tracks.map((track, index) =>
+      validateAnimationTrack(
+        track,
+        `${path}.tracks[${index}]`,
+        duration,
+        context,
+      ),
+    ),
+  };
+}
+
+function validateAnimationTrack(
+  value: unknown,
+  path: string,
+  clipDuration: number,
+  context: SceneDocumentContext,
+): SceneDocument["animation"]["clips"][number]["tracks"][number] {
+  if (!isRecord(value)) {
+    throw new SceneDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const id = readRequiredString(value.id, `${path}.id`, context);
+  const target = validateTrackTarget(value.target, `${path}.target`, context);
+
+  if (!Array.isArray(value.keyframes)) {
+    throw new SceneDocumentValidationError(
+      context,
+      `${path}.keyframes must be an array`,
+    );
+  }
+
+  return {
+    id,
+    target,
+    keyframes: value.keyframes.map((keyframe, index) =>
+      validateKeyframe(
+        keyframe,
+        `${path}.keyframes[${index}]`,
+        clipDuration,
+        target.property,
+        context,
+      ),
+    ),
+  };
+}
+
+function validateTrackTarget(
+  value: unknown,
+  path: string,
+  context: SceneDocumentContext,
+): SceneDocument["animation"]["clips"][number]["tracks"][number]["target"] {
+  if (!isRecord(value)) {
+    throw new SceneDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  if (value.kind !== "node" && value.kind !== "camera") {
+    throw new SceneDocumentValidationError(
+      context,
+      `${path}.kind must be node or camera`,
+    );
+  }
+
+  const property = validateTrackProperty(value.property, `${path}.property`, context);
+
+  if (value.kind === "node") {
+    return {
+      kind: "node",
+      nodeId: readRequiredString(value.nodeId, `${path}.nodeId`, context),
+      property,
+    };
+  }
+
+  if (value.nodeId !== undefined) {
+    throw new SceneDocumentValidationError(
+      context,
+      `${path}.nodeId must not be set for camera tracks`,
+    );
+  }
+
+  return {
+    kind: "camera",
+    property,
+  };
+}
+
+function validateTrackProperty(
+  value: unknown,
+  path: string,
+  context: SceneDocumentContext,
+): SceneTrackProperty {
+  const validProperties: SceneTrackProperty[] = [
+    "position",
+    "rotation",
+    "scale",
+    "target",
+    "fov",
+    "zoom",
+  ];
+
+  if (
+    typeof value !== "string" ||
+    !validProperties.includes(value as SceneTrackProperty)
+  ) {
+    throw new SceneDocumentValidationError(context, `${path} is invalid`);
+  }
+
+  return value as SceneTrackProperty;
+}
+
+function validateKeyframe(
+  value: unknown,
+  path: string,
+  clipDuration: number,
+  property: SceneTrackProperty,
+  context: SceneDocumentContext,
+): SceneDocument["animation"]["clips"][number]["tracks"][number]["keyframes"][number] {
+  if (!isRecord(value)) {
+    throw new SceneDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const time = readFiniteNumber(value.time, `${path}.time`, context);
+
+  if (time < 0 || time > clipDuration) {
+    throw new SceneDocumentValidationError(
+      context,
+      `${path}.time must be within the clip duration`,
+    );
+  }
+
+  if (
+    value.easing !== "linear" &&
+    value.easing !== "step" &&
+    value.easing !== "easeInOut"
+  ) {
+    throw new SceneDocumentValidationError(
+      context,
+      `${path}.easing must be linear, step, or easeInOut`,
+    );
+  }
+
+  return {
+    time,
+    value: validateKeyframeValue(value.value, `${path}.value`, property, context),
+    easing: value.easing,
+  };
+}
+
+function validateKeyframeValue(
+  value: unknown,
+  path: string,
+  property: SceneTrackProperty,
+  context: SceneDocumentContext,
+): SceneKeyframeValue {
+  if (isVectorTrackProperty(property)) {
+    return readVector3(value, path, context);
+  }
+
+  return readFiniteNumber(value, path, context);
 }
 
 function readVector3(
@@ -191,6 +402,18 @@ function readVector3(
   ];
 }
 
+function readRequiredString(
+  value: unknown,
+  path: string,
+  context: SceneDocumentContext,
+): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new SceneDocumentValidationError(context, `${path} is required`);
+  }
+
+  return value;
+}
+
 function readFiniteNumber(
   value: unknown,
   path: string,
@@ -205,4 +428,13 @@ function readFiniteNumber(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isVectorTrackProperty(property: SceneTrackProperty): boolean {
+  return (
+    property === "position" ||
+    property === "rotation" ||
+    property === "scale" ||
+    property === "target"
+  );
 }

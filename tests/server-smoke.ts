@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDataStore } from "../server/dataStore";
 import { importPrimitiveSvgOnServer } from "../server/primitiveSvgImport";
+import { validateSceneDocument } from "../server/sceneDocument";
 import type { SceneDocument } from "../server/types";
 
 const tempDataDir = await mkdtemp(join(tmpdir(), "ivg-server-smoke-"));
@@ -56,7 +57,7 @@ try {
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
 
   const validSceneDocument: SceneDocument = {
-    version: 1,
+    version: 2,
     camera: {
       projection: "perspective",
       position: [4.5, 3.2, 5.2],
@@ -78,10 +79,154 @@ try {
     ],
     animation: {
       fps: 24,
-      duration: 0,
-      tracks: [],
+      activeClipId: null,
+      clips: [],
     },
   };
+  const animatedSceneDocument: SceneDocument = {
+    ...validSceneDocument,
+    animation: {
+      fps: 24,
+      activeClipId: "intro",
+      clips: [
+        {
+          id: "intro",
+          name: "Intro",
+          duration: 1,
+          tracks: [
+            {
+              id: "node-1-position",
+              target: {
+                kind: "node",
+                nodeId: "node-1",
+                property: "position",
+              },
+              keyframes: [
+                {
+                  time: 0,
+                  value: [0, 1, 0],
+                  easing: "linear",
+                },
+                {
+                  time: 1,
+                  value: [2, 1, 0],
+                  easing: "easeInOut",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  validateSceneDocument(animatedSceneDocument, { projectId: firstProject.id });
+  assert.throws(
+    () =>
+      validateSceneDocument(
+        {
+          ...validSceneDocument,
+          version: 1,
+        },
+        { projectId: firstProject.id },
+      ),
+    /version must be 2/,
+  );
+  assertInvalidSceneDocument(
+    {
+      ...animatedSceneDocument,
+      animation: {
+        ...animatedSceneDocument.animation,
+        activeClipId: "missing-clip",
+      },
+    },
+    /activeClipId/,
+    firstProject.id,
+  );
+  assertInvalidSceneDocument(
+    {
+      ...animatedSceneDocument,
+      animation: {
+        ...animatedSceneDocument.animation,
+        clips: [
+          {
+            ...animatedSceneDocument.animation.clips[0],
+            tracks: [
+              {
+                ...animatedSceneDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  {
+                    time: 0,
+                    value: 1,
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /value must contain three numbers/,
+    firstProject.id,
+  );
+  assertInvalidSceneDocument(
+    {
+      ...animatedSceneDocument,
+      animation: {
+        ...animatedSceneDocument.animation,
+        clips: [
+          {
+            ...animatedSceneDocument.animation.clips[0],
+            tracks: [
+              {
+                id: "camera-fov",
+                target: {
+                  kind: "camera",
+                  property: "fov",
+                },
+                keyframes: [
+                  {
+                    time: 0,
+                    value: [1, 2, 3],
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /value must be a number/,
+    firstProject.id,
+  );
+  assertInvalidSceneDocument(
+    {
+      ...animatedSceneDocument,
+      animation: {
+        ...animatedSceneDocument.animation,
+        clips: [
+          {
+            ...animatedSceneDocument.animation.clips[0],
+            tracks: [
+              {
+                ...animatedSceneDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  {
+                    time: 2,
+                    value: [0, 1, 0],
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /within the clip duration/,
+    firstProject.id,
+  );
   const firstScene = await store.createScene({
     projectId: firstProject.id,
     name: "Opening Scene",
@@ -90,7 +235,7 @@ try {
   const secondScene = await store.createScene({
     projectId: firstProject.id,
     name: "Opening Scene",
-    document: validSceneDocument,
+    document: animatedSceneDocument,
   });
 
   assert.equal(firstScene.id, "opening-scene");
@@ -102,15 +247,15 @@ try {
   assert.deepEqual(storedScene.document, validSceneDocument);
 
   const updatedSceneDocument: SceneDocument = {
-    ...validSceneDocument,
+    ...animatedSceneDocument,
     camera: {
-      ...validSceneDocument.camera,
+      ...animatedSceneDocument.camera,
       projection: "orthographic",
       zoom: 1.5,
     },
     nodes: [
       {
-        ...validSceneDocument.nodes[0],
+        ...animatedSceneDocument.nodes[0],
         position: [2.5, 1, 0],
       },
     ],
@@ -162,4 +307,15 @@ try {
 } finally {
   store.close();
   await rm(tempDataDir, { recursive: true, force: true });
+}
+
+function assertInvalidSceneDocument(
+  document: unknown,
+  expectedMessage: RegExp,
+  projectId: string,
+): void {
+  assert.throws(
+    () => validateSceneDocument(document, { projectId }),
+    expectedMessage,
+  );
 }

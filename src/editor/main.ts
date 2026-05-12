@@ -509,26 +509,26 @@ function clearExperimentScene(): void {
 
 function createCurrentSceneDocument(): SceneDocument {
   return {
-    version: 1,
+    version: 2,
     camera: threeViewport.getCameraSnapshot(),
     nodes: sceneNodes.map(cloneSceneNode),
     animation: {
       fps: 24,
-      duration: 0,
-      tracks: [],
+      activeClipId: null,
+      clips: [],
     },
   };
 }
 
 function createEmptySceneDocument(): SceneDocument {
   return {
-    version: 1,
+    version: 2,
     camera: threeViewport.getDefaultCameraSnapshot(),
     nodes: [],
     animation: {
       fps: 24,
-      duration: 0,
-      tracks: [],
+      activeClipId: null,
+      clips: [],
     },
   };
 }

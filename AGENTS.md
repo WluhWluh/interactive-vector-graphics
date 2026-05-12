@@ -77,8 +77,10 @@ than to the heavier 3D/game look of Star Birds.
   sources live beside their project under `data/projects/<project-id>/`.
 - Scene metadata lives in the same SQLite database; scene documents are JSON
   files under `data/projects/<project-id>/scenes/`.
-- Scene document v1 stores camera, nodes, and an empty animation placeholder.
-  Save and load whole documents; do not add partial patch persistence yet.
+- Scene document v2 stores camera, nodes, and animation clips/tracks/keyframes.
+  The editor currently writes an empty animation placeholder and does not play or
+  edit keyframes yet. Save and load whole documents; do not add partial patch
+  persistence yet.
 - Loading scenes must tolerate missing asset references so deleting an asset does
   not make old scene documents unreadable.
 - Validate primitive SVG imports on the server before saving them. Browser-side

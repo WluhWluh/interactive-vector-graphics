@@ -8,6 +8,7 @@ import type {
   SceneRecord,
   StoredPrimitiveAsset,
 } from "./types";
+import { validateSceneDocument } from "./sceneDocument";
 
 const PROJECTS_DIR_NAME = "projects";
 const DATABASE_FILE_NAME = "ivg.sqlite";
@@ -324,11 +325,11 @@ export function createDataStore(dataDir: string): DataStore {
     const scene = getSceneRecord(projectId, sceneId);
     const rawDocument = JSON.parse(
       await readFile(join(resolvedDataDir, scene.dataPath), "utf8"),
-    ) as SceneDocument;
+    ) as unknown;
 
     return {
       scene,
-      document: rawDocument,
+      document: validateSceneDocument(rawDocument, { projectId, sceneId }),
     };
   }
 

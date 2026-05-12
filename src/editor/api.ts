@@ -23,13 +23,47 @@ export type StoredPrimitiveAssetDto = {
 };
 
 export type SceneDocument = {
-  version: 1;
+  version: 2;
   camera: EditorViewportCameraSnapshot;
   nodes: EditorSceneNode[];
   animation: {
     fps: 24;
-    duration: 0;
-    tracks: [];
+    activeClipId: string | null;
+    clips: Array<{
+      id: string;
+      name: string;
+      duration: number;
+      tracks: Array<{
+        id: string;
+        target:
+          | {
+              kind: "node";
+              nodeId: string;
+              property:
+                | "position"
+                | "rotation"
+                | "scale"
+                | "target"
+                | "fov"
+                | "zoom";
+            }
+          | {
+              kind: "camera";
+              property:
+                | "position"
+                | "rotation"
+                | "scale"
+                | "target"
+                | "fov"
+                | "zoom";
+            };
+        keyframes: Array<{
+          time: number;
+          value: number | [number, number, number];
+          easing: "linear" | "step" | "easeInOut";
+        }>;
+      }>;
+    }>;
   };
 };
 

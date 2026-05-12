@@ -79,8 +79,8 @@ Then open:
   selection proxies, OrbitControls, and TransformControls. SVG primitives still
   render through Canvas Path2D so this does not change the visual runtime target.
 - The editor can save and load the current camera and scene nodes as scene
-  document v1. Animation data is reserved as an empty `{ fps: 24, duration: 0,
-  tracks: [] }` block until the timeline exists.
+  document v2. Animation data is reserved as `{ fps: 24, activeClipId: null,
+  clips: [] }` until the timeline exists.
 
 ## Primitive SVG Assets
 
