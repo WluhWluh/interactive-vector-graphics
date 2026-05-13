@@ -967,9 +967,14 @@ function syncNodeFromViewport(nodeId: string): void {
     applyWorldTransformToPrefabNode(node, worldNode);
     loadedPrefabId = null;
 
-    if (node.kind === "group") {
-      rebuildViewportProxies();
-    }
+    /**
+     * TransformControls fires continuously while the user drags a handle. Do
+     * not rebuild the proxy scene here: clearing and recreating the selected
+     * Three object detaches the active handle and makes group dragging feel like
+     * it stops after a tiny movement. Instead, keep the selected proxy alive and
+     * only refresh the world-space transforms of the other prefab proxies.
+     */
+    syncPrefabProxyWorldTransforms(node.id);
 
     return;
   }
@@ -1003,6 +1008,27 @@ function syncSelectionFromSceneNode(): void {
     selectedAssetId = node.assetId;
   } else {
     selectedPrefabId = node.prefabId;
+  }
+}
+
+function syncPrefabProxyWorldTransforms(exceptNodeId: string | null = null): void {
+  const worldTransforms = getPrefabWorldTransforms(prefabNodes);
+
+  for (const node of prefabNodes) {
+    if (node.id === exceptNodeId) {
+      continue;
+    }
+
+    const worldTransform = worldTransforms.get(node.id);
+
+    if (!worldTransform) {
+      continue;
+    }
+
+    threeViewport.syncProxyFromNode({
+      id: node.id,
+      ...matrixToTransform(worldTransform),
+    });
   }
 }
 
