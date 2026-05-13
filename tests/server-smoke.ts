@@ -67,6 +67,13 @@ try {
   assert.ok(firstAsset.bezierPath.segments.length >= 3);
   assert.deepEqual(firstAsset.bezierPath.segments[0]?.anchor, [-50, 0]);
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
+  const normalizedFilledSvg = await readFile(
+    join(tempDataDir, firstAsset.sourcePath),
+    "utf8",
+  );
+
+  assert.match(normalizedFilledSvg, /fill-rule="nonzero"/);
+  assert.match(normalizedFilledSvg, /d="M -50 0 C -50 -33 -21 -50 0 -50/);
 
   const roundTripPathD = structuredBezierToPathD(firstAsset.bezierPath);
   const reparsedRoundTrip = parsePathDToStructuredBezier(roundTripPathD, {
@@ -102,6 +109,66 @@ try {
   assert.equal(strokeAsset.bezierPath.closed, false);
   assert.equal(strokeAsset.bezierPath.segments.length, 2);
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 3);
+  const normalizedStrokeSvg = await readFile(
+    join(tempDataDir, strokeAsset.sourcePath),
+    "utf8",
+  );
+
+  assert.match(normalizedStrokeSvg, /stroke-linecap="round"/);
+  assert.match(normalizedStrokeSvg, /stroke-linejoin="round"/);
+
+  const editedFilledBezier = cloneStructuredBezierPathForTest(
+    firstAsset.bezierPath,
+  );
+  editedFilledBezier.segments[0] = {
+    ...editedFilledBezier.segments[0]!,
+    anchor: [-45, 5],
+  };
+  const updatedFilledAsset = await store.updatePrimitiveAssetPath(
+    firstProject.id,
+    firstAsset.id,
+    editedFilledBezier,
+  );
+
+  assert.deepEqual(updatedFilledAsset.bezierPath.segments[0]?.anchor, [-45, 5]);
+  assert.match(updatedFilledAsset.pathD, /^M -45 5/);
+  assert.match(
+    await readFile(join(tempDataDir, firstAsset.sourcePath), "utf8"),
+    /d="M -45 5/,
+  );
+
+  const editedStrokeBezier = cloneStructuredBezierPathForTest(
+    strokeAsset.bezierPath,
+  );
+  editedStrokeBezier.segments[1] = {
+    ...editedStrokeBezier.segments[1]!,
+    handleIn: [-30, -20],
+  };
+  const updatedStrokeAsset = await store.updatePrimitiveAssetPath(
+    firstProject.id,
+    strokeAsset.id,
+    editedStrokeBezier,
+  );
+
+  assert.equal(updatedStrokeAsset.bezierPath.closed, false);
+  assert.deepEqual(updatedStrokeAsset.bezierPath.segments[1]?.handleIn, [-30, -20]);
+  assert.doesNotMatch(updatedStrokeAsset.pathD, /Z$/);
+  await assert.rejects(
+    () =>
+      store.updatePrimitiveAssetPath(firstProject.id, firstAsset.id, {
+        ...firstAsset.bezierPath,
+        closed: false,
+      }),
+    /must be closed/,
+  );
+  await assert.rejects(
+    () =>
+      store.updatePrimitiveAssetPath(firstProject.id, strokeAsset.id, {
+        ...strokeAsset.bezierPath,
+        closed: true,
+      }),
+    /must be open/,
+  );
 
   const styledStrokeSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
@@ -904,5 +971,20 @@ function createBezierSegment(
     anchor,
     handleIn: [0, 0],
     handleOut: [0, 0],
+  };
+}
+
+function cloneStructuredBezierPathForTest(
+  path: StructuredBezierPath,
+): StructuredBezierPath {
+  return {
+    version: 1,
+    closed: path.closed,
+    segments: path.segments.map((segment) => ({
+      id: segment.id,
+      anchor: [...segment.anchor],
+      handleIn: [...segment.handleIn],
+      handleOut: [...segment.handleOut],
+    })),
   };
 }

@@ -253,6 +253,34 @@ export async function deleteAsset(
   assertOk(response, body.error);
 }
 
+export async function updateAssetPath(
+  projectId: string,
+  assetId: string,
+  bezierPath: StructuredBezierPath,
+): Promise<PrimitiveSvgAsset> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/path`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ bezierPath }),
+    },
+  );
+  const body = (await response.json()) as {
+    asset?: StoredPrimitiveAssetDto;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.asset) {
+    throw new Error("Asset API did not return an updated asset.");
+  }
+
+  return hydratePrimitiveAsset(body.asset);
+}
+
 export async function listPrefabs(projectId: string): Promise<PrefabRecord[]> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/prefabs`,

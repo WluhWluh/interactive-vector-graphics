@@ -163,6 +163,91 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await expect(page.locator("#inspector-fields")).toContainText("#ffcf4a");
   await expect(page.locator("#inspector-fields")).toContainText("Bezier Segments");
   await expect(page.locator("#inspector-fields")).toContainText("Closed Path");
+  await expect(page.locator("#inspector-fields")).toContainText("Source Path Edit");
+  const originalUploadedAnchor = await page.evaluate(() => {
+    const asset = window.__vectorEditorDebug
+      ?.getAssets()
+      .find((candidate) => candidate.id === "uploaded-face");
+
+    return asset?.bezierPath.segments[0]?.anchor ?? null;
+  });
+
+  await page.getByRole("button", { name: "Source Path Edit" }).click();
+  await expect(page.getByRole("button", { name: "Fill: uploaded-face" })).toBeVisible();
+  await page.locator("#edit-path-button").click();
+  await expect(page.locator("#save-path-button")).toBeVisible();
+  await expect(page.getByLabel("Path anchor X")).toHaveValue("-50");
+
+  const initialPathEditState = await page.evaluate(
+    () => window.__vectorEditorDebug?.getPathEditState() ?? null,
+  );
+
+  expect(initialPathEditState).toMatchObject({
+    assetId: "uploaded-face",
+    selectedSegmentId: "seg-1",
+    selectedComponent: "anchor",
+    hasDraft: true,
+  });
+
+  const firstAnchorScreenPoint = await page.evaluate(() =>
+    window.__vectorEditorDebug
+      ?.getPathEditState()
+      .controls.find(
+        (control) =>
+          control.segmentId === "seg-1" && control.component === "anchor",
+      ) ?? null,
+  );
+
+  expect(firstAnchorScreenPoint).not.toBeNull();
+  await page.getByLabel("Path anchor X").fill("-42");
+  await page.getByLabel("Path anchor X").blur();
+  await expect(page.getByLabel("Path anchor X")).toHaveValue("-42");
+
+  const draggedPathEditState = await page.evaluate(
+    () => window.__vectorEditorDebug?.getPathEditState() ?? null,
+  );
+
+  expect(draggedPathEditState?.draftBezierPath?.segments[0]?.anchor).toEqual([
+    -42,
+    0,
+  ]);
+  await page.locator("#save-path-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getPathEditState().hasDraft ?? true,
+      ),
+    )
+    .toBe(false);
+  await expect(page.locator("#edit-path-button")).toBeVisible();
+
+  const savedPathState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+
+    return {
+      pathEdit: debug?.getPathEditState() ?? null,
+      anchor: asset?.bezierPath.segments[0]?.anchor ?? null,
+      pathD: asset?.pathD ?? "",
+    };
+  });
+
+  expect(savedPathState.pathEdit?.hasDraft).toBe(false);
+  expect(savedPathState.anchor).not.toEqual(originalUploadedAnchor);
+  expect(savedPathState.pathD).toContain(`M ${savedPathState.anchor?.[0]}`);
+  await page.locator("#edit-path-button").click();
+  await page.getByLabel("Path anchor X").fill("not-a-number");
+  await page.getByLabel("Path anchor X").blur();
+  await expect(page.getByLabel("Path anchor X")).not.toHaveValue("not-a-number");
+  await page.locator("#cancel-path-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getPathEditState().hasDraft ?? true,
+      ),
+    )
+    .toBe(false);
+  await page.getByRole("button", { name: "Asset Assembly" }).click();
   await expect(page.getByRole("button", { name: "Group: Root Group" })).toBeVisible();
   await page.getByRole("button", { name: "Group: Root Group" }).click();
   await expect(page.locator("#delete-prefab-node-button")).toBeDisabled();
@@ -812,6 +897,37 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
   await expect(page.locator("#inspector-fields")).toContainText("12");
   await expect(page.locator("#inspector-fields")).toContainText("Bezier Segments");
   await expect(page.locator("#inspector-fields")).toContainText("Closed Path");
+  await page.getByRole("button", { name: "Source Path Edit" }).click();
+  await page.locator("#edit-path-button").click();
+
+  const secondHandleScreenPoint = await page.evaluate(() =>
+    window.__vectorEditorDebug
+      ?.getPathEditState()
+      .controls.find(
+        (control) =>
+          control.segmentId === "seg-2" && control.component === "handleIn",
+      ) ?? null,
+  );
+
+  expect(secondHandleScreenPoint).not.toBeNull();
+  const strokePaperBox = await page.locator("#paper-canvas").boundingBox();
+  expect(strokePaperBox).not.toBeNull();
+  await page.mouse.click(
+    strokePaperBox!.x + secondHandleScreenPoint!.x,
+    strokePaperBox!.y + secondHandleScreenPoint!.y,
+  );
+  await expect(page.getByLabel("Path handleIn X")).toBeVisible();
+  await page.getByLabel("Path handleIn X").fill("-24");
+  await page.getByLabel("Path handleIn X").blur();
+  await page.locator("#save-path-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getPathEditState().hasDraft ?? true,
+      ),
+    )
+    .toBe(false);
+  await expect(page.locator("#edit-path-button")).toBeVisible();
 
   const strokeState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -836,6 +952,7 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
   expect(strokeState.selectedAssetId).toBe("leg-stroke");
   expect(await countTealPixels(page.locator("#vector-canvas"))).toBeGreaterThan(300);
 
+  await page.getByRole("button", { name: "Asset Assembly" }).click();
   await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
   await expect(page.getByRole("button", { name: /Primitive: leg-stroke/ })).toBeVisible();
   await expect(await countTealPixels(page.locator("#vector-canvas"))).toBeGreaterThan(300);

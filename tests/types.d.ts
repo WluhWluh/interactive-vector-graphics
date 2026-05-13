@@ -52,7 +52,7 @@ declare global {
       getSelectedProjectId: () => string | null;
       getSelectedAssetId: () => string | null;
       getLastImportError: () => string | null;
-      getEditorMode: () => "asset" | "scene";
+      getEditorMode: () => "asset" | "path" | "scene";
       getPrefabs: () => Array<{
         id: string;
         projectId: string;
@@ -124,6 +124,19 @@ declare global {
           billboardMode: "spherical";
         }>;
       };
+      getPathEditState: () => {
+        assetId: string | null;
+        selectedSegmentId: string | null;
+        selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
+        hasDraft: boolean;
+        draftBezierPath: StructuredBezierPathDebug | null;
+        controls: Array<{
+          segmentId: string;
+          component: "anchor" | "handleIn" | "handleOut";
+          x: number;
+          y: number;
+        }>;
+      };
       getExperimentScene: () => {
         camera: {
           projection: "perspective" | "orthographic";
@@ -171,6 +184,7 @@ declare global {
         | "primitive-assets"
         | "prefabs"
         | "prefab-contents"
+        | "source-path-assets"
         | "scene-documents"
         | "scene-contents"
       >;

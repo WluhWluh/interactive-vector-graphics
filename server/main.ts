@@ -4,6 +4,7 @@ import { createDataStore, getDefaultDataDir, getServerPort } from "./dataStore";
 import { validatePrefabDocument } from "./prefabDocument";
 import { importPrimitiveSvgOnServer } from "./primitiveSvgImport";
 import { validateSceneDocument } from "./sceneDocument";
+import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
 import type {
   AssetsResponse,
   CreateAssetResponse,
@@ -16,6 +17,7 @@ import type {
   ProjectsResponse,
   SceneDetailResponse,
   ScenesResponse,
+  UpdateAssetPathResponse,
 } from "./types";
 
 const dataStore = createDataStore(getDefaultDataDir());
@@ -157,6 +159,29 @@ server.delete<{
   } catch (error) {
     reply.code(404);
     return { error: error instanceof Error ? error.message : "Asset not found." };
+  }
+});
+
+server.put<{
+  Params: { projectId: string; assetId: string };
+  Body: { bezierPath?: unknown };
+  Reply: UpdateAssetPathResponse | { error: string };
+}>("/api/projects/:projectId/assets/:assetId/path", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const asset = await dataStore.updatePrimitiveAssetPath(
+      request.params.projectId,
+      request.params.assetId,
+      request.body?.bezierPath as StructuredBezierPath,
+    );
+
+    return { asset };
+  } catch (error) {
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Asset path update failed.",
+    };
   }
 });
 

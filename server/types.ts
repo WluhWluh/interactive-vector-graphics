@@ -174,6 +174,10 @@ export type CreateAssetResponse = {
   asset: StoredPrimitiveAsset;
 };
 
+export type UpdateAssetPathResponse = {
+  asset: StoredPrimitiveAsset;
+};
+
 export type PrefabsResponse = {
   prefabs: PrefabRecord[];
 };

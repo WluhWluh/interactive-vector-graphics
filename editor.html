@@ -16,6 +16,9 @@
           <button id="asset-mode-button" class="editor-button" type="button">
             Asset Assembly
           </button>
+          <button id="path-mode-button" class="editor-button" type="button">
+            Source Path Edit
+          </button>
           <button id="scene-mode-button" class="editor-button" type="button">
             Scene Layout
           </button>
@@ -201,6 +204,47 @@
               >
                 Delete Prefab Node
               </button>
+            </div>
+          </section>
+        </section>
+
+        <section id="path-mode-panel" class="mode-panel">
+          <section
+            class="collapsible-module"
+            data-collapsible-module="source-path-assets"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h2>Source Path Assets</h2>
+                <span>Asset source curves</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Source Path Assets"
+                aria-expanded="true"
+                data-module-collapse-button="source-path-assets"
+              >
+                鈻?              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <ul
+                id="path-asset-list"
+                class="asset-list"
+                aria-label="Source path assets"
+              ></ul>
+              <div class="source-path-actions">
+                <button id="edit-path-button" class="editor-button" type="button">
+                  Edit Path
+                </button>
+                <button id="save-path-button" class="editor-button" type="button">
+                  Save Path
+                </button>
+                <button id="cancel-path-button" class="danger-button" type="button">
+                  Cancel
+                </button>
+              </div>
+              <div id="path-edit-fields" class="path-edit-panel"></div>
             </div>
           </section>
         </section>

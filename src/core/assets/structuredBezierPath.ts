@@ -102,14 +102,20 @@ export function cloneStructuredBezierPath(
 }
 
 export function validateStructuredBezierPath(
-  path: StructuredBezierPath,
+  path: unknown,
   options: { expectedClosed: boolean },
 ): StructuredBezierPath {
-  if (path.version !== 1) {
+  if (!path || typeof path !== "object") {
+    throw new StructuredBezierPathError("structured Bezier path must be an object");
+  }
+
+  const candidate = path as Partial<StructuredBezierPath>;
+
+  if (candidate.version !== 1) {
     throw new StructuredBezierPathError("structured Bezier path version must be 1");
   }
 
-  if (path.closed !== options.expectedClosed) {
+  if (candidate.closed !== options.expectedClosed) {
     throw new StructuredBezierPathError(
       options.expectedClosed
         ? "structured Bezier path must be closed"
@@ -119,14 +125,17 @@ export function validateStructuredBezierPath(
 
   const minimumSegments = options.expectedClosed ? 3 : 2;
 
-  if (!Array.isArray(path.segments) || path.segments.length < minimumSegments) {
+  if (
+    !Array.isArray(candidate.segments) ||
+    candidate.segments.length < minimumSegments
+  ) {
     throw new StructuredBezierPathError(
       `structured Bezier path must contain at least ${minimumSegments} segments`,
     );
   }
 
   const ids = new Set<string>();
-  const segments = path.segments.map((segment, index) => {
+  const segments = candidate.segments.map((segment, index) => {
     if (typeof segment.id !== "string" || !segment.id.trim()) {
       throw new StructuredBezierPathError("Bezier segment id is required");
     }
@@ -152,7 +161,7 @@ export function validateStructuredBezierPath(
 
   return {
     version: 1,
-    closed: path.closed,
+    closed: candidate.closed,
     segments,
   };
 }

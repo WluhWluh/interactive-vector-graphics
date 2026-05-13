@@ -10,6 +10,7 @@ import type {
   SceneRecord,
   StoredPrimitiveAsset,
 } from "./types";
+import { createNormalizedPrimitiveSvg } from "../src/core/assets/primitiveAssetSvg";
 import {
   parsePathDToStructuredBezier,
   validateStructuredBezierPath,
@@ -67,6 +68,11 @@ export type DataStore = {
   createPrimitiveAsset: (
     input: CreatePrimitiveAssetInput,
   ) => Promise<StoredPrimitiveAsset>;
+  updatePrimitiveAssetPath: (
+    projectId: string,
+    assetId: string,
+    bezierPath: StructuredBezierPath,
+  ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
   listPrefabs: (projectId: string) => PrefabRecord[];
   createPrefab: (input: CreatePrefabInput) => Promise<PrefabRecord>;
@@ -101,9 +107,8 @@ export function createDataStore(dataDir: string): DataStore {
 
   /**
    * Runtime project data is intentionally kept outside Git. SQLite stores the
-   * searchable metadata, while the original uploaded SVG text stays beside the
-   * project so future tools can inspect or migrate assets without decoding DB
-   * blobs.
+   * searchable metadata, while normalized SVG files stay beside each project so
+   * future tools can inspect project-native assets without decoding DB blobs.
    */
   mkdirSync(resolvedDataDir, { recursive: true });
   const database = new DatabaseSync(databasePath);
@@ -258,6 +263,15 @@ export function createDataStore(dataDir: string): DataStore {
       `${assetId}.svg`,
     );
     const relativeSourcePath = toDataRelativePath(sourcePath);
+    const normalized = createNormalizedPrimitiveSvg({
+      assetKind: input.assetKind,
+      viewBox: input.viewBox,
+      bezierPath: input.bezierPath,
+      fill: input.fill,
+      fillRule: input.fillRule,
+      stroke: input.stroke,
+      strokeWidth: input.strokeWidth,
+    });
     const asset: StoredPrimitiveAsset = {
       id: assetId,
       projectId: input.projectId,
@@ -266,7 +280,7 @@ export function createDataStore(dataDir: string): DataStore {
       sourcePath: relativeSourcePath,
       assetKind: input.assetKind,
       viewBox: input.viewBox,
-      pathD: input.pathD,
+      pathD: normalized.pathD,
       fill: input.fill,
       fillRule: input.fillRule,
       stroke: input.stroke,
@@ -277,7 +291,7 @@ export function createDataStore(dataDir: string): DataStore {
     };
 
     await mkdir(dirname(sourcePath), { recursive: true });
-    await writeFile(sourcePath, input.svgText, "utf8");
+    await writeFile(sourcePath, normalized.svgText, "utf8");
     database
       .prepare(
         `
@@ -308,6 +322,57 @@ export function createDataStore(dataDir: string): DataStore {
       );
 
     return asset;
+  }
+
+  async function updatePrimitiveAssetPath(
+    projectId: string,
+    assetId: string,
+    bezierPath: StructuredBezierPath,
+  ): Promise<StoredPrimitiveAsset> {
+    const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
+    const expectedClosed = existingAsset.assetKind === "filledPath";
+    const validatedBezierPath = validateStructuredBezierPath(bezierPath, {
+      expectedClosed,
+    });
+    const normalized = createNormalizedPrimitiveSvg({
+      assetKind: existingAsset.assetKind,
+      viewBox: existingAsset.viewBox,
+      bezierPath: validatedBezierPath,
+      fill: existingAsset.fill,
+      fillRule: existingAsset.fillRule,
+      stroke: existingAsset.stroke,
+      strokeWidth: existingAsset.strokeWidth,
+    });
+    const timestamp = new Date().toISOString();
+    const updatedAsset: StoredPrimitiveAsset = {
+      ...existingAsset,
+      pathD: normalized.pathD,
+      bezierPath: validatedBezierPath,
+      updatedAt: timestamp,
+    };
+
+    await writeFile(
+      join(resolvedDataDir, existingAsset.sourcePath),
+      normalized.svgText,
+      "utf8",
+    );
+    database
+      .prepare(
+        `
+        UPDATE primitive_assets
+        SET pathD = ?, bezierPath = ?, updatedAt = ?
+        WHERE projectId = ? AND id = ?
+      `,
+      )
+      .run(
+        updatedAsset.pathD,
+        JSON.stringify(updatedAsset.bezierPath),
+        updatedAsset.updatedAt,
+        projectId,
+        assetId,
+      );
+
+    return updatedAsset;
   }
 
   async function deletePrimitiveAsset(
@@ -593,6 +658,31 @@ export function createDataStore(dataDir: string): DataStore {
     return row;
   }
 
+  function getPrimitiveAssetRecord(
+    projectId: string,
+    assetId: string,
+  ): StoredPrimitiveAsset {
+    assertProjectExists(projectId);
+
+    const row = database
+      .prepare(
+        `
+        SELECT id, projectId, name, sourceFilename, sourcePath, assetKind,
+          viewBox, pathD, fill, fillRule, stroke, strokeWidth, bezierPath,
+          createdAt, updatedAt
+        FROM primitive_assets
+        WHERE projectId = ? AND id = ?
+      `,
+      )
+      .get(projectId, assetId) as StoredPrimitiveAssetRow | undefined;
+
+    if (!row) {
+      throw new Error(`Primitive asset "${assetId}" does not exist.`);
+    }
+
+    return hydratePrimitiveAssetRow(row);
+  }
+
   function assertProjectExists(projectId: string): void {
     const row = database
       .prepare("SELECT id FROM projects WHERE id = ?")
@@ -657,6 +747,7 @@ export function createDataStore(dataDir: string): DataStore {
     deleteProject,
     listPrimitiveAssets,
     createPrimitiveAsset,
+    updatePrimitiveAssetPath,
     deletePrimitiveAsset,
     listPrefabs,
     createPrefab,

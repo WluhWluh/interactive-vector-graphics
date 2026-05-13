@@ -1,7 +1,13 @@
 import "../styles.css";
 import { Euler, Matrix4, Quaternion, Vector3 } from "three";
 import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
-import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
+import {
+  cloneStructuredBezierPath,
+  structuredBezierToPathD,
+  type BezierPoint,
+  type BezierSegment,
+  type StructuredBezierPath,
+} from "../core/assets/structuredBezierPath";
 import { CanvasStage } from "../core/stage/canvasStage";
 import {
   drawCenteredStatus,
@@ -23,6 +29,7 @@ import {
   listScenes,
   savePrefab,
   saveScene,
+  updateAssetPath,
   uploadAsset,
   type PrefabAnimation,
   type PrefabAnimationKeyframe,
@@ -49,7 +56,7 @@ import {
   type Vector3Tuple,
 } from "./threeEditorViewport";
 
-type EditorMode = "asset" | "scene";
+type EditorMode = "asset" | "path" | "scene";
 type TransformProperty = "position" | "rotation" | "scale";
 type TimelineVectorProperty = PrefabTrackProperty;
 type TimelinePointerDrag = {
@@ -63,18 +70,40 @@ type PendingPrefabClipboard = {
   mode: PrefabClipboardMode;
   sourceNodeId: string;
 };
+type PathEditComponent = "anchor" | "handleIn" | "handleOut";
+type PathEditSelection = {
+  segmentId: string;
+  component: PathEditComponent;
+};
+type PathEditSession = {
+  assetId: string;
+  draft: StructuredBezierPath;
+  selected: PathEditSelection | null;
+};
+type PathEditDragState = {
+  segmentId: string;
+  component: PathEditComponent;
+};
+type PathEditControl = {
+  segmentId: string;
+  component: PathEditComponent;
+  point: BezierPoint;
+};
 type CollapsibleModuleId =
   | "projects"
   | "primitive-assets"
   | "prefabs"
   | "prefab-contents"
+  | "source-path-assets"
   | "scene-documents"
   | "scene-contents";
 
 type EditorElements = {
   assetModeButton: HTMLButtonElement;
+  pathModeButton: HTMLButtonElement;
   sceneModeButton: HTMLButtonElement;
   assetModePanel: HTMLElement;
+  pathModePanel: HTMLElement;
   sceneModePanel: HTMLElement;
   projectForm: HTMLFormElement;
   projectNameInput: HTMLInputElement;
@@ -124,6 +153,11 @@ type EditorElements = {
   deleteSceneButton: HTMLButtonElement;
   fileInput: HTMLInputElement;
   assetList: HTMLUListElement;
+  pathAssetList: HTMLUListElement;
+  editPathButton: HTMLButtonElement;
+  savePathButton: HTMLButtonElement;
+  cancelPathButton: HTMLButtonElement;
+  pathEditFields: HTMLDivElement;
   addNodeButton: HTMLButtonElement;
   addPrefabInstanceButton: HTMLButtonElement;
   deleteAssetButton: HTMLButtonElement;
@@ -163,6 +197,7 @@ const COLLAPSIBLE_MODULE_IDS: CollapsibleModuleId[] = [
   "primitive-assets",
   "prefabs",
   "prefab-contents",
+  "source-path-assets",
   "scene-documents",
   "scene-contents",
 ];
@@ -178,6 +213,7 @@ const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
 ];
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
+const PATH_EDIT_HIT_RADIUS = 10;
 
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
@@ -206,6 +242,8 @@ let selectedSceneId: string | null = null;
 let loadedSceneId: string | null = null;
 let selectedSceneNodeId: string | null = null;
 let pendingPrefabClipboard: PendingPrefabClipboard | null = null;
+let pathEditSession: PathEditSession | null = null;
+let pathEditDragState: PathEditDragState | null = null;
 let lastImportError: string | null = null;
 let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
@@ -255,6 +293,19 @@ declare global {
         selectedKeyframeId: string | null;
         evaluatedNodes: PrefabNode[];
       };
+      getPathEditState: () => {
+        assetId: string | null;
+        selectedSegmentId: string | null;
+        selectedComponent: PathEditComponent | null;
+        hasDraft: boolean;
+        draftBezierPath: StructuredBezierPath | null;
+        controls: Array<{
+          segmentId: string;
+          component: PathEditComponent;
+          x: number;
+          y: number;
+        }>;
+      };
       getExperimentScene: () => {
         camera: {
           projection: CameraProjection;
@@ -293,6 +344,9 @@ function bindEditorEvents(): void {
 
   elements.assetModeButton.addEventListener("click", () => {
     setEditorMode("asset");
+  });
+  elements.pathModeButton.addEventListener("click", () => {
+    setEditorMode("path");
   });
   elements.sceneModeButton.addEventListener("click", () => {
     setEditorMode("scene");
@@ -402,11 +456,25 @@ function bindEditorEvents(): void {
   elements.timelineDeleteKeyframeButton.addEventListener("click", () => {
     deleteSelectedTimelineKeyframe();
   });
+  window.addEventListener("pointerdown", (event) => {
+    selectPathEditControl(event);
+  });
+  window.addEventListener("mousedown", (event) => {
+    selectPathEditControl(event);
+  });
   window.addEventListener("pointermove", (event) => {
     dragSelectedTimelineKeyframe(event);
+    dragPathEditControl(event);
+  });
+  window.addEventListener("mousemove", (event) => {
+    dragPathEditControl(event);
   });
   window.addEventListener("pointerup", () => {
     timelinePointerDrag = null;
+    pathEditDragState = null;
+  });
+  window.addEventListener("mouseup", () => {
+    pathEditDragState = null;
   });
   elements.createSceneButton.addEventListener("click", () => {
     void createSceneFromInput("empty");
@@ -422,6 +490,19 @@ function bindEditorEvents(): void {
   });
   elements.deleteSceneButton.addEventListener("click", () => {
     void deleteSelectedScene();
+  });
+  elements.editPathButton.addEventListener("click", () => {
+    const asset = getSelectedAsset();
+
+    if (asset) {
+      startPathEditSession(asset);
+    }
+  });
+  elements.savePathButton.addEventListener("click", () => {
+    void savePathEditSession();
+  });
+  elements.cancelPathButton.addEventListener("click", () => {
+    cancelPathEditSession();
   });
   elements.fileInput.addEventListener("change", () => {
     void importSelectedFile();
@@ -463,7 +544,7 @@ function bindEditorEvents(): void {
       if (editorMode === "asset") {
         selectedPrefabNodeId = nodeId;
         syncSelectionFromPrefabNode();
-      } else {
+      } else if (editorMode === "scene") {
         selectedSceneNodeId = nodeId;
         syncSelectionFromSceneNode();
       }
@@ -472,6 +553,9 @@ function bindEditorEvents(): void {
       exposeEditorDebugHooks();
     },
     onObjectTransform: (nodeId) => {
+      if (editorMode === "path") {
+        return;
+      }
       syncNodeFromViewport(nodeId);
       renderEditorShell();
       exposeEditorDebugHooks();
@@ -523,6 +607,15 @@ async function refreshAssets(): Promise<void> {
     selectedAssetId,
     assets.map((asset) => asset.id),
   );
+  if (
+    pathEditSession &&
+    !assets.some((asset) => asset.id === pathEditSession?.assetId)
+  ) {
+    pathEditSession = null;
+    pathEditDragState = null;
+    setImportError(new Error("Path edit asset no longer exists."));
+    return;
+  }
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -639,6 +732,58 @@ async function deleteSelectedProject(): Promise<void> {
   }
 }
 
+async function savePathEditSession(): Promise<void> {
+  if (!selectedProjectId || !pathEditSession) {
+    return;
+  }
+
+  try {
+    const updatedAsset = await updateAssetPath(
+      selectedProjectId,
+      pathEditSession.assetId,
+      pathEditSession.draft,
+    );
+    assets = assets.map((asset) =>
+      asset.id === updatedAsset.id ? updatedAsset : asset,
+    );
+    selectedAssetId = updatedAsset.id;
+    pathEditSession = null;
+    pathEditDragState = null;
+    lastImportError = null;
+    hideError();
+    rebuildViewportProxies();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  } catch (error) {
+    setImportError(error);
+  }
+}
+
+function startPathEditSession(asset: PrimitiveSvgAsset): void {
+  selectedAssetId = asset.id;
+  editorMode = "path";
+  pathEditSession = {
+    assetId: asset.id,
+    draft: cloneStructuredBezierPath(asset.bezierPath),
+    selected: {
+      segmentId: asset.bezierPath.segments[0]?.id ?? "",
+      component: "anchor",
+    },
+  };
+  pathEditDragState = null;
+  lastImportError = null;
+  hideError();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function cancelPathEditSession(): void {
+  pathEditSession = null;
+  pathEditDragState = null;
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
 async function importSelectedFile(): Promise<void> {
   const file = elements.fileInput.files?.[0];
 
@@ -672,6 +817,10 @@ async function deleteSelectedAsset(): Promise<void> {
 
   try {
     await deleteAsset(selectedProjectId, selectedAssetId);
+    if (pathEditSession?.assetId === selectedAssetId) {
+      pathEditSession = null;
+      pathEditDragState = null;
+    }
     selectedAssetId = null;
     lastImportError = null;
     hideError();
@@ -1039,6 +1188,8 @@ function clearProjectWorkspace(): void {
   selectedSceneId = null;
   loadedSceneId = null;
   selectedSceneNodeId = null;
+  pathEditSession = null;
+  pathEditDragState = null;
   nextPrefabNodeNumber = 1;
   nextSceneNodeNumber = 1;
   threeViewport.clearNodes();
@@ -1048,6 +1199,7 @@ function clearSceneLayout(): void {
   sceneNodes = [];
   selectedSceneNodeId = null;
   loadedSceneId = null;
+  pathEditDragState = null;
   nextSceneNodeNumber = 1;
 
   if (editorMode === "scene") {
@@ -2070,8 +2222,10 @@ function getModuleCollapseButton(moduleId: CollapsibleModuleId): HTMLButtonEleme
 function getEditorElements(): EditorElements {
   return {
     assetModeButton: getRequiredElement("asset-mode-button", HTMLButtonElement),
+    pathModeButton: getRequiredElement("path-mode-button", HTMLButtonElement),
     sceneModeButton: getRequiredElement("scene-mode-button", HTMLButtonElement),
     assetModePanel: getRequiredElement("asset-mode-panel", HTMLElement),
+    pathModePanel: getRequiredElement("path-mode-panel", HTMLElement),
     sceneModePanel: getRequiredElement("scene-mode-panel", HTMLElement),
     projectForm: getRequiredElement("project-form", HTMLFormElement),
     projectNameInput: getRequiredElement("project-name-input", HTMLInputElement),
@@ -2211,6 +2365,11 @@ function getEditorElements(): EditorElements {
     ),
     fileInput: getRequiredElement("svg-file-input", HTMLInputElement),
     assetList: getRequiredElement("asset-list", HTMLUListElement),
+    pathAssetList: getRequiredElement("path-asset-list", HTMLUListElement),
+    editPathButton: getRequiredElement("edit-path-button", HTMLButtonElement),
+    savePathButton: getRequiredElement("save-path-button", HTMLButtonElement),
+    cancelPathButton: getRequiredElement("cancel-path-button", HTMLButtonElement),
+    pathEditFields: getRequiredElement("path-edit-fields", HTMLDivElement),
     addNodeButton: getRequiredElement("add-node-button", HTMLButtonElement),
     addPrefabInstanceButton: getRequiredElement(
       "add-prefab-instance-button",
@@ -2263,17 +2422,24 @@ function getRequiredElement<T extends HTMLElement>(
 function renderEditorShell(): void {
   renderProjectList();
   renderAssetList();
+  renderPathAssetList();
   renderPrefabList();
   renderPrefabNodeList();
   renderPrefabTimeline();
   renderSceneList();
   renderSceneNodeList();
+  renderSourcePathEditPanel();
   renderInspector();
   renderCollapsibleModules();
   elements.assetModePanel.hidden = editorMode !== "asset";
+  elements.pathModePanel.hidden = editorMode !== "path";
   elements.sceneModePanel.hidden = editorMode !== "scene";
   elements.assetModeButton.dataset.selected = String(editorMode === "asset");
+  elements.pathModeButton.dataset.selected = String(editorMode === "path");
   elements.sceneModeButton.dataset.selected = String(editorMode === "scene");
+  document.body.dataset.pathEditActive = String(
+    editorMode === "path" && Boolean(pathEditSession),
+  );
   elements.fileInput.disabled = !selectedProjectId;
   elements.deleteProjectButton.disabled = !selectedProjectId;
   elements.prefabNameInput.disabled = !selectedProjectId;
@@ -2322,6 +2488,9 @@ function renderEditorShell(): void {
   elements.addPrefabInstanceButton.disabled = !selectedProjectId || !selectedPrefabId;
   elements.deleteAssetButton.disabled = !selectedProjectId || !selectedAssetId;
   elements.deleteSceneNodeButton.disabled = !selectedSceneNodeId;
+  elements.editPathButton.disabled = !selectedProjectId || !selectedAssetId;
+  elements.savePathButton.disabled = !pathEditSession;
+  elements.cancelPathButton.disabled = !pathEditSession;
   elements.projectionToggleButton.textContent =
     threeViewport.currentProjection === "perspective"
       ? "Perspective"
@@ -2378,6 +2547,32 @@ function renderAssetList(): void {
       button.textContent = `${asset.assetKind === "strokePath" ? "Stroke" : "Fill"}: ${asset.name}`;
       button.addEventListener("click", () => {
         selectedAssetId = asset.id;
+        renderEditorShell();
+        exposeEditorDebugHooks();
+      });
+
+      item.append(button);
+      return item;
+    }),
+  );
+}
+
+function renderPathAssetList(): void {
+  elements.pathAssetList.replaceChildren(
+    ...assets.map((asset) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+
+      button.type = "button";
+      button.className = "asset-list-item";
+      button.dataset.selected = String(asset.id === selectedAssetId);
+      button.textContent = `${asset.assetKind === "strokePath" ? "Stroke" : "Fill"}: ${asset.name}`;
+      button.addEventListener("click", () => {
+        selectedAssetId = asset.id;
+        if (pathEditSession && pathEditSession.assetId !== asset.id) {
+          pathEditSession = null;
+          pathEditDragState = null;
+        }
         renderEditorShell();
         exposeEditorDebugHooks();
       });
@@ -2710,6 +2905,47 @@ function renderSceneNodeList(): void {
   );
 }
 
+function renderSourcePathEditPanel(): void {
+  elements.pathEditFields.replaceChildren();
+
+  const selectedAsset = getSelectedAsset();
+  const status = document.createElement("span");
+  status.className = "path-edit-status";
+
+  if (!selectedProjectId) {
+    status.textContent = "Create or select a project";
+    elements.pathEditFields.append(status);
+    return;
+  }
+
+  if (!selectedAsset) {
+    status.textContent = "Select a primitive asset";
+    elements.pathEditFields.append(status);
+    return;
+  }
+
+  if (!pathEditSession || pathEditSession.assetId !== selectedAsset.id) {
+    status.textContent = "Click Edit Path to edit the selected asset source.";
+    elements.pathEditFields.append(status);
+    return;
+  }
+
+  const selectedSegment = getSelectedPathEditSegment();
+  status.textContent = pathEditSession.selected
+    ? `${pathEditSession.selected.segmentId} / ${pathEditSession.selected.component}`
+    : "Select an anchor or handle";
+  elements.pathEditFields.append(status);
+
+  if (selectedSegment && pathEditSession.selected) {
+    elements.pathEditFields.append(
+      createPathEditPointInputRow(
+        selectedSegment,
+        pathEditSession.selected.component,
+      ),
+    );
+  }
+}
+
 function renderInspector(): void {
   elements.inspectorFields.replaceChildren();
 
@@ -2721,14 +2957,14 @@ function renderInspector(): void {
     return;
   }
 
-  appendInspectorRow("Mode", editorMode === "asset" ? "Asset Assembly" : "Scene Layout");
+  appendInspectorRow("Mode", getEditorModeLabel(editorMode));
   appendInspectorRow("Project", selectedProject.name);
   appendInspectorRow("Project ID", selectedProject.id);
   appendInspectorRow("Projection", camera.projection);
   appendInspectorRow("Camera Pos", camera.position.join(", "));
   appendInspectorRow("Camera Target", camera.target.join(", "));
 
-  if (editorMode === "asset") {
+  if (editorMode === "asset" || editorMode === "path") {
     renderAssetModeInspector();
   } else {
     renderSceneModeInspector();
@@ -2845,6 +3081,7 @@ function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
   }
 
   appendInspectorRow("Path Length", `${asset.pathD.length} chars`);
+  appendInspectorRow("Source Path Edit", "Use the Source Path Edit mode");
 }
 
 function appendInspectorRow(label: string, value: string): void {
@@ -2854,6 +3091,86 @@ function appendInspectorRow(label: string, value: string): void {
   term.textContent = label;
   description.textContent = value;
   elements.inspectorFields.append(term, description);
+}
+
+function createPathEditPointInputRow(
+  segment: BezierSegment,
+  component: PathEditComponent,
+): HTMLDivElement {
+  const row = document.createElement("div");
+  const point = getPathEditComponentPoint(segment, component);
+
+  row.className = "path-edit-point-row";
+
+  point.forEach((value, axisIndex) => {
+    const input = document.createElement("input");
+    const axisName = axisIndex === 0 ? "X" : "Y";
+
+    input.className = "transform-number-input";
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.ariaLabel = `Path ${component} ${axisName}`;
+    input.value = formatTransformValue(value);
+    input.addEventListener("focus", () => {
+      input.dataset.previousValue = input.value;
+    });
+    input.addEventListener("blur", () => {
+      applyPathEditPointInput(input, segment.id, component, axisIndex);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        input.blur();
+      }
+
+      if (event.key === "Escape") {
+        input.value = input.dataset.previousValue ?? formatTransformValue(value);
+        input.blur();
+      }
+    });
+
+    row.append(input);
+  });
+
+  return row;
+}
+
+function applyPathEditPointInput(
+  input: HTMLInputElement,
+  segmentId: string,
+  component: PathEditComponent,
+  axisIndex: number,
+): void {
+  const segment = getPathEditSegment(segmentId);
+  const parsedValue = Number(input.value.trim());
+
+  if (!segment || !Number.isFinite(parsedValue)) {
+    restorePathEditPointInput(input, segment, component, axisIndex);
+    return;
+  }
+
+  const point = getPathEditComponentPoint(segment, component);
+  point[axisIndex] = roundTransformValue(parsedValue);
+
+  if (component === "anchor") {
+    segment.anchor = point;
+  } else {
+    segment[component] = point;
+  }
+
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
+function restorePathEditPointInput(
+  input: HTMLInputElement,
+  segment: BezierSegment | null,
+  component: PathEditComponent,
+  axisIndex: number,
+): void {
+  const point = segment ? getPathEditComponentPoint(segment, component) : null;
+  input.value = point
+    ? formatTransformValue(point[axisIndex] ?? 0)
+    : (input.dataset.previousValue ?? "");
 }
 
 function appendTransformInspectorRow(
@@ -2961,6 +3278,11 @@ function tick(now: DOMHighResTimeStamp): void {
 
 function renderPreviewFrame(): void {
   stage.clearAll();
+  if (editorMode === "path") {
+    renderPathEditFrame();
+    return;
+  }
+
   threeViewport.render(stage.size);
 
   const context = stage.getLayer("vector-canvas").context;
@@ -2996,6 +3318,50 @@ function renderPreviewFrame(): void {
   }
 
   drawBillboards(context, drawables);
+}
+
+function renderPathEditFrame(): void {
+  const vectorContext = stage.getLayer("vector-canvas").context;
+  const paperContext = stage.getLayer("paper-canvas").context;
+  const asset = pathEditSession ? getAssetById(pathEditSession.assetId) : null;
+
+  if (!selectedProjectId) {
+    drawCenteredStatus(vectorContext, stage.size, "Create or select a project");
+    return;
+  }
+
+  if (!pathEditSession) {
+    const selectedAsset = getSelectedAsset();
+
+    if (selectedAsset) {
+      drawPrimitivePreview(vectorContext, stage.size, selectedAsset);
+      drawCenteredStatus(paperContext, stage.size, "Click Edit Path to edit source curves");
+      return;
+    }
+
+    drawCenteredStatus(vectorContext, stage.size, "Select a primitive asset");
+    return;
+  }
+
+  if (!asset) {
+    drawCenteredStatus(vectorContext, stage.size, "Source path asset is missing");
+    return;
+  }
+
+  const pathD = buildPathEditPathD(pathEditSession.draft);
+  const previewAsset = {
+    ...asset,
+    pathD,
+    path: new Path2D(pathD),
+    bezierPath: pathEditSession.draft,
+  };
+
+  drawPathEditPreview(vectorContext, previewAsset);
+  drawPathEditControls(paperContext, previewAsset, pathEditSession);
+}
+
+function buildPathEditPathD(path: StructuredBezierPath): string {
+  return path.segments.length > 0 ? structuredBezierToPathD(path) : "";
 }
 
 function getAssetAssemblyBillboards(): DrawableBillboard[] {
@@ -3226,6 +3592,317 @@ function drawPrimitiveAssetPath(
   context.fill(asset.path, asset.fillRule);
 }
 
+function drawPathEditControls(
+  context: CanvasRenderingContext2D,
+  asset: PrimitiveSvgAsset,
+  session: PathEditSession,
+): void {
+  const transform = getPathEditViewTransform(asset);
+  const controls = getPathEditControls(session.draft);
+
+  context.save();
+  context.font = "600 12px system-ui, sans-serif";
+
+  for (const segment of session.draft.segments) {
+    const anchor = pathPointToScreen(segment.anchor, transform);
+    const handleIn = pathPointToScreen(
+      addBezierPoints(segment.anchor, segment.handleIn),
+      transform,
+    );
+    const handleOut = pathPointToScreen(
+      addBezierPoints(segment.anchor, segment.handleOut),
+      transform,
+    );
+
+    drawPathEditHandleLine(context, anchor, handleIn);
+    drawPathEditHandleLine(context, anchor, handleOut);
+  }
+
+  for (const control of controls) {
+    const screenPoint = pathPointToScreen(control.point, transform);
+    const selected =
+      session.selected?.segmentId === control.segmentId &&
+      session.selected.component === control.component;
+
+    drawPathEditControlPoint(context, screenPoint, control.component, selected);
+  }
+
+  context.restore();
+}
+
+function drawPathEditPreview(
+  context: CanvasRenderingContext2D,
+  asset: PrimitiveSvgAsset,
+): void {
+  const transform = getPathEditViewTransform(asset);
+
+  context.save();
+  context.translate(transform.offsetX, transform.offsetY);
+  context.scale(transform.scale, transform.scale);
+  drawPrimitiveAssetPath(context, asset);
+  context.restore();
+}
+
+function drawPathEditHandleLine(
+  context: CanvasRenderingContext2D,
+  anchor: BezierPoint,
+  handle: BezierPoint,
+): void {
+  context.save();
+  context.strokeStyle = "rgba(238, 244, 255, 0.44)";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(anchor[0], anchor[1]);
+  context.lineTo(handle[0], handle[1]);
+  context.stroke();
+  context.restore();
+}
+
+function drawPathEditControlPoint(
+  context: CanvasRenderingContext2D,
+  point: BezierPoint,
+  component: PathEditComponent,
+  selected: boolean,
+): void {
+  context.save();
+  context.fillStyle = selected ? "#ffcf4a" : "#5bc4bf";
+  context.strokeStyle = "rgba(17, 24, 39, 0.86)";
+  context.lineWidth = 2;
+
+  if (component === "anchor") {
+    context.beginPath();
+    context.arc(point[0], point[1], selected ? 6 : 5, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  } else {
+    const size = selected ? 10 : 8;
+    context.fillRect(point[0] - size / 2, point[1] - size / 2, size, size);
+    context.strokeRect(point[0] - size / 2, point[1] - size / 2, size, size);
+  }
+
+  context.restore();
+}
+
+function selectPathEditControl(event: PointerEvent | MouseEvent): void {
+  if (editorMode !== "path" || !pathEditSession) {
+    return;
+  }
+
+  const asset = getAssetById(pathEditSession.assetId);
+
+  if (!asset) {
+    return;
+  }
+
+  const control = findNearestPathEditControl(
+    getCanvasPointerPoint(event),
+    asset,
+    pathEditSession,
+  );
+
+  if (!control) {
+    return;
+  }
+
+  pathEditSession.selected = {
+    segmentId: control.segmentId,
+    component: control.component,
+  };
+  pathEditDragState = {
+    segmentId: control.segmentId,
+    component: control.component,
+  };
+  event.preventDefault();
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
+function dragPathEditControl(event: PointerEvent | MouseEvent): void {
+  if (editorMode !== "path" || !pathEditSession || !pathEditDragState) {
+    return;
+  }
+
+  const asset = getAssetById(pathEditSession.assetId);
+  const segment = getPathEditSegment(pathEditDragState.segmentId);
+
+  if (!asset || !segment) {
+    pathEditDragState = null;
+    return;
+  }
+
+  const transform = getPathEditViewTransform(asset);
+  const pathPoint = screenPointToPath(getCanvasPointerPoint(event), transform);
+
+  if (pathEditDragState.component === "anchor") {
+    segment.anchor = pathPoint;
+  } else {
+    segment[pathEditDragState.component] = subtractBezierPoints(
+      pathPoint,
+      segment.anchor,
+    );
+  }
+
+  pathEditSession.selected = {
+    segmentId: pathEditDragState.segmentId,
+    component: pathEditDragState.component,
+  };
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
+function getCanvasPointerPoint(event: PointerEvent | MouseEvent): BezierPoint {
+  const canvas = stage.getLayer("paper-canvas").canvas;
+  const rect = canvas.getBoundingClientRect();
+
+  return [
+    roundTransformValue(event.clientX - rect.left),
+    roundTransformValue(event.clientY - rect.top),
+  ];
+}
+
+function findNearestPathEditControl(
+  screenPoint: BezierPoint,
+  asset: PrimitiveSvgAsset,
+  session: PathEditSession,
+): PathEditControl | null {
+  const transform = getPathEditViewTransform(asset);
+  const controls = getPathEditControls(session.draft);
+  let nearest: { control: PathEditControl; distance: number } | null = null;
+
+  for (const control of controls) {
+    const projected = pathPointToScreen(control.point, transform);
+    const distance = Math.hypot(
+      projected[0] - screenPoint[0],
+      projected[1] - screenPoint[1],
+    );
+
+    if (distance > PATH_EDIT_HIT_RADIUS) {
+      continue;
+    }
+
+    if (
+      !nearest ||
+      distance < nearest.distance ||
+      (distance === nearest.distance &&
+        nearest.control.component === "anchor" &&
+        control.component !== "anchor")
+    ) {
+      nearest = { control, distance };
+    }
+  }
+
+  return nearest?.control ?? null;
+}
+
+function getPathEditControls(path: StructuredBezierPath): PathEditControl[] {
+  const controls: PathEditControl[] = [];
+
+  for (const segment of path.segments) {
+    controls.push({
+      segmentId: segment.id,
+      component: "handleIn",
+      point: addBezierPoints(segment.anchor, segment.handleIn),
+    });
+    controls.push({
+      segmentId: segment.id,
+      component: "handleOut",
+      point: addBezierPoints(segment.anchor, segment.handleOut),
+    });
+    controls.push({
+      segmentId: segment.id,
+      component: "anchor",
+      point: segment.anchor,
+    });
+  }
+
+  return controls;
+}
+
+function getPathEditViewTransform(asset: PrimitiveSvgAsset): {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+} {
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const targetSize = Math.max(
+    220,
+    Math.min(stage.size.cssWidth, stage.size.cssHeight) * 0.54,
+  );
+  const scale = targetSize / Math.max(viewBoxWidth, viewBoxHeight);
+  const centerX = stage.size.cssWidth / 2;
+  const centerY = stage.size.cssHeight / 2;
+
+  return {
+    scale,
+    offsetX: centerX - (viewBoxX + viewBoxWidth / 2) * scale,
+    offsetY: centerY - (viewBoxY + viewBoxHeight / 2) * scale,
+  };
+}
+
+function pathPointToScreen(
+  point: BezierPoint,
+  transform: { scale: number; offsetX: number; offsetY: number },
+): BezierPoint {
+  return [
+    transform.offsetX + point[0] * transform.scale,
+    transform.offsetY + point[1] * transform.scale,
+  ];
+}
+
+function screenPointToPath(
+  point: BezierPoint,
+  transform: { scale: number; offsetX: number; offsetY: number },
+): BezierPoint {
+  return [
+    roundTransformValue((point[0] - transform.offsetX) / transform.scale),
+    roundTransformValue((point[1] - transform.offsetY) / transform.scale),
+  ];
+}
+
+function addBezierPoints(left: BezierPoint, right: BezierPoint): BezierPoint {
+  return [
+    roundTransformValue(left[0] + right[0]),
+    roundTransformValue(left[1] + right[1]),
+  ];
+}
+
+function subtractBezierPoints(left: BezierPoint, right: BezierPoint): BezierPoint {
+  return [
+    roundTransformValue(left[0] - right[0]),
+    roundTransformValue(left[1] - right[1]),
+  ];
+}
+
+function getPathEditScreenControls(): Array<{
+  segmentId: string;
+  component: PathEditComponent;
+  x: number;
+  y: number;
+}> {
+  if (!pathEditSession) {
+    return [];
+  }
+
+  const asset = getAssetById(pathEditSession.assetId);
+
+  if (!asset) {
+    return [];
+  }
+
+  const transform = getPathEditViewTransform(asset);
+
+  return getPathEditControls(pathEditSession.draft).map((control) => {
+    const [x, y] = pathPointToScreen(control.point, transform);
+
+    return {
+      segmentId: control.segmentId,
+      component: control.component,
+      x,
+      y,
+    };
+  });
+}
+
 function getSelectedProject(): ProjectRecord | null {
   return projects.find((project) => project.id === selectedProjectId) ?? null;
 }
@@ -3244,6 +3921,32 @@ function getSelectedScene(): SceneRecord | null {
 
 function getAssetById(assetId: string): PrimitiveSvgAsset | null {
   return assets.find((asset) => asset.id === assetId) ?? null;
+}
+
+function getSelectedPathEditSegment(): BezierSegment | null {
+  if (!pathEditSession?.selected) {
+    return null;
+  }
+
+  return getPathEditSegment(pathEditSession.selected.segmentId);
+}
+
+function getPathEditSegment(segmentId: string): BezierSegment | null {
+  return (
+    pathEditSession?.draft.segments.find((segment) => segment.id === segmentId) ??
+    null
+  );
+}
+
+function getPathEditComponentPoint(
+  segment: BezierSegment,
+  component: PathEditComponent,
+): BezierPoint {
+  if (component === "anchor") {
+    return [...segment.anchor];
+  }
+
+  return [...segment[component]];
 }
 
 function getPrefabRecordById(prefabId: string): PrefabRecord | null {
@@ -3739,6 +4442,18 @@ function chooseStableSelection(
   return availableIds[0] ?? null;
 }
 
+function getEditorModeLabel(mode: EditorMode): string {
+  if (mode === "asset") {
+    return "Asset Assembly";
+  }
+
+  if (mode === "path") {
+    return "Source Path Edit";
+  }
+
+  return "Scene Layout";
+}
+
 function getNextNodeNumber(ids: string[], prefix: string): number {
   const pattern = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`);
   const largestExistingNumber = ids.reduce((largest, id) => {
@@ -3920,6 +4635,16 @@ function exposeEditorDebugHooks(): void {
       activeTrackProperty: getActiveTimelineProperty(),
       selectedKeyframeId: selectedTimelineKeyframeId,
       evaluatedNodes: getEvaluatedPrefabNodes(),
+    }),
+    getPathEditState: () => ({
+      assetId: pathEditSession?.assetId ?? null,
+      selectedSegmentId: pathEditSession?.selected?.segmentId ?? null,
+      selectedComponent: pathEditSession?.selected?.component ?? null,
+      hasDraft: Boolean(pathEditSession),
+      draftBezierPath: pathEditSession
+        ? cloneStructuredBezierPath(pathEditSession.draft)
+        : null,
+      controls: getPathEditScreenControls(),
     }),
     getExperimentScene: () => {
       const camera = threeViewport.getCameraSnapshot();
