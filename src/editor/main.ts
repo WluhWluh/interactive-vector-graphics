@@ -45,6 +45,12 @@ import {
 type EditorMode = "asset" | "scene";
 type TransformProperty = "position" | "rotation" | "scale";
 type SceneCreateSource = "empty" | "current";
+type PrefabSelectionId = string | typeof PREFAB_ROOT_NODE_ID;
+type PrefabClipboardMode = "copy" | "cut";
+type PendingPrefabClipboard = {
+  mode: PrefabClipboardMode;
+  sourceNodeId: string;
+};
 type CollapsibleModuleId =
   | "projects"
   | "primitive-assets"
@@ -70,6 +76,8 @@ type EditorElements = {
   deletePrefabButton: HTMLButtonElement;
   prefabNodeList: HTMLUListElement;
   createPrefabGroupButton: HTMLButtonElement;
+  prefabCopyButton: HTMLButtonElement;
+  prefabCutButton: HTMLButtonElement;
   deletePrefabNodeButton: HTMLButtonElement;
   sceneNameInput: HTMLInputElement;
   sceneList: HTMLUListElement;
@@ -124,6 +132,7 @@ const COLLAPSED_MODULE_COOKIE_NAME = "ivg_editor_collapsed_modules";
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const EXPANDED_ARROW = "▴";
 const COLLAPSED_ARROW = "▾";
+const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
@@ -142,10 +151,11 @@ let selectedProjectId: string | null = null;
 let selectedAssetId: string | null = null;
 let selectedPrefabId: string | null = null;
 let loadedPrefabId: string | null = null;
-let selectedPrefabNodeId: string | null = null;
+let selectedPrefabNodeId: PrefabSelectionId | null = PREFAB_ROOT_NODE_ID;
 let selectedSceneId: string | null = null;
 let loadedSceneId: string | null = null;
 let selectedSceneNodeId: string | null = null;
+let pendingPrefabClipboard: PendingPrefabClipboard | null = null;
 let lastImportError: string | null = null;
 let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
@@ -177,6 +187,10 @@ declare global {
         selectedPrefabId: string | null;
         loadedPrefabId: string | null;
         selectedPrefabNodeId: string | null;
+        pendingClipboard: {
+          mode: PrefabClipboardMode;
+          sourceNodeId: string;
+        } | null;
       };
       getExperimentScene: () => {
         camera: {
@@ -241,6 +255,12 @@ function bindEditorEvents(): void {
   });
   elements.createPrefabGroupButton.addEventListener("click", () => {
     createPrefabGroup();
+  });
+  elements.prefabCopyButton.addEventListener("click", () => {
+    handlePrefabClipboardPrimaryAction();
+  });
+  elements.prefabCutButton.addEventListener("click", () => {
+    handlePrefabClipboardSecondaryAction();
   });
   elements.deletePrefabNodeButton.addEventListener("click", () => {
     deleteSelectedPrefabNode();
@@ -370,7 +390,8 @@ async function refreshPrefabs(): Promise<void> {
     prefabDocuments = new Map();
     selectedPrefabId = null;
     loadedPrefabId = null;
-    selectedPrefabNodeId = null;
+    selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    pendingPrefabClipboard = null;
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
@@ -399,7 +420,8 @@ async function refreshPrefabs(): Promise<void> {
   if (loadedPrefabId && !prefabs.some((prefab) => prefab.id === loadedPrefabId)) {
     loadedPrefabId = null;
     prefabNodes = [];
-    selectedPrefabNodeId = null;
+    selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    pendingPrefabClipboard = null;
   }
 
   if (editorMode === "asset") {
@@ -604,7 +626,8 @@ async function deleteSelectedPrefab(): Promise<void> {
 
     if (loadedPrefabId === deletedPrefabId) {
       prefabNodes = [];
-      selectedPrefabNodeId = null;
+      selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+      pendingPrefabClipboard = null;
       loadedPrefabId = null;
     }
 
@@ -626,7 +649,7 @@ function createPrefabGroup(): void {
 
   const nodeNumber = nextPrefabNodeNumber;
   const node: PrefabNode = {
-    id: `prefab-node-${nodeNumber}`,
+    id: createNextPrefabNodeId(),
     kind: "group",
     parentId: getParentIdForNewPrefabNode(),
     name: `Group ${nodeNumber}`,
@@ -636,7 +659,6 @@ function createPrefabGroup(): void {
     billboardMode: "spherical",
   };
 
-  nextPrefabNodeNumber += 1;
   prefabNodes = [...prefabNodes, node];
   selectedPrefabNodeId = node.id;
   loadedPrefabId = null;
@@ -654,7 +676,7 @@ function addSelectedAssetToPrefab(): void {
   }
 
   const node: PrefabNode = {
-    id: `prefab-node-${nextPrefabNodeNumber}`,
+    id: createNextPrefabNodeId(),
     kind: "primitive",
     parentId: getParentIdForNewPrefabNode(),
     assetId: selectedAsset.id,
@@ -665,7 +687,6 @@ function addSelectedAssetToPrefab(): void {
     billboardMode: "spherical",
   };
 
-  nextPrefabNodeNumber += 1;
   prefabNodes = [...prefabNodes, node];
   selectedPrefabNodeId = node.id;
   selectedAssetId = selectedAsset.id;
@@ -678,13 +699,14 @@ function addSelectedAssetToPrefab(): void {
 }
 
 function deleteSelectedPrefabNode(): void {
-  if (!selectedPrefabNodeId) {
+  if (!selectedPrefabNodeId || selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
     return;
   }
 
   const deletedNodeIds = getPrefabNodeAndDescendantIds(selectedPrefabNodeId);
   prefabNodes = prefabNodes.filter((node) => !deletedNodeIds.has(node.id));
-  selectedPrefabNodeId = null;
+  selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+  clearInvalidPrefabClipboard();
   loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
@@ -862,7 +884,8 @@ function clearProjectWorkspace(): void {
   selectedAssetId = null;
   selectedPrefabId = null;
   loadedPrefabId = null;
-  selectedPrefabNodeId = null;
+  selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+  pendingPrefabClipboard = null;
   selectedSceneId = null;
   loadedSceneId = null;
   selectedSceneNodeId = null;
@@ -891,7 +914,8 @@ function createCurrentPrefabDocument(): PrefabDocument {
 
 function applyPrefabDocument(document: PrefabDocument): void {
   prefabNodes = document.nodes.map(clonePrefabNode);
-  selectedPrefabNodeId = prefabNodes[0]?.id ?? null;
+  selectedPrefabNodeId = prefabNodes[0]?.id ?? PREFAB_ROOT_NODE_ID;
+  clearInvalidPrefabClipboard();
   nextPrefabNodeNumber = getNextNodeNumber(
     prefabNodes.map((node) => node.id),
     "prefab-node",
@@ -965,7 +989,9 @@ function rebuildViewportProxies(): void {
       threeViewport.addOrUpdateNode(proxyNode, asset ?? undefined);
     }
 
-    threeViewport.setSelectedNode(selectedPrefabNodeId);
+    threeViewport.setSelectedNode(
+      selectedPrefabNodeId === PREFAB_ROOT_NODE_ID ? null : selectedPrefabNodeId,
+    );
     return;
   }
 
@@ -1019,11 +1045,99 @@ function syncNodeFromViewport(nodeId: string): void {
 }
 
 function syncSelectionFromPrefabNode(): void {
+  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+    return;
+  }
+
   const node = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
 
   if (node?.kind === "primitive" && node.assetId) {
     selectedAssetId = node.assetId;
   }
+}
+
+function handlePrefabClipboardPrimaryAction(): void {
+  if (pendingPrefabClipboard) {
+    pastePendingPrefabClipboard();
+    return;
+  }
+
+  startPendingPrefabClipboard("copy");
+}
+
+function handlePrefabClipboardSecondaryAction(): void {
+  if (pendingPrefabClipboard) {
+    pendingPrefabClipboard = null;
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return;
+  }
+
+  startPendingPrefabClipboard("cut");
+}
+
+function startPendingPrefabClipboard(mode: PrefabClipboardMode): void {
+  if (!selectedPrefabNodeId || selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+    return;
+  }
+
+  if (!getPrefabNode(selectedPrefabNodeId)) {
+    setImportError(new Error("Select an existing prefab node before copy or cut."));
+    return;
+  }
+
+  pendingPrefabClipboard = {
+    mode,
+    sourceNodeId: selectedPrefabNodeId,
+  };
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function pastePendingPrefabClipboard(): void {
+  if (!pendingPrefabClipboard) {
+    return;
+  }
+
+  const clipboard = pendingPrefabClipboard;
+  const sourceNode = getPrefabNode(clipboard.sourceNodeId);
+
+  if (!sourceNode) {
+    pendingPrefabClipboard = null;
+    setImportError(new Error("The copied or cut prefab node no longer exists."));
+    return;
+  }
+
+  const targetParentId = getPasteParentId();
+
+  if (targetParentId === undefined) {
+    pendingPrefabClipboard = null;
+    setImportError(new Error("Select an existing paste target."));
+    return;
+  }
+
+  if (
+    clipboard.mode === "cut" &&
+    targetParentId &&
+    getPrefabNodeAndDescendantIds(sourceNode.id).has(targetParentId)
+  ) {
+    setImportError(new Error("Cannot paste a group or node inside itself."));
+    return;
+  }
+
+  if (clipboard.mode === "copy") {
+    copyPrefabSubtree(sourceNode, targetParentId);
+  } else {
+    cutPrefabSubtree(sourceNode, targetParentId);
+  }
+
+  pendingPrefabClipboard = null;
+  loadedPrefabId = null;
+  lastImportError = null;
+  hideError();
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
 }
 
 function syncSelectionFromSceneNode(): void {
@@ -1195,6 +1309,8 @@ function getEditorElements(): EditorElements {
       "delete-prefab-node-button",
       HTMLButtonElement,
     ),
+    prefabCopyButton: getRequiredElement("prefab-copy-button", HTMLButtonElement),
+    prefabCutButton: getRequiredElement("prefab-cut-button", HTMLButtonElement),
     sceneNameInput: getRequiredElement("scene-name-input", HTMLInputElement),
     sceneList: getRequiredElement("scene-list", HTMLUListElement),
     createSceneButton: getRequiredElement(
@@ -1283,7 +1399,17 @@ function renderEditorShell(): void {
   elements.savePrefabButton.disabled = !selectedProjectId || !selectedPrefabId;
   elements.deletePrefabButton.disabled = !selectedProjectId || !selectedPrefabId;
   elements.createPrefabGroupButton.disabled = !selectedProjectId;
-  elements.deletePrefabNodeButton.disabled = !selectedPrefabNodeId;
+  const selectedRealPrefabNode =
+    selectedPrefabNodeId !== null && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID;
+  elements.deletePrefabNodeButton.disabled = !selectedRealPrefabNode;
+  elements.prefabCopyButton.textContent = pendingPrefabClipboard ? "Paste" : "Copy";
+  elements.prefabCutButton.textContent = pendingPrefabClipboard ? "Cancel" : "Cut";
+  elements.prefabCopyButton.disabled = pendingPrefabClipboard
+    ? !selectedPrefabNodeId
+    : !selectedRealPrefabNode;
+  elements.prefabCutButton.disabled = pendingPrefabClipboard
+    ? false
+    : !selectedRealPrefabNode;
   elements.sceneNameInput.disabled = !selectedProjectId;
   elements.createSceneButton.disabled = !selectedProjectId;
   elements.cloneSceneButton.disabled = !selectedProjectId;
@@ -1385,7 +1511,24 @@ function renderPrefabList(): void {
 }
 
 function renderPrefabNodeList(): void {
+  const rootItem = document.createElement("li");
+  const rootButton = document.createElement("button");
+
+  rootButton.type = "button";
+  rootButton.className = "asset-list-item";
+  rootButton.dataset.prefabNodeId = PREFAB_ROOT_NODE_ID;
+  rootButton.dataset.selected = String(selectedPrefabNodeId === PREFAB_ROOT_NODE_ID);
+  rootButton.textContent = "Group: Root Group";
+  rootButton.addEventListener("click", () => {
+    selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    threeViewport.setSelectedNode(null);
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  });
+  rootItem.append(rootButton);
+
   elements.prefabNodeList.replaceChildren(
+    rootItem,
     ...getPrefabNodeTreeEntries().map(({ node, depth }) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
@@ -1498,7 +1641,10 @@ function renderInspector(): void {
 
 function renderAssetModeInspector(): void {
   const selectedPrefab = getSelectedPrefab();
-  const selectedNode = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
+  const selectedNode =
+    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
   const inspectedAsset =
     selectedNode?.kind === "primitive" && selectedNode.assetId
       ? getAssetById(selectedNode.assetId)
@@ -1507,6 +1653,13 @@ function renderAssetModeInspector(): void {
   appendInspectorRow("Selected Prefab", selectedPrefab?.name ?? "None");
   appendInspectorRow("Loaded Prefab", loadedPrefabId ?? "None");
   appendAssetInspectorRows(inspectedAsset);
+
+  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+    appendInspectorRow("Prefab Node", "Root Group");
+    appendInspectorRow("Kind", "virtual group");
+    appendInspectorRow("Parent", "None");
+    return;
+  }
 
   if (!selectedNode) {
     appendInspectorRow("Prefab Node", "No node selected");
@@ -1922,9 +2075,27 @@ function getActiveTransformNode(nodeId: string): EditorTransformNode | null {
 }
 
 function getParentIdForNewPrefabNode(): string | null {
+  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+    return null;
+  }
+
   const selectedNode = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
 
   return selectedNode?.kind === "group" ? selectedNode.id : null;
+}
+
+function getPasteParentId(): string | null | undefined {
+  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+    return null;
+  }
+
+  const targetNode = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
+
+  if (!targetNode) {
+    return undefined;
+  }
+
+  return targetNode.kind === "group" ? targetNode.id : targetNode.parentId;
 }
 
 function getPrefabNodeAndDescendantIds(rootNodeId: string): Set<string> {
@@ -1943,6 +2114,69 @@ function getPrefabNodeAndDescendantIds(rootNodeId: string): Set<string> {
   }
 
   return ids;
+}
+
+function copyPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
+  const subtreeIds = getPrefabNodeAndDescendantIds(sourceNode.id);
+  const subtreeNodes = prefabNodes.filter((node) => subtreeIds.has(node.id));
+  const idMap = new Map<string, string>();
+
+  for (const node of subtreeNodes) {
+    idMap.set(node.id, createNextPrefabNodeId());
+  }
+
+  const copiedNodes = subtreeNodes.map((node) => {
+    const copiedNode = clonePrefabNode(node);
+    const nextId = idMap.get(node.id);
+
+    if (!nextId) {
+      throw new Error(`Missing copied node id for "${node.id}".`);
+    }
+
+    copiedNode.id = nextId;
+    copiedNode.parentId =
+      node.id === sourceNode.id
+        ? targetParentId
+        : (idMap.get(node.parentId ?? "") ?? null);
+
+    if (node.id === sourceNode.id) {
+      copiedNode.name = `${copiedNode.name} Copy`;
+    }
+
+    return copiedNode;
+  });
+
+  prefabNodes = [...prefabNodes, ...copiedNodes];
+  selectedPrefabNodeId = idMap.get(sourceNode.id) ?? PREFAB_ROOT_NODE_ID;
+}
+
+function cutPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
+  const nextNodes = prefabNodes.map((node) =>
+    node.id === sourceNode.id
+      ? {
+          ...node,
+          parentId: targetParentId,
+        }
+      : node,
+  );
+
+  prefabNodes = nextNodes;
+  selectedPrefabNodeId = sourceNode.id;
+}
+
+function createNextPrefabNodeId(): string {
+  const id = `prefab-node-${nextPrefabNodeNumber}`;
+  nextPrefabNodeNumber += 1;
+  return id;
+}
+
+function clearInvalidPrefabClipboard(): void {
+  if (
+    pendingPrefabClipboard &&
+    !getPrefabNode(pendingPrefabClipboard.sourceNodeId)
+  ) {
+    pendingPrefabClipboard = null;
+  }
 }
 
 function getPrefabNodeTreeEntries(): PrefabNodeTreeEntry[] {
@@ -2199,6 +2433,9 @@ function exposeEditorDebugHooks(): void {
       selectedPrefabId,
       loadedPrefabId,
       selectedPrefabNodeId,
+      pendingClipboard: pendingPrefabClipboard
+        ? { ...pendingPrefabClipboard }
+        : null,
     }),
     getExperimentScene: () => {
       const camera = threeViewport.getCameraSnapshot();

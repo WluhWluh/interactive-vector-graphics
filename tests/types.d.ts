@@ -59,6 +59,10 @@ declare global {
         selectedPrefabId: string | null;
         loadedPrefabId: string | null;
         selectedPrefabNodeId: string | null;
+        pendingClipboard: {
+          mode: "copy" | "cut";
+          sourceNodeId: string;
+        } | null;
       };
       getExperimentScene: () => {
         camera: {

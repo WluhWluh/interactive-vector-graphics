@@ -158,6 +158,11 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
   await expect(page.locator("#inspector-fields")).toContainText("uploaded-face");
   await expect(page.locator("#inspector-fields")).toContainText("#ffcf4a");
+  await expect(page.getByRole("button", { name: "Group: Root Group" })).toBeVisible();
+  await page.getByRole("button", { name: "Group: Root Group" }).click();
+  await expect(page.locator("#delete-prefab-node-button")).toBeDisabled();
+  await expect(page.locator("#prefab-copy-button")).toBeDisabled();
+  await expect(page.locator("#prefab-cut-button")).toBeDisabled();
   await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
   await expect(page.getByRole("button", { name: /Primitive: uploaded-face/ })).toBeVisible();
   await expect(page.locator("#inspector-fields")).toContainText("prefab-node-1");
@@ -220,6 +225,84 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editedTransformState?.rotation).toEqual([0, 0, 0.75]);
   expect(editedTransformState?.scale).toEqual([1, 1, 1]);
   await expect(page.getByLabel("Scale Y")).toHaveValue("1");
+  await page.locator("#prefab-copy-button").click();
+  await expect(page.locator("#prefab-copy-button")).toHaveText("Paste");
+  await expect(page.locator("#prefab-cut-button")).toHaveText("Cancel");
+  await page.getByLabel("Position X").fill("1.5");
+  await page.getByLabel("Position X").blur();
+  await page.getByRole("button", { name: "Group: Root Group" }).click();
+  await page.locator("#prefab-copy-button").click();
+
+  const copiedPrimitiveState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getPrefabAssembly() ?? null;
+  });
+
+  expect(copiedPrimitiveState?.pendingClipboard).toBeNull();
+  expect(copiedPrimitiveState?.selectedPrefabNodeId).toBe("prefab-node-2");
+  expect(copiedPrimitiveState?.nodes).toHaveLength(2);
+  expect(copiedPrimitiveState?.nodes[1]).toMatchObject({
+    id: "prefab-node-2",
+    parentId: null,
+    name: "uploaded-face Copy",
+    position: [1.5, 1, 0],
+  });
+  await page.locator('[data-prefab-node-id="prefab-node-2"]').click();
+  await page.locator("#prefab-copy-button").click();
+  await page.locator("#delete-prefab-node-button").click();
+
+  const afterDeleteCopiedSourceState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getPrefabAssembly() ?? null;
+  });
+
+  expect(afterDeleteCopiedSourceState?.pendingClipboard).toBeNull();
+  expect(afterDeleteCopiedSourceState?.nodes).toHaveLength(1);
+  await page.locator('[data-prefab-node-id="prefab-node-1"]').click();
+  await page.locator("#create-prefab-group-button").click();
+  await expect(page.getByRole("button", { name: "Group: Group 3" })).toBeVisible();
+  await page.locator("#prefab-cut-button").click();
+  await page.getByRole("button", { name: "Group: Group 3" }).click();
+  await page.locator("#prefab-copy-button").click();
+  await expect(page.locator("#import-error")).toContainText(
+    "Cannot paste a group or node inside itself.",
+  );
+
+  const invalidCutState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getPrefabAssembly() ?? null;
+  });
+
+  expect(invalidCutState?.pendingClipboard).toEqual({
+    mode: "cut",
+    sourceNodeId: "prefab-node-3",
+  });
+  expect(invalidCutState?.nodes).toHaveLength(2);
+  await page.locator("#prefab-cut-button").click();
+  await expect(page.locator("#prefab-copy-button")).toHaveText("Copy");
+  await page.locator("#delete-prefab-node-button").click();
+
+  const afterGroupDeleteState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getPrefabAssembly() ?? null;
+  });
+
+  expect(afterGroupDeleteState?.nodes).toHaveLength(1);
+  await page.locator('[data-prefab-node-id="prefab-node-1"]').click();
+  await page.locator("#prefab-cut-button").click();
+  await page.getByRole("button", { name: "Group: Root Group" }).click();
+  await page.locator("#prefab-copy-button").click();
+
+  const cutPrimitiveState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getPrefabAssembly() ?? null;
+  });
+
+  expect(cutPrimitiveState?.pendingClipboard).toBeNull();
+  expect(cutPrimitiveState?.selectedPrefabNodeId).toBe("prefab-node-1");
+  expect(cutPrimitiveState?.nodes).toHaveLength(1);
+  expect(cutPrimitiveState?.nodes[0]?.id).toBe("prefab-node-1");
+  expect(cutPrimitiveState?.nodes[0]?.parentId).toBeNull();
   await page.getByLabel("Position X").fill("0");
   await page.getByLabel("Position X").blur();
   await page.getByLabel("Rotation Z").fill("0");
