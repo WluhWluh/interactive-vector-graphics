@@ -1,3 +1,5 @@
+import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
+
 export type ProjectRecord = {
   id: string;
   name: string;
@@ -8,6 +10,7 @@ export type ProjectRecord = {
 export type StoredPrimitiveAsset = {
   id: string;
   projectId: string;
+  assetKind: "filledPath" | "strokePath";
   name: string;
   sourceFilename: string;
   sourcePath: string;
@@ -15,6 +18,9 @@ export type StoredPrimitiveAsset = {
   pathD: string;
   fill: string;
   fillRule: "nonzero" | "evenodd";
+  stroke: string | null;
+  strokeWidth: number | null;
+  bezierPath: StructuredBezierPath;
   createdAt: string;
   updatedAt: string;
 };

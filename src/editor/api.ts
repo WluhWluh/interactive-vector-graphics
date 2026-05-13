@@ -1,4 +1,12 @@
-import type { PrimitiveFillRule, PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
+import type {
+  PrimitiveAssetKind,
+  PrimitiveFillRule,
+  PrimitiveSvgAsset,
+} from "../core/assets/primitiveSvg";
+import {
+  cloneStructuredBezierPath,
+  type StructuredBezierPath,
+} from "../core/assets/structuredBezierPath";
 import type {
   EditorSceneNode,
   EditorViewportCameraSnapshot,
@@ -15,6 +23,7 @@ export type ProjectRecord = {
 export type StoredPrimitiveAssetDto = {
   id: string;
   projectId: string;
+  assetKind: PrimitiveAssetKind;
   name: string;
   sourceFilename: string;
   sourcePath: string;
@@ -22,6 +31,9 @@ export type StoredPrimitiveAssetDto = {
   pathD: string;
   fill: string;
   fillRule: PrimitiveFillRule;
+  stroke: string | null;
+  strokeWidth: number | null;
+  bezierPath: StructuredBezierPath;
   createdAt: string;
   updatedAt: string;
 };
@@ -457,16 +469,29 @@ function hydratePrimitiveAsset(asset: StoredPrimitiveAssetDto): PrimitiveSvgAsse
    * editor recreates Path2D at the API boundary so rendering code can stay the
    * same whether an asset came from a built-in manifest or persisted storage.
    */
-  return {
+  const baseAsset = {
     id: asset.id,
     name: asset.name,
     sourceUrl: asset.sourcePath,
     viewBox: asset.viewBox,
     pathD: asset.pathD,
     path: new Path2D(asset.pathD),
-    fill: asset.fill,
-    fillRule: asset.fillRule,
+    bezierPath: cloneStructuredBezierPath(asset.bezierPath),
   };
+
+  return asset.assetKind === "strokePath"
+    ? {
+        ...baseAsset,
+        assetKind: "strokePath",
+        stroke: asset.stroke ?? "#000000",
+        strokeWidth: asset.strokeWidth ?? 1,
+      }
+    : {
+        ...baseAsset,
+        assetKind: "filledPath",
+        fill: asset.fill,
+        fillRule: asset.fillRule,
+      };
 }
 
 function assertOk(response: Response, error?: string): void {

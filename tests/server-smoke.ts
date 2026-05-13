@@ -6,6 +6,12 @@ import { createDataStore } from "../server/dataStore";
 import { importPrimitiveSvgOnServer } from "../server/primitiveSvgImport";
 import { validatePrefabDocument } from "../server/prefabDocument";
 import { validateSceneDocument } from "../server/sceneDocument";
+import {
+  parsePathDToStructuredBezier,
+  structuredBezierToPathD,
+  validateStructuredBezierPath,
+  type StructuredBezierPath,
+} from "../src/core/assets/structuredBezierPath";
 import type { PrefabDocument, SceneDocument } from "../server/types";
 
 const tempDataDir = await mkdtemp(join(tmpdir(), "ivg-server-smoke-"));
@@ -54,8 +60,169 @@ try {
   assert.equal(secondAsset.id, "uploaded-face-2");
   assert.equal(firstAsset.sourcePath, "projects/my-test-project/primitives/uploaded-face.svg");
   assert.deepEqual(firstAsset.viewBox, [-50, -50, 100, 100]);
+  assert.equal(firstAsset.assetKind, "filledPath");
   assert.equal(firstAsset.fill, "#ffcf4a");
+  assert.equal(firstAsset.bezierPath.version, 1);
+  assert.equal(firstAsset.bezierPath.closed, true);
+  assert.ok(firstAsset.bezierPath.segments.length >= 3);
+  assert.deepEqual(firstAsset.bezierPath.segments[0]?.anchor, [-50, 0]);
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
+
+  const roundTripPathD = structuredBezierToPathD(firstAsset.bezierPath);
+  const reparsedRoundTrip = parsePathDToStructuredBezier(roundTripPathD, {
+    expectedClosed: true,
+  });
+
+  assert.equal(reparsedRoundTrip.closed, true);
+  assert.ok(reparsedRoundTrip.segments.length >= 3);
+
+  const validStrokeSvg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+    '<path fill="none" stroke="#5bc4bf" stroke-width="6" d="M 10 80 C 30 20 70 20 90 80" />',
+    "</svg>",
+  ].join("");
+  const importedStroke = importPrimitiveSvgOnServer(validStrokeSvg, {
+    id: "leg-stroke",
+    name: "Leg Stroke",
+    sourceUrl: "test:leg-stroke.svg",
+  });
+  const strokeAsset = await store.createPrimitiveAsset({
+    projectId: firstProject.id,
+    name: "Leg Stroke",
+    sourceFilename: "leg-stroke.svg",
+    svgText: validStrokeSvg,
+    ...importedStroke,
+  });
+
+  assert.equal(strokeAsset.assetKind, "strokePath");
+  assert.equal(strokeAsset.fill, "none");
+  assert.equal(strokeAsset.stroke, "#5bc4bf");
+  assert.equal(strokeAsset.strokeWidth, 6);
+  assert.equal(strokeAsset.bezierPath.version, 1);
+  assert.equal(strokeAsset.bezierPath.closed, false);
+  assert.equal(strokeAsset.bezierPath.segments.length, 2);
+  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 3);
+
+  const styledStrokeSvg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+    '<path style="fill:none;stroke:#ffcf4a;stroke-width:4px" d="M 10 50 L 90 50" />',
+    "</svg>",
+  ].join("");
+  const styledStroke = importPrimitiveSvgOnServer(styledStrokeSvg, {
+    id: "styled-stroke",
+    name: "Styled Stroke",
+    sourceUrl: "test:styled-stroke.svg",
+  });
+
+  assert.equal(styledStroke.assetKind, "strokePath");
+  assert.equal(styledStroke.stroke, "#ffcf4a");
+  assert.equal(styledStroke.strokeWidth, 4);
+  assert.equal(styledStroke.bezierPath.closed, false);
+  assert.equal(styledStroke.bezierPath.segments.length, 2);
+
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke="#5bc4bf" stroke-width="6" d="M 0 0 L 10 0 M 20 0 L 30 0" /></svg>',
+        { id: "multi-subpath", name: "Multi Subpath", sourceUrl: "test" },
+      ),
+    /exactly one subpath/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke="#5bc4bf" stroke-width="6" d="M 10 10 L 90 10 Z" /></svg>',
+        { id: "closed-stroke", name: "Closed Stroke", sourceUrl: "test" },
+      ),
+    /open path without Z commands/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path stroke="#5bc4bf" stroke-width="6" d="M 10 10 L 90 10" /></svg>',
+        { id: "missing-fill-none", name: "Missing Fill None", sourceUrl: "test" },
+      ),
+    /fill="none"/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke="#5bc4bf" d="M 10 10 L 90 10" /></svg>',
+        { id: "missing-width", name: "Missing Width", sourceUrl: "test" },
+      ),
+    /stroke-width/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke-width="6" d="M 10 10 L 90 10" /></svg>',
+        { id: "missing-stroke", name: "Missing Stroke", sourceUrl: "test" },
+      ),
+    /define stroke/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke="#5bc4bf" stroke-width="0" d="M 10 10 L 90 10" /></svg>',
+        { id: "bad-width", name: "Bad Width", sourceUrl: "test" },
+      ),
+    /positive number/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke="url(#paint)" stroke-width="6" d="M 10 10 L 90 10" /></svg>',
+        { id: "paint-server", name: "Paint Server", sourceUrl: "test" },
+      ),
+    /paint server/,
+  );
+  assert.throws(
+    () =>
+      importPrimitiveSvgOnServer(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="none" stroke="#5bc4bf" stroke-width="6" stroke-dasharray="4 4" d="M 10 10 L 90 10" /></svg>',
+        { id: "dash", name: "Dash", sourceUrl: "test" },
+      ),
+    /stroke-dasharray/,
+  );
+  assertInvalidStructuredBezierPath(
+    {
+      version: 1,
+      closed: true,
+      segments: [
+        createBezierSegment("seg-1", [0, 0]),
+        createBezierSegment("seg-2", [10, 0]),
+        createBezierSegment("seg-3", [0, 10]),
+      ],
+    },
+    { expectedClosed: false },
+    /must be open/,
+  );
+  assertInvalidStructuredBezierPath(
+    {
+      version: 1,
+      closed: true,
+      segments: [
+        createBezierSegment("seg-1", [0, 0]),
+        createBezierSegment("seg-1", [10, 0]),
+        createBezierSegment("seg-3", [0, 10]),
+      ],
+    },
+    { expectedClosed: true },
+    /duplicate Bezier segment id/,
+  );
+  assertInvalidStructuredBezierPath(
+    {
+      version: 1,
+      closed: true,
+      segments: [
+        createBezierSegment("seg-1", [0, 0]),
+        createBezierSegment("seg-2", [10, Number.POSITIVE_INFINITY]),
+        createBezierSegment("seg-3", [0, 10]),
+      ],
+    },
+    { expectedClosed: true },
+    /finite numbers/,
+  );
 
   const validPrefabDocument: PrefabDocument = {
     version: 3,
@@ -640,6 +807,7 @@ try {
     join(tempDataDir, "projects", firstProject.id, "primitives"),
   );
   assert.deepEqual(primitiveFiles.sort(), [
+    "leg-stroke.svg",
     "uploaded-face-2.svg",
     "uploaded-face.svg",
   ]);
@@ -685,7 +853,7 @@ try {
   assert.deepEqual(remainingSceneFiles, ["opening-scene-2.json"]);
 
   await store.deletePrimitiveAsset(firstProject.id, firstAsset.id);
-  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 1);
+  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
 
   await store.deleteProject(firstProject.id);
   assert.equal(store.listProjects().length, 1);
@@ -714,4 +882,27 @@ function assertInvalidPrefabDocument(
     () => validatePrefabDocument(document, { projectId }),
     expectedMessage,
   );
+}
+
+function assertInvalidStructuredBezierPath(
+  path: StructuredBezierPath,
+  options: { expectedClosed: boolean },
+  expectedMessage: RegExp,
+): void {
+  assert.throws(
+    () => validateStructuredBezierPath(path, options),
+    expectedMessage,
+  );
+}
+
+function createBezierSegment(
+  id: string,
+  anchor: [number, number],
+): StructuredBezierPath["segments"][number] {
+  return {
+    id,
+    anchor,
+    handleIn: [0, 0],
+    handleOut: [0, 0],
+  };
 }

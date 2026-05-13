@@ -59,7 +59,15 @@ export function drawPrimitivePreview(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  context.fillStyle = asset.fill;
-  context.fill(asset.path, asset.fillRule);
+  if (asset.assetKind === "strokePath") {
+    context.strokeStyle = asset.stroke;
+    context.lineWidth = asset.strokeWidth;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.stroke(asset.path);
+  } else {
+    context.fillStyle = asset.fill;
+    context.fill(asset.path, asset.fillRule);
+  }
   context.restore();
 }

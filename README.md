@@ -64,6 +64,9 @@ Uploaded SVG source files are stored under
 `data/projects/<project-id>/scenes/` as JSON files. Project assets, prefabs,
 scenes, and future animation data are intentionally separate from source code.
 Only code, fixtures, and built-in demos should enter Git.
+Each primitive asset also stores normalized structured Bezier path data in
+SQLite beside the original `pathD`. This is authoring data for future path edit
+and deformation tools; current Canvas rendering still uses `Path2D(pathD)`.
 
 For local development, run both servers:
 
@@ -101,8 +104,9 @@ Then open:
 
 ## Primitive SVG Assets
 
-The first import pipeline is deliberately strict. Each primitive SVG should be a
-single solid-color closed path exported from Illustrator:
+The import pipeline is deliberately strict. Each primitive SVG should be either
+a single solid-color closed filled path or a single open stroke path exported
+from Illustrator:
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -100 200 200">
@@ -110,17 +114,31 @@ single solid-color closed path exported from Illustrator:
 </svg>
 ```
 
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <path fill="none" stroke="#5bc4bf" stroke-width="6" d="M 10 80 C 30 20 70 20 90 80" />
+</svg>
+```
+
 Allowed:
 
-- One `<path>` with `d`, `fill`, and optional `fill-rule`.
+- One filled `<path>` with `d`, `fill`, and optional `fill-rule`.
+- Or one open stroked `<path>` with `fill="none"`, solid `stroke`, and positive
+  `stroke-width`.
 - One wrapper `<g>` only when it has no `transform`, `class`, or `style`.
-- `fill` and `fill-rule` may also come from the path `style` attribute.
+- Supported style values may also come from the path `style` attribute.
+- Stroked paths always render as solid round-cap, round-join lines in the editor.
 
 Rejected:
 
-- Multiple paths, open paths, strokes, transforms, class-based styles, opacity,
-  gradients, filters, masks, clips, text, images, symbols, and basic shape
-  elements such as rect/circle/polygon.
+- Multiple paths, filled open paths, closed stroked paths, mixed solid fill and
+  stroke, stroke dashes, transforms, class-based styles, opacity, gradients,
+  filters, masks, clips, text, images, symbols, and basic shape elements such as
+  rect/circle/polygon.
 
 Built-in primitive assets are listed in `public/assets/primitive-assets.json`.
 The runtime loads that manifest, imports each SVG, and registers it in memory.
+During import, the path `d` is parsed into stable Bezier segments with anchors
+and relative handles. Filled primitives must produce a closed structured path
+with at least three segments; stroked primitives must produce an open structured
+path with at least two segments.

@@ -1,6 +1,7 @@
 import "../styles.css";
 import { Euler, Matrix4, Quaternion, Vector3 } from "three";
 import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
+import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
 import { CanvasStage } from "../core/stage/canvasStage";
 import {
   drawCenteredStatus,
@@ -223,11 +224,15 @@ declare global {
       getProjects: () => ProjectRecord[];
       getAssets: () => Array<{
         id: string;
+        assetKind: string;
         name: string;
         sourceUrl: string;
         viewBox: [number, number, number, number];
         fill: string;
         fillRule: string;
+        stroke: string | null;
+        strokeWidth: number | null;
+        bezierPath: StructuredBezierPath;
         pathD: string;
       }>;
       getPrefabs: () => PrefabRecord[];
@@ -2370,7 +2375,7 @@ function renderAssetList(): void {
       button.className = "asset-list-item";
       button.dataset.assetId = asset.id;
       button.dataset.selected = String(asset.id === selectedAssetId);
-      button.textContent = asset.name;
+      button.textContent = `${asset.assetKind === "strokePath" ? "Stroke" : "Fill"}: ${asset.name}`;
       button.addEventListener("click", () => {
         selectedAssetId = asset.id;
         renderEditorShell();
@@ -2822,11 +2827,23 @@ function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
   }
 
   appendInspectorRow("Asset ID", asset.id);
+  appendInspectorRow("Type", asset.assetKind);
   appendInspectorRow("Name", asset.name);
   appendInspectorRow("Source", asset.sourceUrl);
   appendInspectorRow("ViewBox", asset.viewBox.join(", "));
-  appendInspectorRow("Fill", asset.fill);
-  appendInspectorRow("Fill Rule", asset.fillRule);
+  appendInspectorRow("Bezier Segments", String(asset.bezierPath.segments.length));
+  appendInspectorRow("Closed Path", asset.bezierPath.closed ? "true" : "false");
+
+  if (asset.assetKind === "strokePath") {
+    appendInspectorRow("Stroke", asset.stroke);
+    appendInspectorRow("Stroke Width", String(asset.strokeWidth));
+    appendInspectorRow("Line Cap", "round");
+    appendInspectorRow("Line Join", "round");
+  } else {
+    appendInspectorRow("Fill", asset.fill);
+    appendInspectorRow("Fill Rule", asset.fillRule);
+  }
+
   appendInspectorRow("Path Length", `${asset.pathD.length} chars`);
 }
 
@@ -3179,8 +3196,7 @@ function drawBillboardNode(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  context.fillStyle = asset.fill;
-  context.fill(asset.path, asset.fillRule);
+  drawPrimitiveAssetPath(context, asset);
 
   if (selected || ghost) {
     context.lineWidth = 3 / Math.max(assetScale, 0.001);
@@ -3190,6 +3206,24 @@ function drawBillboardNode(
   }
 
   context.restore();
+}
+
+function drawPrimitiveAssetPath(
+  context: CanvasRenderingContext2D,
+  asset: PrimitiveSvgAsset,
+): void {
+  if (asset.assetKind === "strokePath") {
+    context.strokeStyle = asset.stroke;
+    context.lineWidth = asset.strokeWidth;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.setLineDash([]);
+    context.stroke(asset.path);
+    return;
+  }
+
+  context.fillStyle = asset.fill;
+  context.fill(asset.path, asset.fillRule);
 }
 
 function getSelectedProject(): ProjectRecord | null {
@@ -3857,11 +3891,15 @@ function exposeEditorDebugHooks(): void {
     getAssets: () =>
       assets.map((asset) => ({
         id: asset.id,
+        assetKind: asset.assetKind,
         name: asset.name,
         sourceUrl: asset.sourceUrl,
         viewBox: asset.viewBox,
-        fill: asset.fill,
-        fillRule: asset.fillRule,
+        fill: asset.assetKind === "filledPath" ? asset.fill : "none",
+        fillRule: asset.assetKind === "filledPath" ? asset.fillRule : "nonzero",
+        stroke: asset.assetKind === "strokePath" ? asset.stroke : null,
+        strokeWidth: asset.assetKind === "strokePath" ? asset.strokeWidth : null,
+        bezierPath: asset.bezierPath,
         pathD: asset.pathD,
       })),
     getPrefabs: () => [...prefabs],

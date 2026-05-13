@@ -10,6 +10,11 @@ import type {
   SceneRecord,
   StoredPrimitiveAsset,
 } from "./types";
+import {
+  parsePathDToStructuredBezier,
+  validateStructuredBezierPath,
+  type StructuredBezierPath,
+} from "../src/core/assets/structuredBezierPath";
 import { validatePrefabDocument } from "./prefabDocument";
 import { validateSceneDocument } from "./sceneDocument";
 
@@ -18,8 +23,9 @@ const DATABASE_FILE_NAME = "ivg.sqlite";
 const SCENES_DIR_NAME = "scenes";
 const PREFABS_DIR_NAME = "prefabs";
 
-type StoredPrimitiveAssetRow = Omit<StoredPrimitiveAsset, "viewBox"> & {
+type StoredPrimitiveAssetRow = Omit<StoredPrimitiveAsset, "viewBox" | "bezierPath"> & {
   viewBox: string;
+  bezierPath: string | null;
 };
 
 export type CreatePrimitiveAssetInput = {
@@ -27,10 +33,14 @@ export type CreatePrimitiveAssetInput = {
   name: string;
   sourceFilename: string;
   svgText: string;
+  assetKind: "filledPath" | "strokePath";
   viewBox: [number, number, number, number];
   pathD: string;
   fill: string;
   fillRule: "nonzero" | "evenodd";
+  stroke: string | null;
+  strokeWidth: number | null;
+  bezierPath: StructuredBezierPath;
 };
 
 export type CreateSceneInput = {
@@ -115,10 +125,14 @@ export function createDataStore(dataDir: string): DataStore {
         name TEXT NOT NULL,
         sourceFilename TEXT NOT NULL,
         sourcePath TEXT NOT NULL,
+        assetKind TEXT NOT NULL DEFAULT 'filledPath',
         viewBox TEXT NOT NULL,
         pathD TEXT NOT NULL,
         fill TEXT NOT NULL,
         fillRule TEXT NOT NULL,
+        stroke TEXT,
+        strokeWidth REAL,
+        bezierPath TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
         PRIMARY KEY (projectId, id),
@@ -147,6 +161,13 @@ export function createDataStore(dataDir: string): DataStore {
         FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
       );
     `);
+    ensurePrimitiveAssetColumn(
+      "assetKind",
+      "TEXT NOT NULL DEFAULT 'filledPath'",
+    );
+    ensurePrimitiveAssetColumn("stroke", "TEXT");
+    ensurePrimitiveAssetColumn("strokeWidth", "REAL");
+    ensurePrimitiveAssetColumn("bezierPath", "TEXT");
   }
 
   function close(): void {
@@ -211,8 +232,9 @@ export function createDataStore(dataDir: string): DataStore {
     const rows = database
       .prepare(
         `
-        SELECT id, projectId, name, sourceFilename, sourcePath, viewBox, pathD,
-          fill, fillRule, createdAt, updatedAt
+        SELECT id, projectId, name, sourceFilename, sourcePath, assetKind,
+          viewBox, pathD, fill, fillRule, stroke, strokeWidth, bezierPath,
+          createdAt, updatedAt
         FROM primitive_assets
         WHERE projectId = ?
         ORDER BY createdAt
@@ -242,10 +264,14 @@ export function createDataStore(dataDir: string): DataStore {
       name: input.name.trim(),
       sourceFilename: input.sourceFilename,
       sourcePath: relativeSourcePath,
+      assetKind: input.assetKind,
       viewBox: input.viewBox,
       pathD: input.pathD,
       fill: input.fill,
       fillRule: input.fillRule,
+      stroke: input.stroke,
+      strokeWidth: input.strokeWidth,
+      bezierPath: input.bezierPath,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -256,10 +282,11 @@ export function createDataStore(dataDir: string): DataStore {
       .prepare(
         `
         INSERT INTO primitive_assets (
-          id, projectId, name, sourceFilename, sourcePath, viewBox, pathD,
-          fill, fillRule, createdAt, updatedAt
+          id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
+          pathD, fill, fillRule, stroke, strokeWidth, bezierPath, createdAt,
+          updatedAt
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -268,10 +295,14 @@ export function createDataStore(dataDir: string): DataStore {
         asset.name,
         asset.sourceFilename,
         asset.sourcePath,
+        asset.assetKind,
         JSON.stringify(asset.viewBox),
         asset.pathD,
         asset.fill,
         asset.fillRule,
+        asset.stroke,
+        asset.strokeWidth,
+        JSON.stringify(asset.bezierPath),
         asset.createdAt,
         asset.updatedAt,
       );
@@ -604,6 +635,18 @@ export function createDataStore(dataDir: string): DataStore {
     return path.slice(resolvedDataDir.length + 1).replaceAll("\\", "/");
   }
 
+  function ensurePrimitiveAssetColumn(name: string, definition: string): void {
+    const columns = database
+      .prepare("PRAGMA table_info(primitive_assets)")
+      .all() as Array<{ name: string }>;
+
+    if (columns.some((column) => column.name === name)) {
+      return;
+    }
+
+    database.exec(`ALTER TABLE primitive_assets ADD COLUMN ${name} ${definition};`);
+  }
+
   return {
     dataDir: resolvedDataDir,
     ensureReady,
@@ -651,11 +694,35 @@ export function getServerPort(): number {
 function hydratePrimitiveAssetRow(
   row: StoredPrimitiveAssetRow,
 ): StoredPrimitiveAsset {
+  const assetKind = row.assetKind === "strokePath" ? "strokePath" : "filledPath";
+  const expectedClosed = assetKind === "filledPath";
+
   return {
     ...row,
+    assetKind,
     viewBox: JSON.parse(row.viewBox) as [number, number, number, number],
     fillRule: row.fillRule === "evenodd" ? "evenodd" : "nonzero",
+    stroke: assetKind === "strokePath" ? row.stroke : null,
+    strokeWidth:
+      assetKind === "strokePath" && typeof row.strokeWidth === "number"
+        ? row.strokeWidth
+        : null,
+    bezierPath: readStoredBezierPath(row.bezierPath, row.pathD, expectedClosed),
   };
+}
+
+function readStoredBezierPath(
+  value: string | null,
+  pathD: string,
+  expectedClosed: boolean,
+): StructuredBezierPath {
+  if (value) {
+    return validateStructuredBezierPath(JSON.parse(value) as StructuredBezierPath, {
+      expectedClosed,
+    });
+  }
+
+  return parsePathDToStructuredBezier(pathD, { expectedClosed });
 }
 
 function createUniqueId(baseId: string, existingIds: Set<string>): string {

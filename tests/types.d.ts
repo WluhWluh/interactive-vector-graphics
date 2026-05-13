@@ -1,15 +1,30 @@
 export {};
 
+type StructuredBezierPathDebug = {
+  version: 1;
+  closed: boolean;
+  segments: Array<{
+    id: string;
+    anchor: [number, number];
+    handleIn: [number, number];
+    handleOut: [number, number];
+  }>;
+};
+
 declare global {
   interface Window {
     __vectorStageDebug?: {
       getPrimitiveAssets: () => Array<{
         id: string;
+        assetKind: string;
         name: string;
         sourceUrl: string;
         viewBox: [number, number, number, number];
         fill: string;
         fillRule: string;
+        stroke: string | null;
+        strokeWidth: number | null;
+        bezierPath: StructuredBezierPathDebug;
         pathD: string;
       }>;
       getAssetLoadState: () => "loading" | "ready" | "error";
@@ -23,11 +38,15 @@ declare global {
       }>;
       getAssets: () => Array<{
         id: string;
+        assetKind: string;
         name: string;
         sourceUrl: string;
         viewBox: [number, number, number, number];
         fill: string;
         fillRule: string;
+        stroke: string | null;
+        strokeWidth: number | null;
+        bezierPath: StructuredBezierPathDebug;
         pathD: string;
       }>;
       getSelectedProjectId: () => string | null;

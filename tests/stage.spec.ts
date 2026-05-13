@@ -29,6 +29,9 @@ test("renders the empty stage and visible Path2D sample object", async ({
   expect(debugState?.loadState).toBe("ready");
   expect(debugState?.asset?.viewBox).toEqual([-100, -100, 200, 200]);
   expect(debugState?.asset?.fill).toBe("#ffcf4a");
+  expect(debugState?.asset?.bezierPath.version).toBe(1);
+  expect(debugState?.asset?.bezierPath.closed).toBe(true);
+  expect(debugState?.asset?.bezierPath.segments.length).toBeGreaterThanOrEqual(3);
   expect(debugState?.asset?.pathD).toContain("C -100 -66");
 
   await page.screenshot({
@@ -158,6 +161,8 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
   await expect(page.locator("#inspector-fields")).toContainText("uploaded-face");
   await expect(page.locator("#inspector-fields")).toContainText("#ffcf4a");
+  await expect(page.locator("#inspector-fields")).toContainText("Bezier Segments");
+  await expect(page.locator("#inspector-fields")).toContainText("Closed Path");
   await expect(page.getByRole("button", { name: "Group: Root Group" })).toBeVisible();
   await page.getByRole("button", { name: "Group: Root Group" }).click();
   await expect(page.locator("#delete-prefab-node-button")).toBeDisabled();
@@ -188,6 +193,11 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editorDebugState?.selectedProjectId).toBe("playwright-project");
   expect(editorDebugState?.selectedAssetId).toBe("uploaded-face");
   expect(editorDebugState?.importedAsset?.viewBox).toEqual([-50, -50, 100, 100]);
+  expect(editorDebugState?.importedAsset?.bezierPath.version).toBe(1);
+  expect(editorDebugState?.importedAsset?.bezierPath.closed).toBe(true);
+  expect(
+    editorDebugState?.importedAsset?.bezierPath.segments.length,
+  ).toBeGreaterThanOrEqual(3);
   expect(editorDebugState?.importedAsset?.sourceUrl).toBe(
     "projects/playwright-project/primitives/uploaded-face.svg",
   );
@@ -775,6 +785,82 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(afterProjectDeleteState.selectedProjectId).toBeNull();
 });
 
+test("imports and previews an open strokePath primitive", async ({ page }) => {
+  await page.goto("/editor.html");
+
+  await page.locator("#project-name-input").fill("Stroke Project");
+  await page.locator("#project-form").getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("button", { name: "Stroke Project" })).toBeVisible();
+
+  const strokeSvg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+    '<path fill="none" stroke="#5bc4bf" stroke-width="12" d="M 10 80 C 30 20 70 20 90 80" />',
+    "</svg>",
+  ].join("");
+
+  const fileInput = page.locator("#svg-file-input");
+
+  await fileInput.setInputFiles({
+    name: "leg-stroke.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(strokeSvg),
+  });
+
+  await expect(page.getByRole("button", { name: "Stroke: leg-stroke" })).toBeVisible();
+  await expect(page.locator("#inspector-fields")).toContainText("strokePath");
+  await expect(page.locator("#inspector-fields")).toContainText("#5bc4bf");
+  await expect(page.locator("#inspector-fields")).toContainText("12");
+  await expect(page.locator("#inspector-fields")).toContainText("Bezier Segments");
+  await expect(page.locator("#inspector-fields")).toContainText("Closed Path");
+
+  const strokeState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug?.getAssets().find((candidate) => candidate.id === "leg-stroke");
+
+    return {
+      asset,
+      selectedAssetId: debug?.getSelectedAssetId() ?? null,
+    };
+  });
+
+  expect(strokeState.asset).toMatchObject({
+    assetKind: "strokePath",
+    stroke: "#5bc4bf",
+    strokeWidth: 12,
+    bezierPath: {
+      version: 1,
+      closed: false,
+    },
+  });
+  expect(strokeState.asset?.bezierPath.segments).toHaveLength(2);
+  expect(strokeState.selectedAssetId).toBe("leg-stroke");
+  expect(await countTealPixels(page.locator("#vector-canvas"))).toBeGreaterThan(300);
+
+  await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
+  await expect(page.getByRole("button", { name: /Primitive: leg-stroke/ })).toBeVisible();
+  await expect(await countTealPixels(page.locator("#vector-canvas"))).toBeGreaterThan(300);
+
+  const closedStrokeSvg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
+    '<path fill="none" stroke="#5bc4bf" stroke-width="12" d="M 10 10 L 90 10 Z" />',
+    "</svg>",
+  ].join("");
+
+  await fileInput.setInputFiles({
+    name: "closed-stroke.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(closedStrokeSvg),
+  });
+
+  await expect(page.locator("#import-error")).toContainText(
+    "open path without Z commands",
+  );
+  await expect(page.getByRole("button", { name: "Stroke: closed-stroke" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Delete Project" }).click();
+  await expect(page.getByRole("button", { name: "Stroke Project" })).toHaveCount(0);
+});
+
 async function countWarmYellowPixels(vectorCanvas: Locator): Promise<number> {
   return vectorCanvas.evaluate((canvas) => {
     const target = canvas as HTMLCanvasElement;
@@ -794,6 +880,33 @@ async function countWarmYellowPixels(vectorCanvas: Locator): Promise<number> {
       const alpha = data[index + 3] ?? 0;
 
       if (red > 220 && green > 150 && green < 235 && blue < 120 && alpha > 180) {
+        matchingPixels += 1;
+      }
+    }
+
+    return matchingPixels;
+  });
+}
+
+async function countTealPixels(vectorCanvas: Locator): Promise<number> {
+  return vectorCanvas.evaluate((canvas) => {
+    const target = canvas as HTMLCanvasElement;
+    const context = target.getContext("2d");
+
+    if (!context) {
+      return 0;
+    }
+
+    const { data } = context.getImageData(0, 0, target.width, target.height);
+    let matchingPixels = 0;
+
+    for (let index = 0; index < data.length; index += 4) {
+      const red = data[index] ?? 0;
+      const green = data[index + 1] ?? 0;
+      const blue = data[index + 2] ?? 0;
+      const alpha = data[index + 3] ?? 0;
+
+      if (red > 60 && red < 130 && green > 160 && blue > 160 && alpha > 120) {
         matchingPixels += 1;
       }
     }

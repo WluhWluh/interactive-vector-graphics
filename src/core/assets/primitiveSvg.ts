@@ -1,4 +1,10 @@
+import {
+  parsePathDToStructuredBezier,
+  type StructuredBezierPath,
+} from "./structuredBezierPath";
+
 export type PrimitiveFillRule = "nonzero" | "evenodd";
+export type PrimitiveAssetKind = "filledPath" | "strokePath";
 
 export type PrimitiveAssetManifestEntry = {
   id: string;
@@ -11,16 +17,31 @@ export type PrimitiveAssetManifest = {
   assets: PrimitiveAssetManifestEntry[];
 };
 
-export type PrimitiveSvgAsset = {
+export type PrimitiveSvgAssetBase = {
   id: string;
   name: string;
   sourceUrl: string;
   viewBox: [number, number, number, number];
   pathD: string;
   path: Path2D;
+  bezierPath: StructuredBezierPath;
+};
+
+export type FilledPrimitiveSvgAsset = PrimitiveSvgAssetBase & {
+  assetKind: "filledPath";
   fill: string;
   fillRule: PrimitiveFillRule;
 };
+
+export type StrokePrimitiveSvgAsset = PrimitiveSvgAssetBase & {
+  assetKind: "strokePath";
+  stroke: string;
+  strokeWidth: number;
+};
+
+export type PrimitiveSvgAsset =
+  | FilledPrimitiveSvgAsset
+  | StrokePrimitiveSvgAsset;
 
 export type SvgImportContext = {
   id: string;
@@ -29,7 +50,15 @@ export type SvgImportContext = {
 };
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-const ALLOWED_STYLE_PROPERTIES = new Set(["fill", "fill-rule"]);
+const ALLOWED_STYLE_PROPERTIES = new Set([
+  "fill",
+  "fill-rule",
+  "stroke",
+  "stroke-width",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-miterlimit",
+]);
 const UNSUPPORTED_ELEMENT_NAMES = new Set([
   "defs",
   "clipPath",
@@ -191,16 +220,34 @@ export function importPrimitiveSvg(
 
   const viewBox = parseViewBox(svg.getAttribute("viewBox"), context);
   const pathElement = selectSinglePathElement(svg, context);
-  const pathD = readRequiredPathData(pathElement, context);
-  const styles = readPathStyles(pathElement, context);
+  rejectPathAttributes(pathElement, context);
 
-  return {
+  const pathD = readRequiredPathData(pathElement, context);
+  const styles = readPathStyles(pathElement, pathD, context);
+  const baseAsset = {
     id: context.id,
     name: context.name,
     sourceUrl: context.sourceUrl,
     viewBox,
     pathD,
     path: new Path2D(pathD),
+    bezierPath: parsePathDToStructuredBezier(pathD, {
+      expectedClosed: styles.assetKind === "filledPath",
+    }),
+  };
+
+  if (styles.assetKind === "strokePath") {
+    return {
+      ...baseAsset,
+      assetKind: "strokePath",
+      stroke: styles.stroke,
+      strokeWidth: styles.strokeWidth,
+    };
+  }
+
+  return {
+    ...baseAsset,
+    assetKind: "filledPath",
     fill: styles.fill,
     fillRule: styles.fillRule,
   };
@@ -367,19 +414,10 @@ function readRequiredPathData(
   pathElement: SVGPathElement,
   context: SvgImportContext,
 ): string {
-  rejectPathAttributes(pathElement, context);
-
   const pathD = pathElement.getAttribute("d")?.trim();
 
   if (!pathD) {
     throw new PrimitiveSvgImportError(context, "the path d attribute is required");
-  }
-
-  if (!/[zZ]\s*$/.test(pathD)) {
-    throw new PrimitiveSvgImportError(
-      context,
-      "the path must be closed with a final Z command",
-    );
   }
 
   return pathD;
@@ -390,16 +428,12 @@ function rejectPathAttributes(
   context: SvgImportContext,
 ): void {
   const rejectedAttributes = [
-    "stroke",
-    "stroke-width",
-    "stroke-linecap",
-    "stroke-linejoin",
-    "stroke-miterlimit",
     "stroke-dasharray",
     "transform",
     "class",
     "opacity",
     "fill-opacity",
+    "stroke-opacity",
   ];
 
   for (const attribute of rejectedAttributes) {
@@ -414,27 +448,94 @@ function rejectPathAttributes(
 
 function readPathStyles(
   pathElement: SVGPathElement,
+  pathD: string,
   context: SvgImportContext,
-): { fill: string; fillRule: PrimitiveFillRule } {
+):
+  | {
+      assetKind: "filledPath";
+      fill: string;
+      fillRule: PrimitiveFillRule;
+    }
+  | {
+      assetKind: "strokePath";
+      stroke: string;
+      strokeWidth: number;
+    } {
   const inlineStyles = parseInlineStyle(pathElement.getAttribute("style"), context);
-  const fill = pathElement.getAttribute("fill") ?? inlineStyles.fill;
+  const fill = pathElement.getAttribute("fill") ?? inlineStyles.fill ?? null;
+  const stroke = pathElement.getAttribute("stroke") ?? inlineStyles.stroke ?? null;
+  const strokeWidth =
+    pathElement.getAttribute("stroke-width") ?? inlineStyles["stroke-width"] ?? null;
   const fillRule = normalizeFillRule(
     pathElement.getAttribute("fill-rule") ?? inlineStyles["fill-rule"] ?? "nonzero",
     context,
   );
+  const hasSolidFill = fill !== null && fill !== "none";
+  const hasNoFill = fill === "none";
+  const hasSolidStroke = stroke !== null && stroke !== "none";
 
-  if (!fill) {
+  if (hasSolidFill && hasSolidStroke) {
+    throw new PrimitiveSvgImportError(
+      context,
+      "a primitive path cannot mix solid fill and stroke",
+    );
+  }
+
+  if (hasSolidStroke) {
+    if (!hasNoFill) {
+      throw new PrimitiveSvgImportError(
+        context,
+        "strokePath assets must explicitly use fill=\"none\"",
+      );
+    }
+
+    if (/[zZ]/.test(pathD)) {
+      throw new PrimitiveSvgImportError(
+        context,
+        "strokePath assets must use an open path without Z commands",
+      );
+    }
+
+    if (stroke.startsWith("url(")) {
+      throw new PrimitiveSvgImportError(
+        context,
+        "stroke must be a solid color, not a paint server",
+      );
+    }
+
+    return {
+      assetKind: "strokePath",
+      stroke,
+      strokeWidth: normalizeStrokeWidth(strokeWidth, context),
+    };
+  }
+
+  if (hasNoFill) {
+    throw new PrimitiveSvgImportError(
+      context,
+      "strokePath assets must define stroke",
+    );
+  }
+
+  if (!hasSolidFill) {
     throw new PrimitiveSvgImportError(context, "fill is required");
   }
 
-  if (fill === "none" || fill.startsWith("url(")) {
+  if (fill.startsWith("url(")) {
     throw new PrimitiveSvgImportError(
       context,
       "fill must be a solid color, not none or a paint server",
     );
   }
 
-  return { fill, fillRule };
+  if (!/[zZ]\s*$/.test(pathD)) {
+    throw new PrimitiveSvgImportError(
+      context,
+      "filledPath assets must be closed with a final Z command",
+    );
+  }
+
+  return { assetKind: "filledPath", fill, fillRule };
 }
 
 function parseInlineStyle(
@@ -475,6 +576,30 @@ function parseInlineStyle(
   }
 
   return output;
+}
+
+function normalizeStrokeWidth(
+  value: string | null,
+  context: SvgImportContext,
+): number {
+  if (!value) {
+    throw new PrimitiveSvgImportError(
+      context,
+      "strokePath assets must define stroke-width",
+    );
+  }
+
+  const match = /^(\d+(?:\.\d+)?|\.\d+)(px)?$/.exec(value.trim());
+  const strokeWidth = match ? Number(match[1]) : Number.NaN;
+
+  if (!Number.isFinite(strokeWidth) || strokeWidth <= 0) {
+    throw new PrimitiveSvgImportError(
+      context,
+      "stroke-width must be a positive number or px value",
+    );
+  }
+
+  return strokeWidth;
 }
 
 function normalizeFillRule(

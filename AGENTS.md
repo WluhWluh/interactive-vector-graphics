@@ -36,17 +36,25 @@ than to the heavier 3D/game look of Star Birds.
 
 ## Primitive SVG Import Rules
 
-- First-stage SVG assets are strict primitives: one file, one solid-color closed
-  `<path>`, no stroke.
+- SVG assets are strict primitives: one file, one path. Supported kinds are
+  `filledPath` for solid-color closed paths and `strokePath` for open paths with
+  `fill="none"`, solid `stroke`, and positive `stroke-width`.
 - A single wrapper `<g>` is allowed only when it has no transform, class, or
   style.
-- `fill` and `fill-rule` may be read from attributes or from the path `style`
-  attribute.
+- Supported fill/stroke values may be read from attributes or from the path
+  `style` attribute.
+- `strokePath` assets always render as solid round-cap, round-join lines; do not
+  expose cap/join/dash editing until a later explicit milestone.
 - Reject complex SVG features instead of trying to clean them automatically:
-  multiple paths, transforms, gradients, filters, masks, clips, text, images,
+  multiple paths, filled open paths, closed stroked paths, mixed fill/stroke,
+  stroke dashes, transforms, gradients, filters, masks, clips, text, images,
   symbols, class styles, opacity, and basic shape elements.
 - Compose birds, characters, props, and animated forms later in the editor from
   multiple primitive assets rather than exporting grouped character SVGs.
+- Store structured Bezier path data for every imported primitive. The original
+  SVG `pathD` remains the current rendering source, while the normalized segment
+  list is reserved for future Path Edit Mode, anchor/handle editing, and path
+  deformation animation.
 
 ## Entrypoint Rules
 

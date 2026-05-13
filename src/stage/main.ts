@@ -3,6 +3,7 @@ import {
   PrimitiveAssetRegistry,
   type PrimitiveSvgAsset,
 } from "../core/assets/primitiveSvg";
+import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
 import { CanvasStage } from "../core/stage/canvasStage";
 import {
   drawCenteredStatus,
@@ -42,11 +43,15 @@ declare global {
     __vectorStageDebug?: {
       getPrimitiveAssets: () => Array<{
         id: string;
+        assetKind: string;
         name: string;
         sourceUrl: string;
         viewBox: [number, number, number, number];
         fill: string;
         fillRule: string;
+        stroke: string | null;
+        strokeWidth: number | null;
+        bezierPath: StructuredBezierPath;
         pathD: string;
       }>;
       getAssetLoadState: () => AssetLoadState["status"];
@@ -75,11 +80,15 @@ function exposeDebugHooks(): void {
     getPrimitiveAssets: () =>
       assetRegistry.snapshot().map((asset) => ({
         id: asset.id,
+        assetKind: asset.assetKind,
         name: asset.name,
         sourceUrl: asset.sourceUrl,
         viewBox: asset.viewBox,
-        fill: asset.fill,
-        fillRule: asset.fillRule,
+        fill: asset.assetKind === "filledPath" ? asset.fill : "none",
+        fillRule: asset.assetKind === "filledPath" ? asset.fillRule : "nonzero",
+        stroke: asset.assetKind === "strokePath" ? asset.stroke : null,
+        strokeWidth: asset.assetKind === "strokePath" ? asset.strokeWidth : null,
+        bezierPath: asset.bezierPath,
         pathD: asset.pathD,
       })),
     getAssetLoadState: () => assetLoadState.status,
