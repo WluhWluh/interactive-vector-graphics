@@ -23,6 +23,12 @@ import {
   savePrefab,
   saveScene,
   uploadAsset,
+  type PrefabAnimation,
+  type PrefabAnimationKeyframe,
+  type PrefabAnimationClip,
+  type PrefabAnimationTrack,
+  type PrefabTrackEasing,
+  type PrefabTrackProperty,
   type PrefabDocument,
   type PrefabNode,
   type PrefabRecord,
@@ -44,6 +50,11 @@ import {
 
 type EditorMode = "asset" | "scene";
 type TransformProperty = "position" | "rotation" | "scale";
+type TimelineVectorProperty = PrefabTrackProperty;
+type TimelinePointerDrag = {
+  keyframeId: string;
+  property: PrefabTrackProperty;
+};
 type SceneCreateSource = "empty" | "current";
 type PrefabSelectionId = string | typeof PREFAB_ROOT_NODE_ID;
 type PrefabClipboardMode = "copy" | "cut";
@@ -79,6 +90,29 @@ type EditorElements = {
   prefabCopyButton: HTMLButtonElement;
   prefabCutButton: HTMLButtonElement;
   deletePrefabNodeButton: HTMLButtonElement;
+  prefabTimelinePanel: HTMLElement;
+  timelineClipNameInput: HTMLInputElement;
+  timelineCreateClipButton: HTMLButtonElement;
+  timelineClipList: HTMLUListElement;
+  timelineDeleteClipButton: HTMLButtonElement;
+  timelinePlayButton: HTMLButtonElement;
+  timelinePauseButton: HTMLButtonElement;
+  timelineStopButton: HTMLButtonElement;
+  timelineTimeInput: HTMLInputElement;
+  timelineDurationInput: HTMLInputElement;
+  timelineSnapFpsInput: HTMLInputElement;
+  timelineLoopInput: HTMLInputElement;
+  timelineScrubInput: HTMLInputElement;
+  timelineTrackLanes: HTMLDivElement;
+  timelineAddKeyframeButton: HTMLButtonElement;
+  timelineStatus: HTMLSpanElement;
+  timelineKeyframeEditor: HTMLDivElement;
+  timelineKeyframeTimeInput: HTMLInputElement;
+  timelineKeyframeValueXInput: HTMLInputElement;
+  timelineKeyframeValueYInput: HTMLInputElement;
+  timelineKeyframeValueZInput: HTMLInputElement;
+  timelineKeyframeEasingSelect: HTMLSelectElement;
+  timelineDeleteKeyframeButton: HTMLButtonElement;
   sceneNameInput: HTMLInputElement;
   sceneList: HTMLUListElement;
   createSceneButton: HTMLButtonElement;
@@ -133,6 +167,13 @@ const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const EXPANDED_ARROW = "▴";
 const COLLAPSED_ARROW = "▾";
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
+const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
+  "position",
+  "rotation",
+  "scale",
+];
+const DEFAULT_PREFAB_SNAP_FPS = 10;
+const DEFAULT_TIMELINE_DURATION_MS = 1000;
 
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
@@ -152,6 +193,11 @@ let selectedAssetId: string | null = null;
 let selectedPrefabId: string | null = null;
 let loadedPrefabId: string | null = null;
 let selectedPrefabNodeId: PrefabSelectionId | null = PREFAB_ROOT_NODE_ID;
+let prefabAnimation: PrefabAnimation = createEmptyPrefabAnimation();
+let timelineCurrentTimeMs = 0;
+let isTimelinePlaying = false;
+let selectedTimelineKeyframeId: string | null = null;
+let timelinePointerDrag: TimelinePointerDrag | null = null;
 let selectedSceneId: string | null = null;
 let loadedSceneId: string | null = null;
 let selectedSceneNodeId: string | null = null;
@@ -191,6 +237,15 @@ declare global {
           mode: PrefabClipboardMode;
           sourceNodeId: string;
         } | null;
+      };
+      getPrefabTimeline: () => {
+        animation: PrefabAnimation;
+        currentTimeMs: number;
+        isPlaying: boolean;
+        selectedClipId: string | null;
+        activeTrackProperty: PrefabTrackProperty;
+        selectedKeyframeId: string | null;
+        evaluatedNodes: PrefabNode[];
       };
       getExperimentScene: () => {
         camera: {
@@ -264,6 +319,83 @@ function bindEditorEvents(): void {
   });
   elements.deletePrefabNodeButton.addEventListener("click", () => {
     deleteSelectedPrefabNode();
+  });
+  elements.timelineCreateClipButton.addEventListener("click", () => {
+    createTimelineClipFromInput();
+  });
+  elements.timelineDeleteClipButton.addEventListener("click", () => {
+    deleteSelectedTimelineClip();
+  });
+  elements.timelinePlayButton.addEventListener("click", () => {
+    playTimeline();
+  });
+  elements.timelinePauseButton.addEventListener("click", () => {
+    pauseTimeline();
+  });
+  elements.timelineStopButton.addEventListener("click", () => {
+    stopTimeline();
+  });
+  elements.timelineTimeInput.addEventListener("blur", () => {
+    applyTimelineTimeInput();
+  });
+  elements.timelineTimeInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      elements.timelineTimeInput.blur();
+    }
+  });
+  elements.timelineDurationInput.addEventListener("blur", () => {
+    applyTimelineDurationInput();
+  });
+  elements.timelineDurationInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      elements.timelineDurationInput.blur();
+    }
+  });
+  elements.timelineSnapFpsInput.addEventListener("blur", () => {
+    applyTimelineSnapFpsInput();
+  });
+  elements.timelineSnapFpsInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      elements.timelineSnapFpsInput.blur();
+    }
+  });
+  elements.timelineLoopInput.addEventListener("change", () => {
+    applyTimelineLoopInput();
+  });
+  elements.timelineScrubInput.addEventListener("input", () => {
+    scrubTimelineTo(Number(elements.timelineScrubInput.value));
+  });
+  elements.timelineAddKeyframeButton.addEventListener("click", () => {
+    addKeyframeForSelectedPrefabNode();
+  });
+  elements.timelineKeyframeTimeInput.addEventListener("blur", () => {
+    applySelectedKeyframeTimeInput();
+  });
+  elements.timelineKeyframeTimeInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      elements.timelineKeyframeTimeInput.blur();
+    }
+  });
+  elements.timelineKeyframeValueXInput.addEventListener("blur", () => {
+    applySelectedKeyframeValueInput();
+  });
+  elements.timelineKeyframeValueYInput.addEventListener("blur", () => {
+    applySelectedKeyframeValueInput();
+  });
+  elements.timelineKeyframeValueZInput.addEventListener("blur", () => {
+    applySelectedKeyframeValueInput();
+  });
+  elements.timelineKeyframeEasingSelect.addEventListener("change", () => {
+    applySelectedKeyframeEasingInput();
+  });
+  elements.timelineDeleteKeyframeButton.addEventListener("click", () => {
+    deleteSelectedTimelineKeyframe();
+  });
+  window.addEventListener("pointermove", (event) => {
+    dragSelectedTimelineKeyframe(event);
+  });
+  window.addEventListener("pointerup", () => {
+    timelinePointerDrag = null;
   });
   elements.createSceneButton.addEventListener("click", () => {
     void createSceneFromInput("empty");
@@ -392,6 +524,7 @@ async function refreshPrefabs(): Promise<void> {
     loadedPrefabId = null;
     selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
     pendingPrefabClipboard = null;
+    resetPrefabTimelineState();
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
@@ -422,6 +555,7 @@ async function refreshPrefabs(): Promise<void> {
     prefabNodes = [];
     selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
     pendingPrefabClipboard = null;
+    resetPrefabTimelineState();
   }
 
   if (editorMode === "asset") {
@@ -626,6 +760,7 @@ async function deleteSelectedPrefab(): Promise<void> {
 
     if (loadedPrefabId === deletedPrefabId) {
       prefabNodes = [];
+      resetPrefabTimelineState();
       selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
       pendingPrefabClipboard = null;
       loadedPrefabId = null;
@@ -661,6 +796,7 @@ function createPrefabGroup(): void {
 
   prefabNodes = [...prefabNodes, node];
   selectedPrefabNodeId = node.id;
+  pauseTimeline();
   loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
@@ -690,6 +826,7 @@ function addSelectedAssetToPrefab(): void {
   prefabNodes = [...prefabNodes, node];
   selectedPrefabNodeId = node.id;
   selectedAssetId = selectedAsset.id;
+  pauseTimeline();
   loadedPrefabId = null;
   lastImportError = null;
   hideError();
@@ -707,6 +844,7 @@ function deleteSelectedPrefabNode(): void {
   prefabNodes = prefabNodes.filter((node) => !deletedNodeIds.has(node.id));
   selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
   clearInvalidPrefabClipboard();
+  pauseTimeline();
   loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
@@ -880,6 +1018,7 @@ function clearProjectWorkspace(): void {
   prefabDocuments = new Map();
   scenes = [];
   prefabNodes = [];
+  resetPrefabTimelineState();
   sceneNodes = [];
   selectedAssetId = null;
   selectedPrefabId = null;
@@ -907,13 +1046,18 @@ function clearSceneLayout(): void {
 
 function createCurrentPrefabDocument(): PrefabDocument {
   return {
-    version: 1,
+    version: 3,
     nodes: prefabNodes.map(clonePrefabNode),
+    animation: clonePrefabAnimation(prefabAnimation),
   };
 }
 
 function applyPrefabDocument(document: PrefabDocument): void {
   prefabNodes = document.nodes.map(clonePrefabNode);
+  prefabAnimation = clonePrefabAnimation(document.animation);
+  timelineCurrentTimeMs = 0;
+  isTimelinePlaying = false;
+  selectedTimelineKeyframeId = null;
   selectedPrefabNodeId = prefabNodes[0]?.id ?? PREFAB_ROOT_NODE_ID;
   clearInvalidPrefabClipboard();
   nextPrefabNodeNumber = getNextNodeNumber(
@@ -1005,6 +1149,7 @@ function rebuildViewportProxies(): void {
 
 function syncNodeFromViewport(nodeId: string): void {
   if (editorMode === "asset") {
+    pauseTimeline();
     const node = getPrefabNode(nodeId);
 
     if (!node) {
@@ -1054,6 +1199,609 @@ function syncSelectionFromPrefabNode(): void {
   if (node?.kind === "primitive" && node.assetId) {
     selectedAssetId = node.assetId;
   }
+}
+
+function getActiveTimelineClip(): PrefabAnimationClip | null {
+  return prefabAnimation.activeClipId
+    ? (prefabAnimation.clips.find(
+        (clip) => clip.id === prefabAnimation.activeClipId,
+      ) ?? null)
+    : null;
+}
+
+function getActiveTimelineProperty(): PrefabTrackProperty {
+  switch (threeViewport.currentTransformMode) {
+    case "rotate":
+      return "rotation";
+    case "scale":
+      return "scale";
+    case "translate":
+      return "position";
+  }
+}
+
+function setActiveTimelineProperty(property: PrefabTrackProperty): void {
+  const mode: TransformMode =
+    property === "rotation" ? "rotate" : property === "scale" ? "scale" : "translate";
+  setTransformMode(mode);
+}
+
+function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
+  prefabAnimation = {
+    ...prefabAnimation,
+    activeClipId: nextClip.id,
+    clips: prefabAnimation.clips.map((clip) =>
+      clip.id === nextClip.id ? clonePrefabAnimationClip(nextClip) : clonePrefabAnimationClip(clip),
+    ),
+  };
+}
+
+function updateTimelinePlayback(deltaSeconds: number): void {
+  if (!isTimelinePlaying) {
+    return;
+  }
+
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip || activeClip.durationMs <= 0) {
+    isTimelinePlaying = false;
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return;
+  }
+
+  const nextTimeMs = timelineCurrentTimeMs + deltaSeconds * 1000;
+
+  if (nextTimeMs > activeClip.durationMs) {
+    if (activeClip.loop) {
+      timelineCurrentTimeMs = Math.round(nextTimeMs % activeClip.durationMs);
+    } else {
+      timelineCurrentTimeMs = activeClip.durationMs;
+      isTimelinePlaying = false;
+    }
+  } else {
+    timelineCurrentTimeMs = Math.round(nextTimeMs);
+  }
+
+  renderPrefabTimeline();
+  exposeEditorDebugHooks();
+}
+
+function getEvaluatedPrefabNodes(): PrefabNode[] {
+  const nodes = prefabNodes.map(clonePrefabNode);
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip) {
+    return nodes;
+  }
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const timeMs = clampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
+
+  for (const track of activeClip.tracks) {
+    const node = nodeById.get(track.target.nodeId);
+
+    if (!node) {
+      continue;
+    }
+
+    const value = evaluatePrefabTrack(track, timeMs);
+
+    if (value) {
+      node[track.target.property] = value;
+    }
+  }
+
+  return nodes;
+}
+
+function evaluatePrefabTrack(
+  track: PrefabAnimationTrack,
+  timeMs: number,
+): Vector3Tuple | null {
+  const keyframes = [...track.keyframes].sort((a, b) => a.timeMs - b.timeMs);
+
+  if (keyframes.length === 0) {
+    return null;
+  }
+
+  const firstKeyframe = keyframes[0];
+  const lastKeyframe = keyframes[keyframes.length - 1];
+
+  if (!firstKeyframe || !lastKeyframe) {
+    return null;
+  }
+
+  if (timeMs <= firstKeyframe.timeMs) {
+    return [...firstKeyframe.value];
+  }
+
+  if (timeMs >= lastKeyframe.timeMs) {
+    return [...lastKeyframe.value];
+  }
+
+  for (let index = 0; index < keyframes.length - 1; index += 1) {
+    const current = keyframes[index];
+    const next = keyframes[index + 1];
+
+    if (!current || !next || timeMs < current.timeMs || timeMs > next.timeMs) {
+      continue;
+    }
+
+    if (current.easing === "step" || current.timeMs === next.timeMs) {
+      return [...current.value];
+    }
+
+    const span = next.timeMs - current.timeMs;
+    const rawProgress = (timeMs - current.timeMs) / span;
+    const progress =
+      current.easing === "easeInOut"
+        ? smoothstep(rawProgress)
+        : rawProgress;
+
+    return lerpVector3(current.value, next.value, progress);
+  }
+
+  return null;
+}
+
+function upsertPrefabKeyframe(
+  clip: PrefabAnimationClip,
+  input: {
+    nodeId: string;
+    property: PrefabTrackProperty;
+    timeMs: number;
+    value: Vector3Tuple;
+    easing: PrefabTrackEasing;
+  },
+): PrefabAnimationClip {
+  const trackId = `${input.nodeId}-${input.property}`;
+  const tracks = clip.tracks.map(clonePrefabAnimationTrack);
+  let track = tracks.find(
+    (candidate) =>
+      candidate.target.nodeId === input.nodeId &&
+      candidate.target.property === input.property,
+  );
+
+  if (!track) {
+    track = {
+      id: createUniqueTimelineTrackId(trackId, tracks),
+      target: {
+        nodeId: input.nodeId,
+        property: input.property,
+      },
+      keyframes: [],
+    };
+    tracks.push(track);
+  }
+
+  const snappedTimeMs = snapTimelineTimeMs(input.timeMs);
+  const nextKeyframe = {
+    id: "",
+    timeMs: snappedTimeMs,
+    value: [...input.value] as Vector3Tuple,
+    easing: input.easing,
+  };
+  const existingIndex = track.keyframes.findIndex(
+    (keyframe) => keyframe.timeMs === snappedTimeMs,
+  );
+
+  if (existingIndex >= 0) {
+    const existingKeyframe = track.keyframes[existingIndex];
+    track.keyframes[existingIndex] = {
+      ...nextKeyframe,
+      id: existingKeyframe?.id ?? createUniqueTimelineKeyframeId(track),
+    };
+    selectedTimelineKeyframeId = track.keyframes[existingIndex]?.id ?? null;
+  } else {
+    const createdKeyframe = {
+      ...nextKeyframe,
+      id: createUniqueTimelineKeyframeId(track),
+    };
+    track.keyframes.push(createdKeyframe);
+    selectedTimelineKeyframeId = createdKeyframe.id;
+  }
+
+  track.keyframes.sort((a, b) => a.timeMs - b.timeMs);
+
+  return {
+    ...clip,
+    tracks,
+  };
+}
+
+function createTimelineClipFromInput(): void {
+  if (!selectedProjectId) {
+    setImportError(new Error("Create or select a project before creating a clip."));
+    return;
+  }
+
+  const name = elements.timelineClipNameInput.value.trim();
+
+  if (!name) {
+    setImportError(new Error("Clip name is required."));
+    return;
+  }
+
+  const clip: PrefabAnimationClip = {
+    id: createUniqueTimelineClipId(name),
+    name,
+    durationMs: DEFAULT_TIMELINE_DURATION_MS,
+    loop: true,
+    tracks: [],
+  };
+
+  prefabAnimation = {
+    ...prefabAnimation,
+    activeClipId: clip.id,
+    clips: [...prefabAnimation.clips.map(clonePrefabAnimationClip), clip],
+  };
+  timelineCurrentTimeMs = 0;
+  isTimelinePlaying = false;
+  selectedTimelineKeyframeId = null;
+  loadedPrefabId = null;
+  elements.timelineClipNameInput.value = "";
+  lastImportError = null;
+  hideError();
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function deleteSelectedTimelineClip(): void {
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip) {
+    return;
+  }
+
+  prefabAnimation = {
+    ...prefabAnimation,
+    activeClipId: null,
+    clips: prefabAnimation.clips
+      .filter((clip) => clip.id !== activeClip.id)
+      .map(clonePrefabAnimationClip),
+  };
+  timelineCurrentTimeMs = 0;
+  isTimelinePlaying = false;
+  selectedTimelineKeyframeId = null;
+  loadedPrefabId = null;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function selectTimelineClip(clipId: string): void {
+  const clip = prefabAnimation.clips.find((candidate) => candidate.id === clipId);
+
+  if (!clip) {
+    return;
+  }
+
+  prefabAnimation = {
+    ...prefabAnimation,
+    activeClipId: clip.id,
+    clips: prefabAnimation.clips.map(clonePrefabAnimationClip),
+  };
+  timelineCurrentTimeMs = clampTimelineTimeMs(timelineCurrentTimeMs, clip);
+  isTimelinePlaying = false;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function playTimeline(): void {
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip || activeClip.durationMs <= 0) {
+    return;
+  }
+
+  isTimelinePlaying = true;
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function pauseTimeline(): void {
+  if (!isTimelinePlaying) {
+    return;
+  }
+
+  isTimelinePlaying = false;
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function stopTimeline(): void {
+  isTimelinePlaying = false;
+  timelineCurrentTimeMs = 0;
+  selectedTimelineKeyframeId = null;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function scrubTimelineTo(timeMs: number): void {
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip || !Number.isFinite(timeMs)) {
+    return;
+  }
+
+  timelineCurrentTimeMs = clampTimelineTimeMs(Math.round(timeMs), activeClip);
+  isTimelinePlaying = false;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function applyTimelineTimeInput(): void {
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip) {
+    return;
+  }
+
+  scrubTimelineTo(
+    snapAndClampTimelineTimeMs(Number(elements.timelineTimeInput.value.trim()), activeClip),
+  );
+}
+
+function applyTimelineDurationInput(): void {
+  const activeClip = getActiveTimelineClip();
+  const nextDuration = Number(elements.timelineDurationInput.value.trim());
+
+  if (
+    !activeClip ||
+    !Number.isFinite(nextDuration) ||
+    nextDuration < 0 ||
+    !Number.isInteger(nextDuration)
+  ) {
+    renderEditorShell();
+    return;
+  }
+
+  const durationMs = Math.round(nextDuration);
+  updateActiveTimelineClip({
+    ...activeClip,
+    durationMs,
+    tracks: activeClip.tracks.map((track) => ({
+      ...clonePrefabAnimationTrack(track),
+      keyframes: track.keyframes.map(clonePrefabAnimationKeyframe),
+    })),
+  });
+  timelineCurrentTimeMs = clampTimelineTimeMs(
+    timelineCurrentTimeMs,
+    getActiveTimelineClip(),
+  );
+  isTimelinePlaying = false;
+  loadedPrefabId = null;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function applyTimelineLoopInput(): void {
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip) {
+    return;
+  }
+
+  updateActiveTimelineClip({
+    ...activeClip,
+    loop: elements.timelineLoopInput.checked,
+  });
+  loadedPrefabId = null;
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function applyTimelineSnapFpsInput(): void {
+  const nextSnapFps = Number(elements.timelineSnapFpsInput.value.trim());
+
+  if (!Number.isFinite(nextSnapFps) || nextSnapFps < 1 || nextSnapFps > 240) {
+    renderEditorShell();
+    return;
+  }
+
+  prefabAnimation = {
+    ...clonePrefabAnimation(prefabAnimation),
+    snapFps: roundTimelineNumber(nextSnapFps),
+  };
+  loadedPrefabId = null;
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function applySelectedKeyframeTimeInput(): void {
+  const activeClip = getActiveTimelineClip();
+  const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
+  const nextTimeMs = Number(elements.timelineKeyframeTimeInput.value.trim());
+
+  if (!activeClip || !selected || !Number.isFinite(nextTimeMs)) {
+    renderEditorShell();
+    return;
+  }
+
+  updateSelectedTimelineKeyframe({
+    ...selected.keyframe,
+    timeMs: snapAndClampTimelineTimeMs(nextTimeMs, activeClip),
+  });
+}
+
+function applySelectedKeyframeValueInput(): void {
+  const activeClip = getActiveTimelineClip();
+  const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
+  const x = Number(elements.timelineKeyframeValueXInput.value.trim());
+  const y = Number(elements.timelineKeyframeValueYInput.value.trim());
+  const z = Number(elements.timelineKeyframeValueZInput.value.trim());
+
+  if (
+    !selected ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(z)
+  ) {
+    renderEditorShell();
+    return;
+  }
+
+  updateSelectedTimelineKeyframe({
+    ...selected.keyframe,
+    value: [roundTransformValue(x), roundTransformValue(y), roundTransformValue(z)],
+  });
+}
+
+function applySelectedKeyframeEasingInput(): void {
+  const activeClip = getActiveTimelineClip();
+  const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
+  const easing = elements.timelineKeyframeEasingSelect.value as PrefabTrackEasing;
+
+  if (!selected || !["linear", "step", "easeInOut"].includes(easing)) {
+    renderEditorShell();
+    return;
+  }
+
+  updateSelectedTimelineKeyframe({
+    ...selected.keyframe,
+    easing,
+  });
+}
+
+function deleteSelectedTimelineKeyframe(): void {
+  const activeClip = getActiveTimelineClip();
+  const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
+
+  if (!activeClip || !selected) {
+    return;
+  }
+
+  const nextClip = {
+    ...activeClip,
+    tracks: activeClip.tracks.map((track) =>
+      track.id === selected.track.id
+        ? {
+            ...clonePrefabAnimationTrack(track),
+            keyframes: track.keyframes
+              .filter((keyframe) => keyframe.id !== selected.keyframe.id)
+              .map(clonePrefabAnimationKeyframe),
+          }
+        : clonePrefabAnimationTrack(track),
+    ),
+  };
+
+  selectedTimelineKeyframeId = null;
+  updateActiveTimelineClip(nextClip);
+  loadedPrefabId = null;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function updateSelectedTimelineKeyframe(nextKeyframe: PrefabAnimationKeyframe): void {
+  const activeClip = getActiveTimelineClip();
+  const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
+
+  if (!activeClip || !selected) {
+    return;
+  }
+
+  const nextTimeMs = clampTimelineTimeMs(nextKeyframe.timeMs, activeClip);
+  const nextClip = {
+    ...activeClip,
+    tracks: activeClip.tracks.map((track) => {
+      if (track.id !== selected.track.id) {
+        return clonePrefabAnimationTrack(track);
+      }
+
+      const nextKeyframes = track.keyframes
+        .filter((keyframe) => keyframe.id !== selected.keyframe.id)
+        .filter((keyframe) => keyframe.timeMs !== nextTimeMs)
+        .map(clonePrefabAnimationKeyframe);
+
+      nextKeyframes.push({
+        ...nextKeyframe,
+        timeMs: nextTimeMs,
+      });
+      nextKeyframes.sort((a, b) => a.timeMs - b.timeMs);
+
+      return {
+        ...clonePrefabAnimationTrack(track),
+        keyframes: nextKeyframes,
+      };
+    }),
+  };
+
+  selectedTimelineKeyframeId = nextKeyframe.id;
+  timelineCurrentTimeMs = nextTimeMs;
+  updateActiveTimelineClip(nextClip);
+  loadedPrefabId = null;
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function dragSelectedTimelineKeyframe(event: PointerEvent): void {
+  if (!timelinePointerDrag) {
+    return;
+  }
+
+  const activeClip = getActiveTimelineClip();
+  const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
+
+  if (!activeClip || !selected) {
+    timelinePointerDrag = null;
+    return;
+  }
+
+  const trackBar = document.querySelector(
+    `.timeline-track-bar[data-timeline-property="${timelinePointerDrag.property}"]`,
+  );
+
+  if (!(trackBar instanceof HTMLElement)) {
+    return;
+  }
+
+  const nextTimeMs = timeMsFromTimelinePointer(event, activeClip, trackBar);
+  updateSelectedTimelineKeyframe({
+    ...selected.keyframe,
+    timeMs: nextTimeMs,
+  });
+}
+
+function addKeyframeForSelectedPrefabNode(): void {
+  const activeClip = getActiveTimelineClip();
+  const selectedNode =
+    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
+
+  if (!activeClip || !selectedNode) {
+    setImportError(new Error("Select a real prefab node and an active clip first."));
+    return;
+  }
+
+  const property = getActiveTimelineProperty();
+  const timeMs = snapAndClampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
+  let nextClip = clonePrefabAnimationClip(activeClip);
+
+  nextClip = upsertPrefabKeyframe(nextClip, {
+    nodeId: selectedNode.id,
+    property,
+    timeMs,
+    value: [...selectedNode[property]],
+    easing: "linear",
+  });
+
+  updateActiveTimelineClip(nextClip);
+  timelineCurrentTimeMs = timeMs;
+  loadedPrefabId = null;
+  lastImportError = null;
+  hideError();
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
 }
 
 function handlePrefabClipboardPrimaryAction(): void {
@@ -1311,6 +2059,92 @@ function getEditorElements(): EditorElements {
     ),
     prefabCopyButton: getRequiredElement("prefab-copy-button", HTMLButtonElement),
     prefabCutButton: getRequiredElement("prefab-cut-button", HTMLButtonElement),
+    prefabTimelinePanel: getRequiredElement("prefab-timeline-panel", HTMLElement),
+    timelineClipNameInput: getRequiredElement(
+      "timeline-clip-name-input",
+      HTMLInputElement,
+    ),
+    timelineCreateClipButton: getRequiredElement(
+      "timeline-create-clip-button",
+      HTMLButtonElement,
+    ),
+    timelineClipList: getRequiredElement(
+      "timeline-clip-list",
+      HTMLUListElement,
+    ),
+    timelineDeleteClipButton: getRequiredElement(
+      "timeline-delete-clip-button",
+      HTMLButtonElement,
+    ),
+    timelinePlayButton: getRequiredElement(
+      "timeline-play-button",
+      HTMLButtonElement,
+    ),
+    timelinePauseButton: getRequiredElement(
+      "timeline-pause-button",
+      HTMLButtonElement,
+    ),
+    timelineStopButton: getRequiredElement(
+      "timeline-stop-button",
+      HTMLButtonElement,
+    ),
+    timelineTimeInput: getRequiredElement(
+      "timeline-time-input",
+      HTMLInputElement,
+    ),
+    timelineDurationInput: getRequiredElement(
+      "timeline-duration-input",
+      HTMLInputElement,
+    ),
+    timelineSnapFpsInput: getRequiredElement(
+      "timeline-snap-fps-input",
+      HTMLInputElement,
+    ),
+    timelineLoopInput: getRequiredElement(
+      "timeline-loop-input",
+      HTMLInputElement,
+    ),
+    timelineScrubInput: getRequiredElement(
+      "timeline-scrub-input",
+      HTMLInputElement,
+    ),
+    timelineTrackLanes: getRequiredElement(
+      "timeline-track-lanes",
+      HTMLDivElement,
+    ),
+    timelineAddKeyframeButton: getRequiredElement(
+      "timeline-add-keyframe-button",
+      HTMLButtonElement,
+    ),
+    timelineStatus: getRequiredElement("timeline-status", HTMLSpanElement),
+    timelineKeyframeEditor: getRequiredElement(
+      "timeline-keyframe-editor",
+      HTMLDivElement,
+    ),
+    timelineKeyframeTimeInput: getRequiredElement(
+      "timeline-keyframe-time-input",
+      HTMLInputElement,
+    ),
+    timelineKeyframeValueXInput: getRequiredElement(
+      "timeline-keyframe-value-x-input",
+      HTMLInputElement,
+    ),
+    timelineKeyframeValueYInput: getRequiredElement(
+      "timeline-keyframe-value-y-input",
+      HTMLInputElement,
+    ),
+    timelineKeyframeValueZInput: getRequiredElement(
+      "timeline-keyframe-value-z-input",
+      HTMLInputElement,
+    ),
+    timelineKeyframeEasingSelect: getRequiredElement(
+      "timeline-keyframe-easing-select",
+      HTMLSelectElement,
+    ),
+    timelineDeleteKeyframeButton: getRequiredElement(
+      "timeline-delete-keyframe-button",
+      HTMLButtonElement,
+    ),
     sceneNameInput: getRequiredElement("scene-name-input", HTMLInputElement),
     sceneList: getRequiredElement("scene-list", HTMLUListElement),
     createSceneButton: getRequiredElement(
@@ -1383,6 +2217,7 @@ function renderEditorShell(): void {
   renderAssetList();
   renderPrefabList();
   renderPrefabNodeList();
+  renderPrefabTimeline();
   renderSceneList();
   renderSceneNodeList();
   renderInspector();
@@ -1410,6 +2245,23 @@ function renderEditorShell(): void {
   elements.prefabCutButton.disabled = pendingPrefabClipboard
     ? false
     : !selectedRealPrefabNode;
+  const activeTimelineClip = getActiveTimelineClip();
+  elements.prefabTimelinePanel.hidden = editorMode !== "asset";
+  elements.timelineClipNameInput.disabled = !selectedProjectId;
+  elements.timelineCreateClipButton.disabled = !selectedProjectId;
+  elements.timelineDeleteClipButton.disabled = !activeTimelineClip;
+  elements.timelinePlayButton.disabled =
+    !activeTimelineClip || activeTimelineClip.durationMs <= 0;
+  elements.timelinePauseButton.disabled = !isTimelinePlaying;
+  elements.timelineStopButton.disabled =
+    !activeTimelineClip && timelineCurrentTimeMs === 0;
+  elements.timelineTimeInput.disabled = !activeTimelineClip;
+  elements.timelineDurationInput.disabled = !activeTimelineClip;
+  elements.timelineSnapFpsInput.disabled = !selectedProjectId;
+  elements.timelineLoopInput.disabled = !activeTimelineClip;
+  elements.timelineScrubInput.disabled = !activeTimelineClip;
+  elements.timelineAddKeyframeButton.disabled =
+    !activeTimelineClip || !selectedRealPrefabNode;
   elements.sceneNameInput.disabled = !selectedProjectId;
   elements.createSceneButton.disabled = !selectedProjectId;
   elements.cloneSceneButton.disabled = !selectedProjectId;
@@ -1561,6 +2413,200 @@ function renderPrefabNodeList(): void {
       return item;
     }),
   );
+}
+
+function renderPrefabTimeline(): void {
+  const activeClip = getActiveTimelineClip();
+  const activeProperty = getActiveTimelineProperty();
+  const clipButtons = prefabAnimation.clips.map((clip) => {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "timeline-clip-item";
+    button.dataset.clipId = clip.id;
+    button.dataset.selected = String(clip.id === prefabAnimation.activeClipId);
+    button.textContent = `${clip.name} (${clip.durationMs} ms)`;
+    button.addEventListener("click", () => {
+      selectTimelineClip(clip.id);
+    });
+
+    item.append(button);
+    return item;
+  });
+
+  elements.timelineClipList.replaceChildren(...clipButtons);
+  elements.timelineTimeInput.value = String(timelineCurrentTimeMs);
+  elements.timelineDurationInput.value = activeClip
+    ? String(activeClip.durationMs)
+    : String(DEFAULT_TIMELINE_DURATION_MS);
+  elements.timelineSnapFpsInput.value = formatTimelineNumber(prefabAnimation.snapFps);
+  elements.timelineLoopInput.checked = activeClip?.loop ?? false;
+  elements.timelineScrubInput.max = String(Math.max(activeClip?.durationMs ?? 1, 1));
+  elements.timelineScrubInput.value = String(clampTimelineTimeMs(timelineCurrentTimeMs, activeClip));
+
+  if (!activeClip) {
+    elements.timelineTrackLanes.replaceChildren();
+    elements.timelineKeyframeEditor.hidden = true;
+    elements.timelineStatus.textContent = "Select or create a clip";
+    return;
+  }
+
+  const selectedNode =
+    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
+  const trackCount = activeClip.tracks.length;
+  const keyframeCount = activeClip.tracks.reduce(
+    (total, track) => total + track.keyframes.length,
+    0,
+  );
+
+  renderTimelineTrackLanes(activeClip, selectedNode, activeProperty);
+  renderTimelineKeyframeEditor(activeClip);
+
+  elements.timelineStatus.textContent = selectedNode
+    ? `${activeClip.name}: ${trackCount} tracks, ${keyframeCount} keyframes`
+    : `${activeClip.name}: select a real prefab node to add keyframes`;
+}
+
+function renderTimelineTrackLanes(
+  activeClip: PrefabAnimationClip,
+  selectedNode: PrefabNode | null,
+  activeProperty: PrefabTrackProperty,
+): void {
+  const lanes = TIMELINE_VECTOR_PROPERTIES.map((property) => {
+    const lane = document.createElement("div");
+    const labelButton = document.createElement("button");
+    const trackBar = document.createElement("div");
+    const isActive = property === activeProperty;
+
+    lane.className = "timeline-track-lane";
+    labelButton.type = "button";
+    labelButton.className = "timeline-track-label";
+    labelButton.dataset.timelineProperty = property;
+    labelButton.dataset.active = String(isActive);
+    labelButton.textContent = getTimelinePropertyLabel(property);
+    labelButton.addEventListener("click", () => {
+      setActiveTimelineProperty(property);
+    });
+
+    trackBar.className = "timeline-track-bar";
+    trackBar.dataset.timelineProperty = property;
+    trackBar.dataset.active = String(isActive);
+    appendTimelineSnapTicks(trackBar, activeClip);
+    trackBar.addEventListener("click", (event) => {
+      if (property !== getActiveTimelineProperty()) {
+        setActiveTimelineProperty(property);
+        return;
+      }
+
+      timelineCurrentTimeMs = timeMsFromTimelinePointer(event, activeClip);
+      selectedTimelineKeyframeId = null;
+      isTimelinePlaying = false;
+      rebuildViewportProxies();
+      renderEditorShell();
+      exposeEditorDebugHooks();
+    });
+
+    const track =
+      selectedNode && activeClip
+        ? findTimelineTrack(activeClip, selectedNode.id, property)
+        : null;
+
+    for (const keyframe of track?.keyframes ?? []) {
+      const marker = document.createElement("button");
+      const left =
+        activeClip.durationMs > 0
+          ? (keyframe.timeMs / activeClip.durationMs) * 100
+          : 0;
+
+      marker.type = "button";
+      marker.className = "timeline-keyframe-marker";
+      marker.dataset.keyframeId = keyframe.id;
+      marker.dataset.selected = String(keyframe.id === selectedTimelineKeyframeId);
+      marker.style.left = `${Math.min(Math.max(left, 0), 100)}%`;
+      marker.ariaLabel = `${getTimelinePropertyLabel(property)} keyframe ${keyframe.timeMs} ms`;
+      marker.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (property !== getActiveTimelineProperty()) {
+          setActiveTimelineProperty(property);
+          return;
+        }
+
+        selectedTimelineKeyframeId = keyframe.id;
+        timelineCurrentTimeMs = keyframe.timeMs;
+        isTimelinePlaying = false;
+        renderEditorShell();
+        exposeEditorDebugHooks();
+      });
+      marker.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        if (property !== getActiveTimelineProperty()) {
+          setActiveTimelineProperty(property);
+          return;
+        }
+
+        selectedTimelineKeyframeId = keyframe.id;
+        timelinePointerDrag = {
+          keyframeId: keyframe.id,
+          property,
+        };
+        marker.setPointerCapture(event.pointerId);
+      });
+      trackBar.append(marker);
+    }
+
+    lane.append(labelButton, trackBar);
+    return lane;
+  });
+
+  elements.timelineTrackLanes.replaceChildren(...lanes);
+}
+
+function appendTimelineSnapTicks(
+  trackBar: HTMLElement,
+  activeClip: PrefabAnimationClip,
+): void {
+  const fragment = document.createDocumentFragment();
+
+  for (const timeMs of getTimelineSnapTickTimes(activeClip)) {
+    const tick = document.createElement("span");
+    const left =
+      activeClip.durationMs > 0 ? (timeMs / activeClip.durationMs) * 100 : 0;
+
+    tick.className = "timeline-snap-tick";
+    tick.dataset.timeMs = String(timeMs);
+    tick.dataset.major = String(
+      timeMs === 0 || timeMs === activeClip.durationMs || timeMs % 1000 === 0,
+    );
+    tick.style.left = `${Math.min(Math.max(left, 0), 100)}%`;
+    fragment.append(tick);
+  }
+
+  trackBar.append(fragment);
+}
+
+function renderTimelineKeyframeEditor(activeClip: PrefabAnimationClip): void {
+  const selected = getSelectedTimelineKeyframe(activeClip);
+
+  if (!selected) {
+    elements.timelineKeyframeEditor.hidden = true;
+    return;
+  }
+
+  elements.timelineKeyframeEditor.hidden = false;
+  elements.timelineKeyframeTimeInput.value = String(selected.keyframe.timeMs);
+  elements.timelineKeyframeValueXInput.value = formatTransformValue(
+    selected.keyframe.value[0],
+  );
+  elements.timelineKeyframeValueYInput.value = formatTransformValue(
+    selected.keyframe.value[1],
+  );
+  elements.timelineKeyframeValueZInput.value = formatTransformValue(
+    selected.keyframe.value[2],
+  );
+  elements.timelineKeyframeEasingSelect.value = selected.keyframe.easing;
 }
 
 function renderSceneList(): void {
@@ -1801,7 +2847,7 @@ function applyTransformInput(
   property: TransformProperty,
   axisIndex: number,
 ): void {
-  const node = getActiveTransformNode(nodeId);
+  const node = editorMode === "asset" ? getPrefabNode(nodeId) : getSceneNode(nodeId);
   const parsedValue = Number(input.value.trim());
 
   if (!node || !Number.isFinite(parsedValue)) {
@@ -1819,6 +2865,7 @@ function applyTransformInput(
   node[property] = nextValue;
 
   if (editorMode === "asset") {
+    pauseTimeline();
     loadedPrefabId = null;
     rebuildViewportProxies();
   } else {
@@ -1845,9 +2892,9 @@ function tick(now: DOMHighResTimeStamp): void {
   const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
 
+  updateTimelinePlayback(deltaSeconds);
   renderPreviewFrame();
   requestAnimationFrame(tick);
-  void deltaSeconds;
 }
 
 function renderPreviewFrame(): void {
@@ -1891,7 +2938,7 @@ function renderPreviewFrame(): void {
 
 function getAssetAssemblyBillboards(): DrawableBillboard[] {
   return flattenPrefabBillboards(
-    prefabNodes,
+    getEvaluatedPrefabNodes(),
     new Matrix4(),
     (nodeId) => nodeId === selectedPrefabNodeId,
   );
@@ -2066,14 +3113,6 @@ function getSceneNode(nodeId: string): SceneNode | null {
   return sceneNodes.find((node) => node.id === nodeId) ?? null;
 }
 
-function getActiveTransformNode(nodeId: string): EditorTransformNode | null {
-  if (editorMode === "asset") {
-    return getPrefabNode(nodeId);
-  }
-
-  return getSceneNode(nodeId);
-}
-
 function getParentIdForNewPrefabNode(): string | null {
   if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
     return null;
@@ -2114,6 +3153,101 @@ function getPrefabNodeAndDescendantIds(rootNodeId: string): Set<string> {
   }
 
   return ids;
+}
+
+function findTimelineTrack(
+  clip: PrefabAnimationClip,
+  nodeId: string,
+  property: PrefabTrackProperty,
+): PrefabAnimationTrack | null {
+  return (
+    clip.tracks.find(
+      (track) =>
+        track.target.nodeId === nodeId && track.target.property === property,
+    ) ?? null
+  );
+}
+
+function getSelectedTimelineKeyframe(
+  clip: PrefabAnimationClip,
+): {
+  track: PrefabAnimationTrack;
+  keyframe: PrefabAnimationKeyframe;
+} | null {
+  if (!selectedTimelineKeyframeId) {
+    return null;
+  }
+
+  for (const track of clip.tracks) {
+    const keyframe = track.keyframes.find(
+      (candidate) => candidate.id === selectedTimelineKeyframeId,
+    );
+
+    if (keyframe) {
+      return {
+        track,
+        keyframe,
+      };
+    }
+  }
+
+  return null;
+}
+
+function timeMsFromTimelinePointer(
+  event: PointerEvent | MouseEvent,
+  clip: PrefabAnimationClip,
+  element?: HTMLElement,
+): number {
+  const target =
+    element ??
+    (event.currentTarget instanceof HTMLElement ? event.currentTarget : null);
+
+  if (!target) {
+    return clampTimelineTimeMs(timelineCurrentTimeMs, clip);
+  }
+
+  const rect = target.getBoundingClientRect();
+  const rawRatio = (event.clientX - rect.left) / Math.max(rect.width, 1);
+  const ratio = Math.min(Math.max(rawRatio, 0), 1);
+
+  return snapAndClampTimelineTimeMs(Math.round(ratio * clip.durationMs), clip);
+}
+
+function getTimelineSnapTickTimes(clip: PrefabAnimationClip): number[] {
+  if (clip.durationMs <= 0) {
+    return [0];
+  }
+
+  const snapFrameMs = getTimelineSnapFrameMs();
+  const times = new Set<number>([0, clip.durationMs]);
+
+  for (
+    let frameIndex = 1;
+    ;
+    frameIndex += 1
+  ) {
+    const timeMs = Math.round(frameIndex * snapFrameMs);
+
+    if (timeMs >= clip.durationMs) {
+      break;
+    }
+
+    times.add(timeMs);
+  }
+
+  return [...times].sort((a, b) => a - b);
+}
+
+function getTimelinePropertyLabel(property: PrefabTrackProperty): string {
+  switch (property) {
+    case "position":
+      return "Position";
+    case "rotation":
+      return "Rotation";
+    case "scale":
+      return "Scale";
+  }
 }
 
 function copyPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
@@ -2162,6 +3296,44 @@ function cutPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null)
 
   prefabNodes = nextNodes;
   selectedPrefabNodeId = sourceNode.id;
+}
+
+function resetPrefabTimelineState(): void {
+  prefabAnimation = createEmptyPrefabAnimation();
+  timelineCurrentTimeMs = 0;
+  isTimelinePlaying = false;
+  selectedTimelineKeyframeId = null;
+  timelinePointerDrag = null;
+}
+
+function createEmptyPrefabAnimation(): PrefabAnimation {
+  return {
+    snapFps: DEFAULT_PREFAB_SNAP_FPS,
+    activeClipId: null,
+    clips: [],
+  };
+}
+
+function createUniqueTimelineClipId(name: string): string {
+  const baseId = slugifyTimelineName(name);
+  const existingIds = new Set(prefabAnimation.clips.map((clip) => clip.id));
+
+  return createUniqueId(baseId, existingIds);
+}
+
+function createUniqueTimelineTrackId(
+  baseId: string,
+  tracks: PrefabAnimationTrack[],
+): string {
+  return createUniqueId(baseId, new Set(tracks.map((track) => track.id)));
+}
+
+function createUniqueTimelineKeyframeId(track: PrefabAnimationTrack): string {
+  const baseId = `${track.id}-key`;
+  return createUniqueId(
+    baseId,
+    new Set(track.keyframes.map((keyframe) => keyframe.id)),
+  );
 }
 
 function createNextPrefabNodeId(): string {
@@ -2301,6 +3473,54 @@ function cloneTransform(transform: TransformSnapshot): TransformSnapshot {
   };
 }
 
+function clonePrefabAnimation(animation: PrefabAnimation): PrefabAnimation {
+  const clips = animation.clips.map(clonePrefabAnimationClip);
+  const activeClipId =
+    animation.activeClipId && clips.some((clip) => clip.id === animation.activeClipId)
+      ? animation.activeClipId
+      : null;
+
+  return {
+    snapFps: animation.snapFps,
+    activeClipId,
+    clips,
+  };
+}
+
+function clonePrefabAnimationClip(clip: PrefabAnimationClip): PrefabAnimationClip {
+  return {
+    id: clip.id,
+    name: clip.name,
+    durationMs: clip.durationMs,
+    loop: clip.loop,
+    tracks: clip.tracks.map(clonePrefabAnimationTrack),
+  };
+}
+
+function clonePrefabAnimationTrack(
+  track: PrefabAnimationTrack,
+): PrefabAnimationTrack {
+  return {
+    id: track.id,
+    target: {
+      nodeId: track.target.nodeId,
+      property: track.target.property,
+    },
+    keyframes: track.keyframes.map(clonePrefabAnimationKeyframe),
+  };
+}
+
+function clonePrefabAnimationKeyframe(
+  keyframe: PrefabAnimationTrack["keyframes"][number],
+): PrefabAnimationTrack["keyframes"][number] {
+  return {
+    id: keyframe.id,
+    timeMs: keyframe.timeMs,
+    value: [...keyframe.value],
+    easing: keyframe.easing,
+  };
+}
+
 function clonePrefabNode(node: PrefabNode): PrefabNode {
   if (node.kind === "group") {
     return {
@@ -2378,12 +3598,92 @@ function getNextNodeNumber(ids: string[], prefix: string): number {
   return largestExistingNumber + 1;
 }
 
+function createUniqueId(baseId: string, existingIds: Set<string>): string {
+  if (!existingIds.has(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+
+  while (existingIds.has(`${baseId}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${baseId}-${suffix}`;
+}
+
+function slugifyTimelineName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || "clip";
+}
+
 function formatTransformValue(value: number): string {
   return String(roundTransformValue(value));
 }
 
 function roundTransformValue(value: number): number {
   return Number(value.toFixed(4));
+}
+
+function formatTimelineNumber(value: number): string {
+  return String(roundTimelineNumber(value));
+}
+
+function roundTimelineNumber(value: number): number {
+  return Number(value.toFixed(3));
+}
+
+function clampTimelineTimeMs(
+  timeMs: number,
+  clip: PrefabAnimationClip | null,
+): number {
+  if (!clip || !Number.isFinite(timeMs)) {
+    return 0;
+  }
+
+  return Math.round(Math.min(Math.max(timeMs, 0), clip.durationMs));
+}
+
+function snapTimelineTimeMs(timeMs: number): number {
+  if (!Number.isFinite(timeMs)) {
+    return 0;
+  }
+
+  const frameMs = getTimelineSnapFrameMs();
+  return Math.round(Math.round(timeMs / frameMs) * frameMs);
+}
+
+function snapAndClampTimelineTimeMs(
+  timeMs: number,
+  clip: PrefabAnimationClip | null,
+): number {
+  return clampTimelineTimeMs(snapTimelineTimeMs(timeMs), clip);
+}
+
+function getTimelineSnapFrameMs(): number {
+  return 1000 / Math.min(Math.max(prefabAnimation.snapFps, 1), 240);
+}
+
+function smoothstep(value: number): number {
+  const clamped = Math.min(Math.max(value, 0), 1);
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+function lerpVector3(
+  start: Vector3Tuple,
+  end: Vector3Tuple,
+  progress: number,
+): Vector3Tuple {
+  return [
+    roundTransformValue(start[0] + (end[0] - start[0]) * progress),
+    roundTransformValue(start[1] + (end[1] - start[1]) * progress),
+    roundTransformValue(start[2] + (end[2] - start[2]) * progress),
+  ];
 }
 
 function vectorToTuple(value: Vector3): Vector3Tuple {
@@ -2436,6 +3736,15 @@ function exposeEditorDebugHooks(): void {
       pendingClipboard: pendingPrefabClipboard
         ? { ...pendingPrefabClipboard }
         : null,
+    }),
+    getPrefabTimeline: () => ({
+      animation: clonePrefabAnimation(prefabAnimation),
+      currentTimeMs: timelineCurrentTimeMs,
+      isPlaying: isTimelinePlaying,
+      selectedClipId: prefabAnimation.activeClipId,
+      activeTrackProperty: getActiveTimelineProperty(),
+      selectedKeyframeId: selectedTimelineKeyframeId,
+      evaluatedNodes: getEvaluatedPrefabNodes(),
     }),
     getExperimentScene: () => {
       const camera = threeViewport.getCameraSnapshot();

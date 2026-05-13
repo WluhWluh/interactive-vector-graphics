@@ -1,4 +1,9 @@
-import type { PrefabDocument, Vector3Tuple } from "./types";
+import type {
+  PrefabDocument,
+  PrefabTrackEasing,
+  PrefabTrackProperty,
+  Vector3Tuple,
+} from "./types";
 
 type PrefabDocumentContext = {
   projectId: string;
@@ -25,8 +30,8 @@ export function validatePrefabDocument(
     throw new PrefabDocumentValidationError(context, "document must be an object");
   }
 
-  if (value.version !== 1) {
-    throw new PrefabDocumentValidationError(context, "version must be 1");
+  if (value.version !== 3) {
+    throw new PrefabDocumentValidationError(context, "version must be 3");
   }
 
   if (!Array.isArray(value.nodes)) {
@@ -36,11 +41,13 @@ export function validatePrefabDocument(
   const nodes = value.nodes.map((node, index) =>
     validatePrefabNode(node, `nodes[${index}]`, context),
   );
+  const animation = validatePrefabAnimation(value.animation, context);
   validatePrefabHierarchy(nodes, context);
 
   return {
-    version: 1,
+    version: 3,
     nodes,
+    animation,
   };
 }
 
@@ -147,6 +154,246 @@ function validatePrefabHierarchy(
   }
 }
 
+function validatePrefabAnimation(
+  value: unknown,
+  context: PrefabDocumentContext,
+): PrefabDocument["animation"] {
+  if (!isRecord(value)) {
+    throw new PrefabDocumentValidationError(context, "animation must be an object");
+  }
+
+  const snapFps = readFiniteNumber(value.snapFps, "animation.snapFps", context);
+
+  if (snapFps < 1 || snapFps > 240) {
+    throw new PrefabDocumentValidationError(
+      context,
+      "animation.snapFps must be between 1 and 240",
+    );
+  }
+
+  if (value.activeClipId !== null && typeof value.activeClipId !== "string") {
+    throw new PrefabDocumentValidationError(
+      context,
+      "animation.activeClipId must be null or a string",
+    );
+  }
+
+  if (!Array.isArray(value.clips)) {
+    throw new PrefabDocumentValidationError(
+      context,
+      "animation.clips must be an array",
+    );
+  }
+
+  const clips = value.clips.map((clip, index) =>
+    validatePrefabAnimationClip(clip, `animation.clips[${index}]`, context),
+  );
+
+  if (
+    typeof value.activeClipId === "string" &&
+    !clips.some((clip) => clip.id === value.activeClipId)
+  ) {
+    throw new PrefabDocumentValidationError(
+      context,
+      "animation.activeClipId must match an existing clip id",
+    );
+  }
+
+  return {
+    snapFps,
+    activeClipId: value.activeClipId,
+    clips,
+  };
+}
+
+function validatePrefabAnimationClip(
+  value: unknown,
+  path: string,
+  context: PrefabDocumentContext,
+): PrefabDocument["animation"]["clips"][number] {
+  if (!isRecord(value)) {
+    throw new PrefabDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const id = readRequiredString(value.id, `${path}.id`, context);
+  const name = readRequiredString(value.name, `${path}.name`, context);
+  const durationMs = readInteger(value.durationMs, `${path}.durationMs`, context);
+
+  if (durationMs < 0) {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path}.durationMs must be greater than or equal to 0`,
+    );
+  }
+
+  if (typeof value.loop !== "boolean") {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path}.loop must be a boolean`,
+    );
+  }
+
+  if (!Array.isArray(value.tracks)) {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path}.tracks must be an array`,
+    );
+  }
+
+  return {
+    id,
+    name,
+    durationMs,
+    loop: value.loop,
+    tracks: value.tracks.map((track, index) =>
+      validatePrefabAnimationTrack(
+        track,
+        `${path}.tracks[${index}]`,
+        durationMs,
+        context,
+      ),
+    ),
+  };
+}
+
+function validatePrefabAnimationTrack(
+  value: unknown,
+  path: string,
+  clipDurationMs: number,
+  context: PrefabDocumentContext,
+): PrefabDocument["animation"]["clips"][number]["tracks"][number] {
+  if (!isRecord(value)) {
+    throw new PrefabDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const id = readRequiredString(value.id, `${path}.id`, context);
+  const target = validatePrefabTrackTarget(value.target, `${path}.target`, context);
+
+  if (!Array.isArray(value.keyframes)) {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path}.keyframes must be an array`,
+    );
+  }
+
+  return {
+    id,
+    target,
+    keyframes: validateUniqueKeyframes(
+      value.keyframes.map((keyframe, index) =>
+        validatePrefabKeyframe(
+          keyframe,
+          `${path}.keyframes[${index}]`,
+          clipDurationMs,
+          context,
+        ),
+      ),
+      path,
+      context,
+    ),
+  };
+}
+
+function validatePrefabTrackTarget(
+  value: unknown,
+  path: string,
+  context: PrefabDocumentContext,
+): PrefabDocument["animation"]["clips"][number]["tracks"][number]["target"] {
+  if (!isRecord(value)) {
+    throw new PrefabDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  return {
+    nodeId: readRequiredString(value.nodeId, `${path}.nodeId`, context),
+    property: validatePrefabTrackProperty(value.property, `${path}.property`, context),
+  };
+}
+
+function validatePrefabTrackProperty(
+  value: unknown,
+  path: string,
+  context: PrefabDocumentContext,
+): PrefabTrackProperty {
+  const validProperties: PrefabTrackProperty[] = [
+    "position",
+    "rotation",
+    "scale",
+  ];
+
+  if (
+    typeof value !== "string" ||
+    !validProperties.includes(value as PrefabTrackProperty)
+  ) {
+    throw new PrefabDocumentValidationError(context, `${path} is invalid`);
+  }
+
+  return value as PrefabTrackProperty;
+}
+
+function validatePrefabKeyframe(
+  value: unknown,
+  path: string,
+  clipDurationMs: number,
+  context: PrefabDocumentContext,
+): PrefabDocument["animation"]["clips"][number]["tracks"][number]["keyframes"][number] {
+  if (!isRecord(value)) {
+    throw new PrefabDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const id = readRequiredString(value.id, `${path}.id`, context);
+  const timeMs = readInteger(value.timeMs, `${path}.timeMs`, context);
+
+  if (timeMs < 0 || timeMs > clipDurationMs) {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path}.timeMs must be within the clip duration`,
+    );
+  }
+
+  return {
+    id,
+    timeMs,
+    value: readVector3(value.value, `${path}.value`, context),
+    easing: validatePrefabTrackEasing(value.easing, `${path}.easing`, context),
+  };
+}
+
+function validateUniqueKeyframes(
+  keyframes: PrefabDocument["animation"]["clips"][number]["tracks"][number]["keyframes"],
+  path: string,
+  context: PrefabDocumentContext,
+): PrefabDocument["animation"]["clips"][number]["tracks"][number]["keyframes"] {
+  const ids = new Set<string>();
+
+  for (const keyframe of keyframes) {
+    if (ids.has(keyframe.id)) {
+      throw new PrefabDocumentValidationError(
+        context,
+        `${path}.keyframes contains duplicate keyframe id "${keyframe.id}"`,
+      );
+    }
+
+    ids.add(keyframe.id);
+  }
+
+  return keyframes;
+}
+
+function validatePrefabTrackEasing(
+  value: unknown,
+  path: string,
+  context: PrefabDocumentContext,
+): PrefabTrackEasing {
+  if (value !== "linear" && value !== "step" && value !== "easeInOut") {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path} must be linear, step, or easeInOut`,
+    );
+  }
+
+  return value;
+}
+
 function readVector3(
   value: unknown,
   path: string,
@@ -188,6 +435,20 @@ function readFiniteNumber(
   }
 
   return value;
+}
+
+function readInteger(
+  value: unknown,
+  path: string,
+  context: PrefabDocumentContext,
+): number {
+  const number = readFiniteNumber(value, path, context);
+
+  if (!Number.isInteger(number)) {
+    throw new PrefabDocumentValidationError(context, `${path} must be an integer`);
+  }
+
+  return number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

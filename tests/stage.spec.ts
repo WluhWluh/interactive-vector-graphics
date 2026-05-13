@@ -307,6 +307,98 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await page.getByLabel("Position X").blur();
   await page.getByLabel("Rotation Z").fill("0");
   await page.getByLabel("Rotation Z").blur();
+  await expect(page.getByRole("heading", { name: "Timeline" })).toBeVisible();
+  await expect(page.locator("#timeline-add-keyframe-button")).toBeDisabled();
+  await page.locator("#timeline-clip-name-input").fill("Idle");
+  await page.locator("#timeline-create-clip-button").click();
+  await expect(page.getByRole("button", { name: /Idle/ })).toBeVisible();
+  await page.locator('[data-prefab-node-id="prefab-node-1"]').click();
+  await expect(page.locator("#timeline-snap-fps-input")).toHaveValue("10");
+  await page.locator("#timeline-snap-fps-input").fill("20");
+  await page.locator("#timeline-snap-fps-input").blur();
+  await page.locator("#timeline-duration-input").fill("1000");
+  await page.locator("#timeline-duration-input").blur();
+  await expect(page.locator('.timeline-track-bar[data-timeline-property="position"] .timeline-snap-tick')).toHaveCount(21);
+  await page.locator("#timeline-time-input").fill("0");
+  await page.locator("#timeline-time-input").blur();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await page.getByLabel("Position X").fill("2");
+  await page.getByLabel("Position X").blur();
+  await page.locator("#timeline-time-input").fill("1000");
+  await page.locator("#timeline-time-input").blur();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await page.locator("#timeline-scrub-input").fill("500");
+  await page.locator('.timeline-track-bar[data-timeline-property="scale"]').click({
+    position: { x: 120, y: 8 },
+  });
+  await page.locator("#timeline-add-keyframe-button").click();
+
+  const timelineState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getPrefabTimeline() ?? null;
+  });
+
+  const positionTrack = timelineState?.animation.clips[0]?.tracks.find(
+    (track) => track.target.property === "position",
+  );
+  const scaleTrack = timelineState?.animation.clips[0]?.tracks.find(
+    (track) => track.target.property === "scale",
+  );
+
+  expect(timelineState?.animation.activeClipId).toBe("idle");
+  expect(timelineState?.animation.snapFps).toBe(20);
+  expect(timelineState?.animation.clips[0]?.durationMs).toBe(1000);
+  expect(timelineState?.animation.clips[0]?.tracks).toHaveLength(2);
+  expect(positionTrack?.keyframes).toMatchObject([
+    {
+      timeMs: 0,
+      value: [0, 1, 0],
+      easing: "linear",
+    },
+    {
+      timeMs: 1000,
+      value: [2, 1, 0],
+      easing: "linear",
+    },
+  ]);
+  expect(positionTrack?.keyframes[0]?.id).toBeTruthy();
+  expect(scaleTrack?.keyframes).toHaveLength(1);
+  expect(timelineState?.currentTimeMs).toBe(500);
+  expect(timelineState?.activeTrackProperty).toBe("scale");
+  expect(timelineState?.selectedKeyframeId).toBeTruthy();
+  expect(timelineState?.evaluatedNodes[0]?.position).toEqual([1, 1, 0]);
+  await page
+    .getByLabel("Transform mode")
+    .getByRole("button", { name: "Rotate" })
+    .click();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__vectorEditorDebug
+            ?.getPrefabTimeline()
+            .animation.clips[0]?.tracks.some(
+              (track) => track.target.property === "rotation",
+            ) ?? false,
+      ),
+    )
+    .toBe(true);
+  await page.locator("#timeline-play-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__vectorEditorDebug?.getPrefabTimeline().isPlaying),
+    )
+    .toBe(true);
+  await page.locator("#timeline-pause-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__vectorEditorDebug?.getPrefabTimeline().isPlaying),
+    )
+    .toBe(false);
+  await page.getByRole("button", { name: "Group: Root Group" }).click();
+  await expect(page.locator("#timeline-add-keyframe-button")).toBeDisabled();
+  await page.locator('[data-prefab-node-id="prefab-node-1"]').click();
   await page.locator("#prefab-name-input").fill("Face Prefab");
   await page.locator("#create-prefab-button").click();
   await expect(page.getByRole("button", { name: /Face Prefab/ })).toBeVisible();
@@ -322,12 +414,37 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       prefabs: debug.getPrefabs(),
       selectedPrefabId: debug.getSelectedPrefabId(),
       loadedPrefabId: debug.getLoadedPrefabId(),
+      timeline: debug.getPrefabTimeline(),
     };
   });
 
   expect(savedPrefabState?.prefabs).toHaveLength(1);
   expect(savedPrefabState?.selectedPrefabId).toBe("face-prefab");
   expect(savedPrefabState?.loadedPrefabId).toBe("face-prefab");
+  expect(savedPrefabState?.timeline.animation.clips[0]?.name).toBe("Idle");
+  await page.getByRole("button", { name: "Load Prefab" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__vectorEditorDebug?.getPrefabTimeline().animation.clips[0]
+            ?.tracks.length ?? 0,
+      ),
+    )
+    .toBe(3);
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getPrefabTimeline().animation.snapFps,
+      ),
+    )
+    .toBe(20);
+  await page.getByLabel("Position X").fill("0");
+  await page.getByLabel("Position X").blur();
+  await page.getByRole("button", { name: "Save Prefab" }).click();
+  await expect
+    .poll(async () => page.evaluate(() => window.__vectorEditorDebug?.getLoadedPrefabId()))
+    .toBe("face-prefab");
   await page.getByRole("button", { name: "Scene Layout" }).click();
 
   await page.locator("#scene-name-input").fill("Empty Scene");

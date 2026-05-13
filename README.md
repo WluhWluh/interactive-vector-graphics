@@ -87,14 +87,17 @@ Then open:
   selection proxies, OrbitControls, and TransformControls. SVG primitives still
   render through Canvas Path2D so this does not change the visual runtime target.
 - `/editor.html` has two early authoring modes. `Asset Assembly` builds
-  project-level prefabs from primitive SVG parts and optional transform groups.
+  project-level prefabs from primitive SVG parts and optional transform groups,
+  and includes the first prefab-local timeline for transform keyframes.
   `Scene Layout` places prefab reference instances in the spatial scene.
 - Scene documents store prefab instance references instead of unpacking prefab
   contents. This keeps reusable character/prop assemblies editable at the
   project level.
-- The editor can save and load the current camera and scene nodes as scene
-  document v2. Animation data is reserved as `{ fps: 24, activeClipId: null,
-  clips: [] }` until the timeline exists.
+- Prefab documents use v3 and store local animation clips/tracks/keyframes for
+  `position`, `rotation`, and `scale` preview. Prefab keyframe times are saved
+  as integer milliseconds, and each prefab stores its own `snapFps` editing
+  helper. Scene document v2 still stores its animation structure but does not
+  yet expose a scene-level timeline UI.
 
 ## Primitive SVG Assets
 

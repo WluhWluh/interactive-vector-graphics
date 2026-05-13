@@ -38,9 +38,43 @@ export type PrefabNode = {
   billboardMode: "spherical";
 };
 
+export type PrefabTrackEasing = "linear" | "step" | "easeInOut";
+export type PrefabTrackProperty = "position" | "rotation" | "scale";
+
+export type PrefabAnimation = {
+  snapFps: number;
+  activeClipId: string | null;
+  clips: PrefabAnimationClip[];
+};
+
+export type PrefabAnimationClip = {
+  id: string;
+  name: string;
+  durationMs: number;
+  loop: boolean;
+  tracks: PrefabAnimationTrack[];
+};
+
+export type PrefabAnimationTrack = {
+  id: string;
+  target: {
+    nodeId: string;
+    property: PrefabTrackProperty;
+  };
+  keyframes: PrefabAnimationKeyframe[];
+};
+
+export type PrefabAnimationKeyframe = {
+  id: string;
+  timeMs: number;
+  value: Vector3Tuple;
+  easing: PrefabTrackEasing;
+};
+
 export type PrefabDocument = {
-  version: 1;
+  version: 3;
   nodes: PrefabNode[];
+  animation: PrefabAnimation;
 };
 
 export type PrefabRecord = {

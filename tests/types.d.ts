@@ -64,6 +64,47 @@ declare global {
           sourceNodeId: string;
         } | null;
       };
+      getPrefabTimeline: () => {
+        animation: {
+          snapFps: number;
+          activeClipId: string | null;
+          clips: Array<{
+            id: string;
+            name: string;
+            durationMs: number;
+            loop: boolean;
+            tracks: Array<{
+              id: string;
+              target: {
+                nodeId: string;
+                property: "position" | "rotation" | "scale";
+              };
+              keyframes: Array<{
+                id: string;
+                timeMs: number;
+                value: [number, number, number];
+                easing: "linear" | "step" | "easeInOut";
+              }>;
+            }>;
+          }>;
+        };
+        currentTimeMs: number;
+        isPlaying: boolean;
+        selectedClipId: string | null;
+        activeTrackProperty: "position" | "rotation" | "scale";
+        selectedKeyframeId: string | null;
+        evaluatedNodes: Array<{
+          id: string;
+          kind: "group" | "primitive";
+          parentId: string | null;
+          assetId?: string;
+          name: string;
+          position: [number, number, number];
+          rotation: [number, number, number];
+          scale: [number, number, number];
+          billboardMode: "spherical";
+        }>;
+      };
       getExperimentScene: () => {
         camera: {
           projection: "perspective" | "orthographic";

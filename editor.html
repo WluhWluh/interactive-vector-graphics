@@ -354,6 +354,188 @@
             aria-label="3D transform helper canvas"
           ></canvas>
         </div>
+        <section
+          id="prefab-timeline-panel"
+          class="prefab-timeline-panel"
+          aria-label="Prefab timeline"
+        >
+          <header class="timeline-header">
+            <div>
+              <h2>Timeline</h2>
+              <span>Prefab clip preview</span>
+            </div>
+            <div class="timeline-clip-create">
+              <input
+                id="timeline-clip-name-input"
+                class="text-input"
+                type="text"
+                placeholder="New clip name"
+                autocomplete="off"
+              />
+              <button
+                id="timeline-create-clip-button"
+                class="editor-button"
+                type="button"
+              >
+                Create Clip
+              </button>
+            </div>
+          </header>
+          <div class="timeline-body">
+            <div class="timeline-clip-column">
+              <ul
+                id="timeline-clip-list"
+                class="timeline-clip-list"
+                aria-label="Animation clips"
+              ></ul>
+              <button
+                id="timeline-delete-clip-button"
+                class="danger-button"
+                type="button"
+              >
+                Delete Clip
+              </button>
+            </div>
+            <div class="timeline-controls">
+              <div class="timeline-row">
+                <button id="timeline-play-button" class="editor-button" type="button">
+                  Play
+                </button>
+                <button id="timeline-pause-button" class="editor-button" type="button">
+                  Pause
+                </button>
+                <button id="timeline-stop-button" class="editor-button" type="button">
+                  Stop
+                </button>
+                <label class="timeline-field">
+                  Time ms
+                  <input
+                    id="timeline-time-input"
+                    class="timeline-number-input"
+                    type="text"
+                    inputmode="numeric"
+                    value="0"
+                  />
+                </label>
+                <label class="timeline-field">
+                  Duration ms
+                  <input
+                    id="timeline-duration-input"
+                    class="timeline-number-input"
+                    type="text"
+                    inputmode="numeric"
+                    value="1000"
+                  />
+                </label>
+                <label class="timeline-field">
+                  Snap FPS
+                  <input
+                    id="timeline-snap-fps-input"
+                    class="timeline-number-input"
+                    type="text"
+                    inputmode="decimal"
+                    value="10"
+                  />
+                </label>
+                <label class="timeline-loop-field">
+                  <input id="timeline-loop-input" type="checkbox" />
+                  Loop
+                </label>
+              </div>
+              <div class="timeline-axis-row">
+                <span class="timeline-axis-label" aria-hidden="true">Time</span>
+                <input
+                  id="timeline-scrub-input"
+                  class="timeline-scrub-input"
+                  type="range"
+                  min="0"
+                  max="1000"
+                  step="1"
+                  value="0"
+                />
+              </div>
+              <div
+                id="timeline-track-lanes"
+                class="timeline-track-lanes"
+                aria-label="Keyframe tracks"
+              ></div>
+              <div class="timeline-row timeline-row-secondary">
+                <button
+                  id="timeline-add-keyframe-button"
+                  class="editor-button"
+                  type="button"
+                >
+                  Add Keyframe
+                </button>
+                <span id="timeline-status" class="timeline-status">
+                  Select or create a clip
+                </span>
+              </div>
+              <div
+                id="timeline-keyframe-editor"
+                class="timeline-keyframe-editor"
+                hidden
+              >
+                <label class="timeline-field">
+                  Key Time ms
+                  <input
+                    id="timeline-keyframe-time-input"
+                    class="timeline-number-input"
+                    type="text"
+                    inputmode="numeric"
+                  />
+                </label>
+                <div class="timeline-keyframe-value-row">
+                  <label class="timeline-field">
+                    X
+                    <input
+                      id="timeline-keyframe-value-x-input"
+                      class="timeline-number-input"
+                      type="text"
+                      inputmode="decimal"
+                    />
+                  </label>
+                  <label class="timeline-field">
+                    Y
+                    <input
+                      id="timeline-keyframe-value-y-input"
+                      class="timeline-number-input"
+                      type="text"
+                      inputmode="decimal"
+                    />
+                  </label>
+                  <label class="timeline-field">
+                    Z
+                    <input
+                      id="timeline-keyframe-value-z-input"
+                      class="timeline-number-input"
+                      type="text"
+                      inputmode="decimal"
+                    />
+                  </label>
+                </div>
+                <label class="timeline-field">
+                  Easing
+                  <select
+                    id="timeline-keyframe-easing-select"
+                    class="timeline-select-input"
+                  >
+                    <option value="linear">linear</option>
+                    <option value="step">step</option>
+                    <option value="easeInOut">easeInOut</option>
+                  </select>
+                </label>
+                <button
+                  id="timeline-delete-keyframe-button"
+                  class="danger-button"
+                  type="button"
+                >
+                  Delete Keyframe
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
       </section>
 
       <aside class="editor-panel editor-inspector" aria-label="Inspector">

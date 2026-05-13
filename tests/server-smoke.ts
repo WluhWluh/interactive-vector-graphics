@@ -58,7 +58,7 @@ try {
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
 
   const validPrefabDocument: PrefabDocument = {
-    version: 1,
+    version: 3,
     nodes: [
       {
         id: "prefab-node-1",
@@ -82,9 +82,232 @@ try {
         billboardMode: "spherical",
       },
     ],
+    animation: {
+      snapFps: 10,
+      activeClipId: null,
+      clips: [],
+    },
+  };
+  const animatedPrefabDocument: PrefabDocument = {
+    ...validPrefabDocument,
+    animation: {
+      snapFps: 10,
+      activeClipId: "idle",
+      clips: [
+        {
+          id: "idle",
+          name: "Idle",
+          durationMs: 1000,
+          loop: true,
+          tracks: [
+            {
+              id: "prefab-node-2-position",
+              target: {
+                nodeId: "prefab-node-2",
+                property: "position",
+              },
+              keyframes: [
+                {
+                  id: "prefab-node-2-position-key",
+                  timeMs: 0,
+                  value: [0, 1, 0],
+                  easing: "linear",
+                },
+                {
+                  id: "prefab-node-2-position-key-2",
+                  timeMs: 1000,
+                  value: [0.5, 1, 0],
+                  easing: "easeInOut",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
   };
 
   validatePrefabDocument(validPrefabDocument, { projectId: firstProject.id });
+  validatePrefabDocument(animatedPrefabDocument, { projectId: firstProject.id });
+  assert.throws(
+    () =>
+      validatePrefabDocument(
+        {
+          ...validPrefabDocument,
+          version: 1,
+        },
+        { projectId: firstProject.id },
+      ),
+    /version must be 3/,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        snapFps: 0,
+      },
+    },
+    /snapFps/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        clips: [
+          {
+            ...animatedPrefabDocument.animation.clips[0],
+            durationMs: 1000.5,
+          },
+        ],
+      },
+    },
+    /durationMs must be an integer/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        activeClipId: "missing-clip",
+      },
+    },
+    /activeClipId/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        clips: [
+          {
+            ...animatedPrefabDocument.animation.clips[0],
+            loop: "yes",
+          },
+        ],
+      },
+    },
+    /loop must be a boolean/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        clips: [
+          {
+            ...animatedPrefabDocument.animation.clips[0],
+            tracks: [
+              {
+                ...animatedPrefabDocument.animation.clips[0].tracks[0],
+                target: {
+                  nodeId: "prefab-node-2",
+                  property: "opacity",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /property is invalid/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        clips: [
+          {
+            ...animatedPrefabDocument.animation.clips[0],
+            tracks: [
+              {
+                ...animatedPrefabDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  {
+                    id: "bad-value",
+                    timeMs: 0,
+                    value: 1,
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /value must contain three numbers/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        clips: [
+          {
+            ...animatedPrefabDocument.animation.clips[0],
+            tracks: [
+              {
+                ...animatedPrefabDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  {
+                    id: "bad-time",
+                    timeMs: 2000,
+                    value: [0, 1, 0],
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /within the clip duration/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...animatedPrefabDocument,
+      animation: {
+        ...animatedPrefabDocument.animation,
+        clips: [
+          {
+            ...animatedPrefabDocument.animation.clips[0],
+            tracks: [
+              {
+                ...animatedPrefabDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  {
+                    id: "duplicate-key",
+                    timeMs: 0,
+                    value: [0, 1, 0],
+                    easing: "linear",
+                  },
+                  {
+                    id: "duplicate-key",
+                    timeMs: 500,
+                    value: [0.5, 1, 0],
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /duplicate keyframe id/,
+    firstProject.id,
+  );
   assert.throws(
     () =>
       validatePrefabDocument(
@@ -144,8 +367,13 @@ try {
     projectId: firstProject.id,
     name: "Demo Head",
     document: {
-      version: 1,
+      version: 3,
       nodes: [],
+      animation: {
+        snapFps: 10,
+        activeClipId: null,
+        clips: [],
+      },
     },
   });
 
@@ -473,6 +701,17 @@ function assertInvalidSceneDocument(
 ): void {
   assert.throws(
     () => validateSceneDocument(document, { projectId }),
+    expectedMessage,
+  );
+}
+
+function assertInvalidPrefabDocument(
+  document: unknown,
+  expectedMessage: RegExp,
+  projectId: string,
+): void {
+  assert.throws(
+    () => validatePrefabDocument(document, { projectId }),
     expectedMessage,
   );
 }

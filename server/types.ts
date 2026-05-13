@@ -30,9 +30,11 @@ export type SceneTrackProperty =
   | "fov"
   | "zoom";
 export type SceneKeyframeValue = number | Vector3Tuple;
+export type PrefabTrackEasing = "linear" | "step" | "easeInOut";
+export type PrefabTrackProperty = "position" | "rotation" | "scale";
 
 export type PrefabDocument = {
-  version: 1;
+  version: 3;
   nodes: Array<{
     id: string;
     kind: "group" | "primitive";
@@ -44,6 +46,29 @@ export type PrefabDocument = {
     scale: Vector3Tuple;
     billboardMode: "spherical";
   }>;
+  animation: {
+    snapFps: number;
+    activeClipId: string | null;
+    clips: Array<{
+      id: string;
+      name: string;
+      durationMs: number;
+      loop: boolean;
+      tracks: Array<{
+        id: string;
+        target: {
+          nodeId: string;
+          property: PrefabTrackProperty;
+        };
+        keyframes: Array<{
+          id: string;
+          timeMs: number;
+          value: Vector3Tuple;
+          easing: PrefabTrackEasing;
+        }>;
+      }>;
+    }>;
+  };
 };
 
 export type PrefabRecord = {
