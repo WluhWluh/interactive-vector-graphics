@@ -367,6 +367,19 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(timelineState?.activeTrackProperty).toBe("scale");
   expect(timelineState?.selectedKeyframeId).toBeTruthy();
   expect(timelineState?.evaluatedNodes[0]?.position).toEqual([1, 1, 0]);
+  expect(
+    await page.evaluate(
+      () => window.__vectorEditorDebug?.getPrefabAssembly().nodes[0]?.position,
+    ),
+  ).toEqual([2, 1, 0]);
+  await page.locator("#timeline-snap-base-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getPrefabAssembly().nodes[0]?.position,
+      ),
+    )
+    .toEqual([1, 1, 0]);
   await page
     .getByLabel("Transform mode")
     .getByRole("button", { name: "Rotate" })

@@ -105,6 +105,7 @@ type EditorElements = {
   timelineScrubInput: HTMLInputElement;
   timelineTrackLanes: HTMLDivElement;
   timelineAddKeyframeButton: HTMLButtonElement;
+  timelineSnapBaseButton: HTMLButtonElement;
   timelineStatus: HTMLSpanElement;
   timelineKeyframeEditor: HTMLDivElement;
   timelineKeyframeTimeInput: HTMLInputElement;
@@ -369,6 +370,9 @@ function bindEditorEvents(): void {
   });
   elements.timelineAddKeyframeButton.addEventListener("click", () => {
     addKeyframeForSelectedPrefabNode();
+  });
+  elements.timelineSnapBaseButton.addEventListener("click", () => {
+    snapSelectedPrefabBaseToTimeline();
   });
   elements.timelineKeyframeTimeInput.addEventListener("blur", () => {
     applySelectedKeyframeTimeInput();
@@ -1806,6 +1810,39 @@ function addKeyframeForSelectedPrefabNode(): void {
   exposeEditorDebugHooks();
 }
 
+function snapSelectedPrefabBaseToTimeline(): void {
+  const activeClip = getActiveTimelineClip();
+  const selectedNode =
+    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
+
+  if (!activeClip || !selectedNode) {
+    setImportError(new Error("Select a real prefab node and an active clip first."));
+    return;
+  }
+
+  const evaluatedNode = getEvaluatedPrefabNodes().find(
+    (node) => node.id === selectedNode.id,
+  );
+
+  if (!evaluatedNode) {
+    setImportError(new Error("Could not evaluate the selected prefab node."));
+    return;
+  }
+
+  selectedNode.position = [...evaluatedNode.position];
+  selectedNode.rotation = [...evaluatedNode.rotation];
+  selectedNode.scale = [...evaluatedNode.scale];
+  pauseTimeline();
+  loadedPrefabId = null;
+  lastImportError = null;
+  hideError();
+  rebuildViewportProxies();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
 function handlePrefabClipboardPrimaryAction(): void {
   if (pendingPrefabClipboard) {
     pastePendingPrefabClipboard();
@@ -2118,6 +2155,10 @@ function getEditorElements(): EditorElements {
       "timeline-add-keyframe-button",
       HTMLButtonElement,
     ),
+    timelineSnapBaseButton: getRequiredElement(
+      "timeline-snap-base-button",
+      HTMLButtonElement,
+    ),
     timelineStatus: getRequiredElement("timeline-status", HTMLSpanElement),
     timelineKeyframeEditor: getRequiredElement(
       "timeline-keyframe-editor",
@@ -2263,6 +2304,8 @@ function renderEditorShell(): void {
   elements.timelineLoopInput.disabled = !activeTimelineClip;
   elements.timelineScrubInput.disabled = !activeTimelineClip;
   elements.timelineAddKeyframeButton.disabled =
+    !activeTimelineClip || !selectedRealPrefabNode;
+  elements.timelineSnapBaseButton.disabled =
     !activeTimelineClip || !selectedRealPrefabNode;
   elements.sceneNameInput.disabled = !selectedProjectId;
   elements.createSceneButton.disabled = !selectedProjectId;

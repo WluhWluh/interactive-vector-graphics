@@ -411,7 +411,7 @@ body {
 }
 
 .timeline-row-secondary {
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
 }
 
