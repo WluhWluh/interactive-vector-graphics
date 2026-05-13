@@ -33,6 +33,33 @@ declare global {
       getSelectedProjectId: () => string | null;
       getSelectedAssetId: () => string | null;
       getLastImportError: () => string | null;
+      getEditorMode: () => "asset" | "scene";
+      getPrefabs: () => Array<{
+        id: string;
+        projectId: string;
+        name: string;
+        dataPath: string;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      getSelectedPrefabId: () => string | null;
+      getLoadedPrefabId: () => string | null;
+      getPrefabAssembly: () => {
+        nodes: Array<{
+          id: string;
+          kind: "group" | "primitive";
+          parentId: string | null;
+          assetId?: string;
+          name: string;
+          position: [number, number, number];
+          rotation: [number, number, number];
+          scale: [number, number, number];
+          billboardMode: "spherical";
+        }>;
+        selectedPrefabId: string | null;
+        loadedPrefabId: string | null;
+        selectedPrefabNodeId: string | null;
+      };
       getExperimentScene: () => {
         camera: {
           projection: "perspective" | "orthographic";
@@ -43,14 +70,25 @@ declare global {
           near: number;
           far: number;
         };
-        nodes: Array<{
-          id: string;
-          assetId: string;
-          position: [number, number, number];
-          rotation: [number, number, number];
-          scale: [number, number, number];
-          billboardMode: "spherical";
-        }>;
+        nodes: Array<
+          | {
+              id: string;
+              kind: "primitive";
+              assetId: string;
+              position: [number, number, number];
+              rotation: [number, number, number];
+              scale: [number, number, number];
+              billboardMode: "spherical";
+            }
+          | {
+              id: string;
+              kind: "prefabInstance";
+              prefabId: string;
+              position: [number, number, number];
+              rotation: [number, number, number];
+              scale: [number, number, number];
+            }
+        >;
         selectedNodeId: string | null;
         transformMode: "translate" | "rotate" | "scale";
       };

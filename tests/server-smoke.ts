@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDataStore } from "../server/dataStore";
 import { importPrimitiveSvgOnServer } from "../server/primitiveSvgImport";
+import { validatePrefabDocument } from "../server/prefabDocument";
 import { validateSceneDocument } from "../server/sceneDocument";
-import type { SceneDocument } from "../server/types";
+import type { PrefabDocument, SceneDocument } from "../server/types";
 
 const tempDataDir = await mkdtemp(join(tmpdir(), "ivg-server-smoke-"));
 const store = createDataStore(tempDataDir);
@@ -56,6 +57,126 @@ try {
   assert.equal(firstAsset.fill, "#ffcf4a");
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
 
+  const validPrefabDocument: PrefabDocument = {
+    version: 1,
+    nodes: [
+      {
+        id: "prefab-node-1",
+        kind: "group",
+        parentId: null,
+        name: "Head",
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        billboardMode: "spherical",
+      },
+      {
+        id: "prefab-node-2",
+        kind: "primitive",
+        parentId: "prefab-node-1",
+        assetId: firstAsset.id,
+        name: "Face",
+        position: [0, 1, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        billboardMode: "spherical",
+      },
+    ],
+  };
+
+  validatePrefabDocument(validPrefabDocument, { projectId: firstProject.id });
+  assert.throws(
+    () =>
+      validatePrefabDocument(
+        {
+          ...validPrefabDocument,
+          nodes: [
+            validPrefabDocument.nodes[0],
+            {
+              ...validPrefabDocument.nodes[1],
+              id: "prefab-node-1",
+            },
+          ],
+        },
+        { projectId: firstProject.id },
+      ),
+    /duplicate node id/,
+  );
+  assert.throws(
+    () =>
+      validatePrefabDocument(
+        {
+          ...validPrefabDocument,
+          nodes: [
+            {
+              ...validPrefabDocument.nodes[0],
+              assetId: firstAsset.id,
+            },
+          ],
+        },
+        { projectId: firstProject.id },
+      ),
+    /must not be set for group/,
+  );
+  assert.throws(
+    () =>
+      validatePrefabDocument(
+        {
+          ...validPrefabDocument,
+          nodes: [
+            {
+              ...validPrefabDocument.nodes[1],
+              parentId: "missing-parent",
+            },
+          ],
+        },
+        { projectId: firstProject.id },
+      ),
+    /parentId "missing-parent" does not exist/,
+  );
+
+  const firstPrefab = await store.createPrefab({
+    projectId: firstProject.id,
+    name: "Demo Head",
+    document: validPrefabDocument,
+  });
+  const secondPrefab = await store.createPrefab({
+    projectId: firstProject.id,
+    name: "Demo Head",
+    document: {
+      version: 1,
+      nodes: [],
+    },
+  });
+
+  assert.equal(firstPrefab.id, "demo-head");
+  assert.equal(secondPrefab.id, "demo-head-2");
+  assert.equal(firstPrefab.dataPath, "projects/my-test-project/prefabs/demo-head.json");
+  assert.equal(store.listPrefabs(firstProject.id).length, 2);
+
+  const storedPrefab = await store.getPrefab(firstProject.id, firstPrefab.id);
+  assert.deepEqual(storedPrefab.document, validPrefabDocument);
+
+  const updatedPrefabDocument: PrefabDocument = {
+    ...validPrefabDocument,
+    nodes: [
+      validPrefabDocument.nodes[0],
+      {
+        ...validPrefabDocument.nodes[1],
+        position: [0.5, 1, 0],
+      },
+    ],
+  };
+  const updatedPrefab = await store.updatePrefab(
+    firstProject.id,
+    firstPrefab.id,
+    updatedPrefabDocument,
+  );
+  const updatedStoredPrefab = await store.getPrefab(firstProject.id, firstPrefab.id);
+
+  assert.equal(updatedPrefab.id, firstPrefab.id);
+  assert.deepEqual(updatedStoredPrefab.document, updatedPrefabDocument);
+
   const validSceneDocument: SceneDocument = {
     version: 2,
     camera: {
@@ -70,11 +191,11 @@ try {
     nodes: [
       {
         id: "node-1",
-        assetId: firstAsset.id,
+        kind: "prefabInstance",
+        prefabId: firstPrefab.id,
         position: [0, 1, 0],
         rotation: [0, 0, 0],
         scale: [1, 1, 1],
-        billboardMode: "spherical",
       },
     ],
     animation: {
@@ -120,6 +241,22 @@ try {
     },
   };
   validateSceneDocument(animatedSceneDocument, { projectId: firstProject.id });
+  assertInvalidSceneDocument(
+    {
+      ...validSceneDocument,
+      nodes: [
+        {
+          id: "node-1",
+          kind: "prefabInstance",
+          position: [0, 1, 0],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+        },
+      ],
+    },
+    /prefabId is required/,
+    firstProject.id,
+  );
   assert.throws(
     () =>
       validateSceneDocument(
@@ -291,6 +428,26 @@ try {
     "utf8",
   );
   assert.equal(JSON.parse(sceneFileText).nodes[0].position[0], 2.5);
+
+  const prefabFiles = await readdir(
+    join(tempDataDir, "projects", firstProject.id, "prefabs"),
+  );
+  assert.deepEqual(prefabFiles.sort(), [
+    "demo-head-2.json",
+    "demo-head.json",
+  ]);
+  const prefabFileText = await readFile(
+    join(tempDataDir, "projects", firstProject.id, "prefabs", "demo-head.json"),
+    "utf8",
+  );
+  assert.equal(JSON.parse(prefabFileText).nodes[1].position[0], 0.5);
+
+  await store.deletePrefab(firstProject.id, firstPrefab.id);
+  assert.equal(store.listPrefabs(firstProject.id).length, 1);
+  const remainingPrefabFiles = await readdir(
+    join(tempDataDir, "projects", firstProject.id, "prefabs"),
+  );
+  assert.deepEqual(remainingPrefabFiles, ["demo-head-2.json"]);
 
   await store.deleteScene(firstProject.id, firstScene.id);
   assert.equal(store.listScenes(firstProject.id).length, 1);

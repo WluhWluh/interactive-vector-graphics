@@ -1,5 +1,9 @@
 import type { PrimitiveFillRule, PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
-import type { EditorSceneNode, EditorViewportCameraSnapshot } from "./threeEditorViewport";
+import type {
+  EditorSceneNode,
+  EditorViewportCameraSnapshot,
+  Vector3Tuple,
+} from "./threeEditorViewport";
 
 export type ProjectRecord = {
   id: string;
@@ -22,10 +26,51 @@ export type StoredPrimitiveAssetDto = {
   updatedAt: string;
 };
 
+export type PrefabNode = {
+  id: string;
+  kind: "group" | "primitive";
+  parentId: string | null;
+  assetId?: string;
+  name: string;
+  position: Vector3Tuple;
+  rotation: Vector3Tuple;
+  scale: Vector3Tuple;
+  billboardMode: "spherical";
+};
+
+export type PrefabDocument = {
+  version: 1;
+  nodes: PrefabNode[];
+};
+
+export type PrefabRecord = {
+  id: string;
+  projectId: string;
+  name: string;
+  dataPath: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ScenePrimitiveNode = EditorSceneNode & {
+  kind: "primitive";
+};
+
+export type ScenePrefabInstanceNode = {
+  id: string;
+  kind: "prefabInstance";
+  prefabId: string;
+  position: Vector3Tuple;
+  rotation: Vector3Tuple;
+  scale: Vector3Tuple;
+};
+
+export type SceneNode = ScenePrimitiveNode | ScenePrefabInstanceNode;
+
 export type SceneDocument = {
   version: 2;
   camera: EditorViewportCameraSnapshot;
-  nodes: EditorSceneNode[];
+  nodes: SceneNode[];
   animation: {
     fps: 24;
     activeClipId: string | null;
@@ -154,6 +199,111 @@ export async function deleteAsset(
 ): Promise<void> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+  const body = (await response.json()) as { error?: string };
+  assertOk(response, body.error);
+}
+
+export async function listPrefabs(projectId: string): Promise<PrefabRecord[]> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/prefabs`,
+  );
+  const body = (await response.json()) as {
+    prefabs?: PrefabRecord[];
+    error?: string;
+  };
+  assertOk(response, body.error);
+  return body.prefabs ?? [];
+}
+
+export async function createPrefab(
+  projectId: string,
+  name: string,
+  document: PrefabDocument,
+): Promise<{ prefab: PrefabRecord; document: PrefabDocument }> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/prefabs`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name, document }),
+    },
+  );
+  const body = (await response.json()) as {
+    prefab?: PrefabRecord;
+    document?: PrefabDocument;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.prefab || !body.document) {
+    throw new Error("Prefab API did not return a created prefab.");
+  }
+
+  return { prefab: body.prefab, document: body.document };
+}
+
+export async function getPrefab(
+  projectId: string,
+  prefabId: string,
+): Promise<{ prefab: PrefabRecord; document: PrefabDocument }> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/prefabs/${encodeURIComponent(prefabId)}`,
+  );
+  const body = (await response.json()) as {
+    prefab?: PrefabRecord;
+    document?: PrefabDocument;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.prefab || !body.document) {
+    throw new Error("Prefab API did not return a prefab document.");
+  }
+
+  return { prefab: body.prefab, document: body.document };
+}
+
+export async function savePrefab(
+  projectId: string,
+  prefabId: string,
+  document: PrefabDocument,
+): Promise<{ prefab: PrefabRecord; document: PrefabDocument }> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/prefabs/${encodeURIComponent(prefabId)}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ document }),
+    },
+  );
+  const body = (await response.json()) as {
+    prefab?: PrefabRecord;
+    document?: PrefabDocument;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.prefab || !body.document) {
+    throw new Error("Prefab API did not return an updated prefab.");
+  }
+
+  return { prefab: body.prefab, document: body.document };
+}
+
+export async function deletePrefab(
+  projectId: string,
+  prefabId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/prefabs/${encodeURIComponent(prefabId)}`,
     {
       method: "DELETE",
     },

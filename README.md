@@ -22,7 +22,8 @@ primitive files stored in a Git-ignored runtime data directory.
 
 - `/index.html` is the clean stage runtime for embedding or presentation.
 - `/editor.html` is the early editor shell with project/asset management, SVG
-  import, an in-memory camera/transform experiment viewport, and Inspector.
+  import, project-level prefab assembly, scene layout, a camera/transform
+  experiment viewport, and Inspector.
 
 The editor now works against the backend API. Projects and imported primitive
 assets persist in the runtime data directory until you delete them from the UI or
@@ -30,8 +31,8 @@ remove that directory yourself.
 
 ## Local Data Server
 
-The backend provides a small Fastify API for project, primitive asset, and scene
-document data:
+The backend provides a small Fastify API for project, primitive asset, prefab,
+and scene document data:
 
 - `GET /api/health`
 - `GET /api/projects`
@@ -40,6 +41,11 @@ document data:
 - `GET /api/projects/:projectId/assets`
 - `POST /api/projects/:projectId/assets` as `multipart/form-data`
 - `DELETE /api/projects/:projectId/assets/:assetId`
+- `GET /api/projects/:projectId/prefabs`
+- `POST /api/projects/:projectId/prefabs`
+- `GET /api/projects/:projectId/prefabs/:prefabId`
+- `PUT /api/projects/:projectId/prefabs/:prefabId`
+- `DELETE /api/projects/:projectId/prefabs/:prefabId`
 - `GET /api/projects/:projectId/scenes`
 - `POST /api/projects/:projectId/scenes`
 - `GET /api/projects/:projectId/scenes/:sceneId`
@@ -51,11 +57,13 @@ is ignored by Git. Set `IVG_DATA_DIR` to use another folder, and
 `IVG_SERVER_PORT` to override the default API port `4317`. Vite's local `/api`
 proxy reads the same port value.
 
-Project and scene metadata is stored in `data/ivg.sqlite`. Uploaded SVG source
-files are stored under `data/projects/<project-id>/primitives/`. Scene documents
-are stored under `data/projects/<project-id>/scenes/` as JSON files. Project
-assets, scenes, and future animation data are intentionally separate from source
-code. Only code, fixtures, and built-in demos should enter Git.
+Project, primitive, prefab, and scene metadata is stored in `data/ivg.sqlite`.
+Uploaded SVG source files are stored under
+`data/projects/<project-id>/primitives/`. Prefab documents live under
+`data/projects/<project-id>/prefabs/`, and scene documents live under
+`data/projects/<project-id>/scenes/` as JSON files. Project assets, prefabs,
+scenes, and future animation data are intentionally separate from source code.
+Only code, fixtures, and built-in demos should enter Git.
 
 For local development, run both servers:
 
@@ -78,6 +86,12 @@ Then open:
 - In the editor, Three.js also provides camera math, grid/axes helpers,
   selection proxies, OrbitControls, and TransformControls. SVG primitives still
   render through Canvas Path2D so this does not change the visual runtime target.
+- `/editor.html` has two early authoring modes. `Asset Assembly` builds
+  project-level prefabs from primitive SVG parts and optional transform groups.
+  `Scene Layout` places prefab reference instances in the spatial scene.
+- Scene documents store prefab instance references instead of unpacking prefab
+  contents. This keeps reusable character/prop assemblies editable at the
+  project level.
 - The editor can save and load the current camera and scene nodes as scene
   document v2. Animation data is reserved as `{ fps: 24, activeClipId: null,
   clips: [] }` until the timeline exists.

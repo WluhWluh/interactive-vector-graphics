@@ -51,8 +51,8 @@ than to the heavier 3D/game look of Star Birds.
 ## Entrypoint Rules
 
 - Keep `/index.html` as the clean runtime stage without editor UI.
-- Use `/editor.html` for authoring UI experiments such as asset import, selection,
-  preview, and future scene editing.
+- Use `/editor.html` for authoring UI experiments such as asset import, prefab
+  assembly, scene layout, selection, preview, and future animation editing.
 - Shared rendering and asset code belongs under `src/core`; entrypoint-specific
   behavior belongs under `src/stage` or `src/editor`.
 - Editor-only Three.js helpers may live under `src/editor`; keep them separate
@@ -62,6 +62,14 @@ than to the heavier 3D/game look of Star Birds.
   clean runtime scene loader is explicitly planned.
 - Canvas billboard rendering should remain the source of visual truth for SVG
   primitives; Three.js proxies are for editing, picking, and transform handles.
+- Keep the editor mode split explicit:
+  - `Asset Assembly` is for project-level reusable prefabs made from primitive
+    SVG parts and optional transform groups.
+  - `Scene Layout` is for spatial scene documents that place prefab reference
+    instances.
+- Scene nodes should reference prefabs instead of unpacking or copying prefab
+  internals. If prefab contents change later, scene instances should remain
+  conceptually tied to that reusable project-level assembly.
 
 ## Runtime Data Rules
 
@@ -75,6 +83,8 @@ than to the heavier 3D/game look of Star Birds.
   directly into repository files.
 - Project metadata currently lives in SQLite at `data/ivg.sqlite`; uploaded SVG
   sources live beside their project under `data/projects/<project-id>/`.
+- Prefab metadata lives in the same SQLite database; prefab documents are JSON
+  files under `data/projects/<project-id>/prefabs/`.
 - Scene metadata lives in the same SQLite database; scene documents are JSON
   files under `data/projects/<project-id>/scenes/`.
 - Scene document v2 stores camera, nodes, and animation clips/tracks/keyframes.

@@ -123,28 +123,54 @@ function validateNodes(
       );
     }
 
-    if (typeof node.assetId !== "string" || !node.assetId.trim()) {
-      throw new SceneDocumentValidationError(
-        context,
-        `nodes[${index}].assetId is required`,
-      );
+    if (node.kind === "primitive") {
+      if (typeof node.assetId !== "string" || !node.assetId.trim()) {
+        throw new SceneDocumentValidationError(
+          context,
+          `nodes[${index}].assetId is required`,
+        );
+      }
+
+      if (node.billboardMode !== "spherical") {
+        throw new SceneDocumentValidationError(
+          context,
+          `nodes[${index}].billboardMode must be spherical`,
+        );
+      }
+
+      return {
+        id: node.id,
+        kind: "primitive" as const,
+        assetId: node.assetId,
+        position: readVector3(node.position, `nodes[${index}].position`, context),
+        rotation: readVector3(node.rotation, `nodes[${index}].rotation`, context),
+        scale: readVector3(node.scale, `nodes[${index}].scale`, context),
+        billboardMode: "spherical" as const,
+      };
     }
 
-    if (node.billboardMode !== "spherical") {
-      throw new SceneDocumentValidationError(
-        context,
-        `nodes[${index}].billboardMode must be spherical`,
-      );
+    if (node.kind === "prefabInstance") {
+      if (typeof node.prefabId !== "string" || !node.prefabId.trim()) {
+        throw new SceneDocumentValidationError(
+          context,
+          `nodes[${index}].prefabId is required`,
+        );
+      }
+
+      return {
+        id: node.id,
+        kind: "prefabInstance" as const,
+        prefabId: node.prefabId,
+        position: readVector3(node.position, `nodes[${index}].position`, context),
+        rotation: readVector3(node.rotation, `nodes[${index}].rotation`, context),
+        scale: readVector3(node.scale, `nodes[${index}].scale`, context),
+      };
     }
 
-    return {
-      id: node.id,
-      assetId: node.assetId,
-      position: readVector3(node.position, `nodes[${index}].position`, context),
-      rotation: readVector3(node.rotation, `nodes[${index}].rotation`, context),
-      scale: readVector3(node.scale, `nodes[${index}].scale`, context),
-      billboardMode: "spherical" as const,
-    };
+    throw new SceneDocumentValidationError(
+      context,
+      `nodes[${index}].kind must be primitive or prefabInstance`,
+    );
   });
 }
 

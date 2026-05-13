@@ -106,9 +106,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
   await expect(page.locator("#inspector-fields")).toContainText("uploaded-face");
   await expect(page.locator("#inspector-fields")).toContainText("#ffcf4a");
-  await page.getByRole("button", { name: "Add to Scene" }).click();
-  await expect(page.getByRole("button", { name: /node-1/ })).toBeVisible();
-  await expect(page.locator("#inspector-fields")).toContainText("node-1");
+  await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
+  await expect(page.getByRole("button", { name: /Primitive: uploaded-face/ })).toBeVisible();
+  await expect(page.locator("#inspector-fields")).toContainText("prefab-node-1");
 
   const editorDebugState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -123,7 +123,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       importedAsset: debug
         .getAssets()
         .find((candidate) => candidate.id === "uploaded-face"),
-      experimentScene: debug.getExperimentScene(),
+      prefabAssembly: debug.getPrefabAssembly(),
       lastImportError: debug.getLastImportError(),
     };
   });
@@ -134,19 +134,22 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editorDebugState?.importedAsset?.sourceUrl).toBe(
     "projects/playwright-project/primitives/uploaded-face.svg",
   );
-  expect(editorDebugState?.experimentScene.nodes).toEqual([
+  expect(editorDebugState?.prefabAssembly.nodes).toEqual([
     {
-      id: "node-1",
+      id: "prefab-node-1",
+      kind: "primitive",
+      parentId: null,
       assetId: "uploaded-face",
+      name: "uploaded-face",
       position: [0, 1, 0],
       rotation: [0, 0, 0],
       scale: [1, 1, 1],
       billboardMode: "spherical",
     },
   ]);
-  expect(editorDebugState?.experimentScene.selectedNodeId).toBe("node-1");
-  expect(editorDebugState?.experimentScene.transformMode).toBe("translate");
-  expect(editorDebugState?.experimentScene.camera.projection).toBe("perspective");
+  expect(editorDebugState?.prefabAssembly.selectedPrefabNodeId).toBe(
+    "prefab-node-1",
+  );
   expect(editorDebugState?.lastImportError).toBeNull();
 
   await page.getByLabel("Position X").fill("2.5");
@@ -158,13 +161,39 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   const editedTransformState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    return debug?.getExperimentScene().nodes[0] ?? null;
+    return debug?.getPrefabAssembly().nodes[0] ?? null;
   });
 
   expect(editedTransformState?.position).toEqual([2.5, 1, 0]);
   expect(editedTransformState?.rotation).toEqual([0, 0, 0.75]);
   expect(editedTransformState?.scale).toEqual([1, 1, 1]);
   await expect(page.getByLabel("Scale Y")).toHaveValue("1");
+  await page.getByLabel("Position X").fill("0");
+  await page.getByLabel("Position X").blur();
+  await page.getByLabel("Rotation Z").fill("0");
+  await page.getByLabel("Rotation Z").blur();
+  await page.locator("#prefab-name-input").fill("Face Prefab");
+  await page.locator("#create-prefab-button").click();
+  await expect(page.getByRole("button", { name: /Face Prefab/ })).toBeVisible();
+
+  const savedPrefabState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      prefabs: debug.getPrefabs(),
+      selectedPrefabId: debug.getSelectedPrefabId(),
+      loadedPrefabId: debug.getLoadedPrefabId(),
+    };
+  });
+
+  expect(savedPrefabState?.prefabs).toHaveLength(1);
+  expect(savedPrefabState?.selectedPrefabId).toBe("face-prefab");
+  expect(savedPrefabState?.loadedPrefabId).toBe("face-prefab");
+  await page.getByRole("button", { name: "Scene Layout" }).click();
 
   await page.locator("#scene-name-input").fill("Empty Scene");
   await page.locator("#create-scene-button").click();
@@ -207,7 +236,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(emptyLoadedState?.nodeCount).toBe(0);
   expect(emptyLoadedState?.loadedSceneId).toBe("empty-scene");
 
-  await page.getByRole("button", { name: "Add to Scene" }).click();
+  await page.getByRole("button", { name: "Add Prefab Instance to Scene" }).click();
   await expect.poll(async () =>
     page.evaluate(() => window.__vectorEditorDebug?.getExperimentScene().nodes.length ?? 0),
   ).toBe(1);
@@ -243,7 +272,12 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(clonedSceneState?.scenes).toHaveLength(2);
   expect(clonedSceneState?.selectedSceneId).toBe("opening-scene");
   expect(clonedSceneState?.loadedSceneId).toBe("opening-scene");
-  expect(clonedSceneState?.node?.position).toEqual([2.5, 1, 0]);
+  expect(clonedSceneState?.node).toMatchObject({
+    id: "node-1",
+    kind: "prefabInstance",
+    prefabId: "face-prefab",
+    position: [2.5, 1, 0],
+  });
 
   await page.getByLabel("Position X").fill("2");
   await page.getByLabel("Position X").blur();
@@ -288,7 +322,11 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     };
   });
 
-  expect(loadedSceneState?.node?.position).toEqual([2, 1, 0]);
+  expect(loadedSceneState?.node).toMatchObject({
+    kind: "prefabInstance",
+    prefabId: "face-prefab",
+    position: [2, 1, 0],
+  });
   expect(loadedSceneState?.loadedSceneId).toBe("opening-scene");
   expect(loadedSceneState?.camera.near).toBe(0.05);
   expect(loadedSceneState?.camera.far).toBe(120);
@@ -319,6 +357,8 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   expect(transformState?.camera.projection).toBe("orthographic");
   expect(transformState?.transformMode).toBe("scale");
+
+  await page.getByRole("button", { name: "Asset Assembly" }).click();
 
   const invalidSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
@@ -354,6 +394,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(invalidImportState?.hasBadAsset).toBe(false);
   expect(invalidImportState?.lastImportError).toContain("bad-asset");
 
+  await page.getByRole("button", { name: "Scene Layout" }).click();
   await page.locator("#delete-scene-button").click();
   await expect(page.getByRole("button", { name: /Opening Scene/ })).toHaveCount(0);
 
@@ -397,6 +438,28 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(afterNodeDeleteState?.assetCount).toBe(1);
   expect(afterNodeDeleteState?.nodeCount).toBe(0);
   expect(afterNodeDeleteState?.selectedNodeId).toBeNull();
+
+  await page.getByRole("button", { name: "Asset Assembly" }).click();
+  await page.locator("#delete-prefab-button").click();
+  await expect(page.getByRole("button", { name: /Face Prefab/ })).toHaveCount(0);
+
+  const afterPrefabDeleteState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    if (!debug) {
+      return null;
+    }
+
+    return {
+      prefabCount: debug.getPrefabs().length,
+      selectedPrefabId: debug.getSelectedPrefabId(),
+      loadedPrefabId: debug.getLoadedPrefabId(),
+    };
+  });
+
+  expect(afterPrefabDeleteState?.prefabCount).toBe(0);
+  expect(afterPrefabDeleteState?.selectedPrefabId).toBeNull();
+  expect(afterPrefabDeleteState?.loadedPrefabId).toBeNull();
 
   await page.getByRole("button", { name: "Delete Imported Asset" }).click();
   await expect(page.getByRole("button", { name: "uploaded-face" })).toHaveCount(0);

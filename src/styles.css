@@ -59,6 +59,20 @@ body {
   border-color: rgba(238, 244, 255, 0.12);
 }
 
+.mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mode-panel {
+  display: contents;
+}
+
+.mode-panel[hidden] {
+  display: none;
+}
+
 .editor-assets {
   border-right: 1px solid rgba(238, 244, 255, 0.12);
 }

@@ -31,6 +31,51 @@ export type SceneTrackProperty =
   | "zoom";
 export type SceneKeyframeValue = number | Vector3Tuple;
 
+export type PrefabDocument = {
+  version: 1;
+  nodes: Array<{
+    id: string;
+    kind: "group" | "primitive";
+    parentId: string | null;
+    assetId?: string;
+    name: string;
+    position: Vector3Tuple;
+    rotation: Vector3Tuple;
+    scale: Vector3Tuple;
+    billboardMode: "spherical";
+  }>;
+};
+
+export type PrefabRecord = {
+  id: string;
+  projectId: string;
+  name: string;
+  dataPath: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ScenePrimitiveNode = {
+  id: string;
+  kind: "primitive";
+  assetId: string;
+  position: Vector3Tuple;
+  rotation: Vector3Tuple;
+  scale: Vector3Tuple;
+  billboardMode: "spherical";
+};
+
+export type ScenePrefabInstanceNode = {
+  id: string;
+  kind: "prefabInstance";
+  prefabId: string;
+  position: Vector3Tuple;
+  rotation: Vector3Tuple;
+  scale: Vector3Tuple;
+};
+
+export type SceneNode = ScenePrimitiveNode | ScenePrefabInstanceNode;
+
 export type SceneDocument = {
   version: 2;
   camera: {
@@ -42,14 +87,7 @@ export type SceneDocument = {
     near: number;
     far: number;
   };
-  nodes: Array<{
-    id: string;
-    assetId: string;
-    position: Vector3Tuple;
-    rotation: Vector3Tuple;
-    scale: Vector3Tuple;
-    billboardMode: "spherical";
-  }>;
+  nodes: SceneNode[];
   animation: {
     fps: 24;
     activeClipId: string | null;
@@ -103,6 +141,20 @@ export type AssetsResponse = {
 
 export type CreateAssetResponse = {
   asset: StoredPrimitiveAsset;
+};
+
+export type PrefabsResponse = {
+  prefabs: PrefabRecord[];
+};
+
+export type CreatePrefabResponse = {
+  prefab: PrefabRecord;
+  document: PrefabDocument;
+};
+
+export type PrefabDetailResponse = {
+  prefab: PrefabRecord;
+  document: PrefabDocument;
 };
 
 export type ScenesResponse = {

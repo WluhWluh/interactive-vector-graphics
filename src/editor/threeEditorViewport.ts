@@ -41,6 +41,13 @@ export type EditorSceneNode = {
   billboardMode: BillboardMode;
 };
 
+export type EditorTransformNode = {
+  id: string;
+  position: Vector3Tuple;
+  rotation: Vector3Tuple;
+  scale: Vector3Tuple;
+};
+
 export type EditorViewportCameraSnapshot = {
   projection: CameraProjection;
   position: Vector3Tuple;
@@ -217,7 +224,7 @@ export class ThreeEditorViewport {
     this.overlayRenderer.render(this.overlayScene, this.activeCamera);
   }
 
-  addOrUpdateNode(node: EditorSceneNode, asset: PrimitiveSvgAsset): void {
+  addOrUpdateNode(node: EditorTransformNode, asset?: PrimitiveSvgAsset): void {
     const existing = this.proxies.get(node.id);
 
     if (existing) {
@@ -248,7 +255,15 @@ export class ThreeEditorViewport {
     }
   }
 
-  syncNodeFromProxy(node: EditorSceneNode): void {
+  clearNodes(): void {
+    for (const nodeId of [...this.proxies.keys()]) {
+      this.removeNode(nodeId);
+    }
+
+    this.setSelectedNode(null);
+  }
+
+  syncNodeFromProxy(node: EditorTransformNode): void {
     const proxy = this.proxies.get(node.id);
 
     if (!proxy) {
@@ -261,7 +276,7 @@ export class ThreeEditorViewport {
     node.scale = vectorToTuple(proxy.root.scale);
   }
 
-  syncProxyFromNode(node: EditorSceneNode): void {
+  syncProxyFromNode(node: EditorTransformNode): void {
     const proxy = this.proxies.get(node.id);
 
     if (!proxy) {
@@ -549,10 +564,10 @@ function createAxesHelper(): AxesHelper {
 }
 
 function createNodeProxy(
-  node: EditorSceneNode,
-  asset: PrimitiveSvgAsset,
+  node: EditorTransformNode,
+  asset?: PrimitiveSvgAsset,
 ): NodeProxy {
-  const [, , viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const [, , viewBoxWidth, viewBoxHeight] = asset?.viewBox ?? [0, 0, 100, 100];
   const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
   const width = viewBoxWidth / largestDimension;
   const height = viewBoxHeight / largestDimension;
@@ -579,7 +594,9 @@ function createNodeProxy(
   edgeLines.renderOrder = 10;
   root.add(edgeLines);
   root.userData.nodeId = node.id;
-  root.userData.assetId = node.assetId;
+  if (asset) {
+    root.userData.assetId = asset.id;
+  }
   root.userData.proxyKind = "primitive-billboard";
   applyNodeTransform(root, node);
 
@@ -591,7 +608,7 @@ function createNodeProxy(
   };
 }
 
-function applyNodeTransform(root: Object3D, node: EditorSceneNode): void {
+function applyNodeTransform(root: Object3D, node: EditorTransformNode): void {
   root.position.fromArray(node.position);
   root.rotation.fromArray([...node.rotation, "XYZ"]);
   root.scale.fromArray(node.scale);

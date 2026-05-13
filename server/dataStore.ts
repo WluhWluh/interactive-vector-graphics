@@ -3,16 +3,20 @@ import { mkdirSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type {
+  PrefabDocument,
+  PrefabRecord,
   ProjectRecord,
   SceneDocument,
   SceneRecord,
   StoredPrimitiveAsset,
 } from "./types";
+import { validatePrefabDocument } from "./prefabDocument";
 import { validateSceneDocument } from "./sceneDocument";
 
 const PROJECTS_DIR_NAME = "projects";
 const DATABASE_FILE_NAME = "ivg.sqlite";
 const SCENES_DIR_NAME = "scenes";
+const PREFABS_DIR_NAME = "prefabs";
 
 type StoredPrimitiveAssetRow = Omit<StoredPrimitiveAsset, "viewBox"> & {
   viewBox: string;
@@ -35,6 +39,12 @@ export type CreateSceneInput = {
   document: SceneDocument;
 };
 
+export type CreatePrefabInput = {
+  projectId: string;
+  name: string;
+  document: PrefabDocument;
+};
+
 export type DataStore = {
   dataDir: string;
   ensureReady: () => Promise<void>;
@@ -48,6 +58,18 @@ export type DataStore = {
     input: CreatePrimitiveAssetInput,
   ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
+  listPrefabs: (projectId: string) => PrefabRecord[];
+  createPrefab: (input: CreatePrefabInput) => Promise<PrefabRecord>;
+  getPrefab: (
+    projectId: string,
+    prefabId: string,
+  ) => Promise<{ prefab: PrefabRecord; document: PrefabDocument }>;
+  updatePrefab: (
+    projectId: string,
+    prefabId: string,
+    document: PrefabDocument,
+  ) => Promise<PrefabRecord>;
+  deletePrefab: (projectId: string, prefabId: string) => Promise<void>;
   listScenes: (projectId: string) => SceneRecord[];
   createScene: (input: CreateSceneInput) => Promise<SceneRecord>;
   getScene: (
@@ -104,6 +126,17 @@ export function createDataStore(dataDir: string): DataStore {
       );
 
       CREATE TABLE IF NOT EXISTS scenes (
+        id TEXT NOT NULL,
+        projectId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        dataPath TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        PRIMARY KEY (projectId, id),
+        FOREIGN KEY (projectId) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS prefabs (
         id TEXT NOT NULL,
         projectId TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -267,6 +300,102 @@ export function createDataStore(dataDir: string): DataStore {
     }
   }
 
+  function listPrefabs(projectId: string): PrefabRecord[] {
+    assertProjectExists(projectId);
+
+    return database
+      .prepare(
+        `
+        SELECT id, projectId, name, dataPath, createdAt, updatedAt
+        FROM prefabs
+        WHERE projectId = ?
+        ORDER BY createdAt
+      `,
+      )
+      .all(projectId) as PrefabRecord[];
+  }
+
+  async function createPrefab(input: CreatePrefabInput): Promise<PrefabRecord> {
+    assertProjectExists(input.projectId);
+
+    const prefabId = createUniquePrefabId(input.projectId, input.name);
+    const timestamp = new Date().toISOString();
+    const dataPath = join(getPrefabsDir(input.projectId), `${prefabId}.json`);
+    const relativeDataPath = toDataRelativePath(dataPath);
+    const prefab: PrefabRecord = {
+      id: prefabId,
+      projectId: input.projectId,
+      name: input.name.trim(),
+      dataPath: relativeDataPath,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await writePrefabDocument(dataPath, input.document);
+    database
+      .prepare(
+        `
+        INSERT INTO prefabs (id, projectId, name, dataPath, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        prefab.id,
+        prefab.projectId,
+        prefab.name,
+        prefab.dataPath,
+        prefab.createdAt,
+        prefab.updatedAt,
+      );
+
+    return prefab;
+  }
+
+  async function getPrefab(
+    projectId: string,
+    prefabId: string,
+  ): Promise<{ prefab: PrefabRecord; document: PrefabDocument }> {
+    const prefab = getPrefabRecord(projectId, prefabId);
+    const rawDocument = JSON.parse(
+      await readFile(join(resolvedDataDir, prefab.dataPath), "utf8"),
+    ) as unknown;
+
+    return {
+      prefab,
+      document: validatePrefabDocument(rawDocument, { projectId, prefabId }),
+    };
+  }
+
+  async function updatePrefab(
+    projectId: string,
+    prefabId: string,
+    document: PrefabDocument,
+  ): Promise<PrefabRecord> {
+    const prefab = getPrefabRecord(projectId, prefabId);
+    const timestamp = new Date().toISOString();
+
+    await writePrefabDocument(join(resolvedDataDir, prefab.dataPath), document);
+    database
+      .prepare(
+        "UPDATE prefabs SET updatedAt = ? WHERE projectId = ? AND id = ?",
+      )
+      .run(timestamp, projectId, prefabId);
+
+    return {
+      ...prefab,
+      updatedAt: timestamp,
+    };
+  }
+
+  async function deletePrefab(projectId: string, prefabId: string): Promise<void> {
+    const prefab = getPrefabRecord(projectId, prefabId);
+
+    database
+      .prepare("DELETE FROM prefabs WHERE projectId = ? AND id = ?")
+      .run(projectId, prefabId);
+    await rm(join(resolvedDataDir, prefab.dataPath), { force: true });
+  }
+
   function listScenes(projectId: string): SceneRecord[] {
     assertProjectExists(projectId);
 
@@ -379,11 +508,38 @@ export function createDataStore(dataDir: string): DataStore {
     return createUniqueId(baseId, existingIds);
   }
 
+  function createUniquePrefabId(projectId: string, name: string): string {
+    const baseId = slugifyName(name);
+    const existingIds = new Set(listPrefabs(projectId).map((prefab) => prefab.id));
+
+    return createUniqueId(baseId, existingIds);
+  }
+
   function createUniqueSceneId(projectId: string, name: string): string {
     const baseId = slugifyName(name);
     const existingIds = new Set(listScenes(projectId).map((scene) => scene.id));
 
     return createUniqueId(baseId, existingIds);
+  }
+
+  function getPrefabRecord(projectId: string, prefabId: string): PrefabRecord {
+    assertProjectExists(projectId);
+
+    const row = database
+      .prepare(
+        `
+        SELECT id, projectId, name, dataPath, createdAt, updatedAt
+        FROM prefabs
+        WHERE projectId = ? AND id = ?
+      `,
+      )
+      .get(projectId, prefabId) as PrefabRecord | undefined;
+
+    if (!row) {
+      throw new Error(`Prefab "${prefabId}" does not exist.`);
+    }
+
+    return row;
   }
 
   function getSceneRecord(projectId: string, sceneId: string): SceneRecord {
@@ -424,9 +580,21 @@ export function createDataStore(dataDir: string): DataStore {
     return join(getProjectDir(projectId), SCENES_DIR_NAME);
   }
 
+  function getPrefabsDir(projectId: string): string {
+    return join(getProjectDir(projectId), PREFABS_DIR_NAME);
+  }
+
   async function writeSceneDocument(
     path: string,
     document: SceneDocument,
+  ): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+  }
+
+  async function writePrefabDocument(
+    path: string,
+    document: PrefabDocument,
   ): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, "utf8");
@@ -447,6 +615,11 @@ export function createDataStore(dataDir: string): DataStore {
     listPrimitiveAssets,
     createPrimitiveAsset,
     deletePrimitiveAsset,
+    listPrefabs,
+    createPrefab,
+    getPrefab,
+    updatePrefab,
+    deletePrefab,
     listScenes,
     createScene,
     getScene,

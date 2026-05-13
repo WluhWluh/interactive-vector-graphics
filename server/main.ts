@@ -1,14 +1,18 @@
 import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { createDataStore, getDefaultDataDir, getServerPort } from "./dataStore";
+import { validatePrefabDocument } from "./prefabDocument";
 import { importPrimitiveSvgOnServer } from "./primitiveSvgImport";
 import { validateSceneDocument } from "./sceneDocument";
 import type {
   AssetsResponse,
   CreateAssetResponse,
+  CreatePrefabResponse,
   CreateProjectResponse,
   CreateSceneResponse,
   HealthResponse,
+  PrefabDetailResponse,
+  PrefabsResponse,
   ProjectsResponse,
   SceneDetailResponse,
   ScenesResponse,
@@ -153,6 +157,111 @@ server.delete<{
   } catch (error) {
     reply.code(404);
     return { error: error instanceof Error ? error.message : "Asset not found." };
+  }
+});
+
+server.get<{
+  Params: { projectId: string };
+  Reply: PrefabsResponse | { error: string };
+}>("/api/projects/:projectId/prefabs", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    return {
+      prefabs: dataStore.listPrefabs(request.params.projectId),
+    };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Project not found." };
+  }
+});
+
+server.post<{
+  Params: { projectId: string };
+  Body: { name?: unknown; document?: unknown };
+  Reply: CreatePrefabResponse | { error: string };
+}>("/api/projects/:projectId/prefabs", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  if (typeof request.body?.name !== "string" || !request.body.name.trim()) {
+    reply.code(400);
+    return { error: "Prefab name is required." };
+  }
+
+  try {
+    const document = validatePrefabDocument(request.body.document, {
+      projectId: request.params.projectId,
+    });
+    const prefab = await dataStore.createPrefab({
+      projectId: request.params.projectId,
+      name: request.body.name,
+      document,
+    });
+
+    return { prefab, document };
+  } catch (error) {
+    reply.code(400);
+    return { error: error instanceof Error ? error.message : "Prefab create failed." };
+  }
+});
+
+server.get<{
+  Params: { projectId: string; prefabId: string };
+  Reply: PrefabDetailResponse | { error: string };
+}>("/api/projects/:projectId/prefabs/:prefabId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    return await dataStore.getPrefab(
+      request.params.projectId,
+      request.params.prefabId,
+    );
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Prefab not found." };
+  }
+});
+
+server.put<{
+  Params: { projectId: string; prefabId: string };
+  Body: { document?: unknown };
+  Reply: PrefabDetailResponse | { error: string };
+}>("/api/projects/:projectId/prefabs/:prefabId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const document = validatePrefabDocument(request.body.document, {
+      projectId: request.params.projectId,
+      prefabId: request.params.prefabId,
+    });
+    const prefab = await dataStore.updatePrefab(
+      request.params.projectId,
+      request.params.prefabId,
+      document,
+    );
+
+    return { prefab, document };
+  } catch (error) {
+    reply.code(400);
+    return { error: error instanceof Error ? error.message : "Prefab update failed." };
+  }
+});
+
+server.delete<{
+  Params: { projectId: string; prefabId: string };
+  Reply: { ok: true } | { error: string };
+}>("/api/projects/:projectId/prefabs/:prefabId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    await dataStore.deletePrefab(
+      request.params.projectId,
+      request.params.prefabId,
+    );
+    return { ok: true };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Prefab not found." };
   }
 });
 

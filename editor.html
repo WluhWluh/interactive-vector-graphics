@@ -12,6 +12,16 @@
   <body class="editor-page">
     <main id="editor-app" class="editor-shell" aria-label="Scene editor">
       <aside class="editor-panel editor-assets" aria-label="Assets">
+        <div class="mode-toggle" role="group" aria-label="Editor mode">
+          <button id="asset-mode-button" class="editor-button" type="button">
+            Asset Assembly
+          </button>
+          <button id="scene-mode-button" class="editor-button" type="button">
+            Scene Layout
+          </button>
+        </div>
+
+        <section id="asset-mode-panel" class="mode-panel">
         <header class="editor-panel-header">
           <h1>Projects</h1>
           <span>Persistent workspace</span>
@@ -32,8 +42,73 @@
         </button>
 
         <header class="editor-panel-header">
-          <h2>Scenes</h2>
-          <span>Saved scene documents</span>
+          <h2>Primitive Assets</h2>
+          <span>Primitive SVG</span>
+        </header>
+        <label class="file-import-button" for="svg-file-input">
+          Import SVG
+        </label>
+        <input
+          id="svg-file-input"
+          class="file-input"
+          type="file"
+          accept=".svg,image/svg+xml"
+        />
+        <p id="import-error" class="editor-error" role="alert" hidden></p>
+        <ul id="asset-list" class="asset-list" aria-label="Primitive assets"></ul>
+        <button id="add-node-button" class="editor-button" type="button">
+          Add Primitive to Prefab
+        </button>
+        <button id="delete-asset-button" class="danger-button" type="button">
+          Delete Imported Asset
+        </button>
+
+        <header class="editor-panel-header">
+          <h2>Prefabs</h2>
+          <span>Reusable assemblies</span>
+        </header>
+        <div class="scene-create-row">
+          <input
+            id="prefab-name-input"
+            class="text-input"
+            type="text"
+            placeholder="New prefab name"
+            autocomplete="off"
+          />
+          <button id="create-prefab-button" class="editor-button" type="button">
+            Create Prefab
+          </button>
+        </div>
+        <ul id="prefab-list" class="asset-list" aria-label="Prefabs"></ul>
+        <div class="scene-action-grid">
+          <button id="load-prefab-button" class="editor-button" type="button">
+            Load Prefab
+          </button>
+          <button id="save-prefab-button" class="editor-button" type="button">
+            Save Prefab
+          </button>
+          <button id="delete-prefab-button" class="danger-button" type="button">
+            Delete Prefab
+          </button>
+        </div>
+
+        <header class="editor-panel-header">
+          <h2>Prefab Contents</h2>
+          <span>Local assembly tree</span>
+        </header>
+        <button id="create-prefab-group-button" class="editor-button" type="button">
+          Create Group
+        </button>
+        <ul id="prefab-node-list" class="asset-list" aria-label="Prefab nodes"></ul>
+        <button id="delete-prefab-node-button" class="danger-button" type="button">
+          Delete Prefab Node
+        </button>
+        </section>
+
+        <section id="scene-mode-panel" class="mode-panel">
+        <header class="editor-panel-header">
+          <h2>Scene Documents</h2>
+          <span>Saved layouts</span>
         </header>
         <div class="scene-create-row">
           <input
@@ -64,35 +139,17 @@
         </div>
 
         <header class="editor-panel-header">
-          <h2>Assets</h2>
-          <span>Primitive SVG</span>
+          <h2>Scene Contents</h2>
+          <span>Layout instances</span>
         </header>
-        <label class="file-import-button" for="svg-file-input">
-          Import SVG
-        </label>
-        <input
-          id="svg-file-input"
-          class="file-input"
-          type="file"
-          accept=".svg,image/svg+xml"
-        />
-        <p id="import-error" class="editor-error" role="alert" hidden></p>
-        <ul id="asset-list" class="asset-list" aria-label="Primitive assets"></ul>
-        <button id="add-node-button" class="editor-button" type="button">
-          Add to Scene
+        <button id="add-prefab-instance-button" class="editor-button" type="button">
+          Add Prefab Instance to Scene
         </button>
-        <button id="delete-asset-button" class="danger-button" type="button">
-          Delete Imported Asset
-        </button>
-
-        <header class="editor-panel-header">
-          <h2>Scene</h2>
-          <span>In-memory experiment</span>
-        </header>
         <ul id="scene-node-list" class="asset-list" aria-label="Scene nodes"></ul>
         <button id="delete-scene-node-button" class="danger-button" type="button">
           Delete Scene Node
         </button>
+        </section>
       </aside>
 
       <section class="editor-preview" aria-label="Live preview">
