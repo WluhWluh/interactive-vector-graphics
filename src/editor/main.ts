@@ -147,6 +147,8 @@ type DrawableBillboard = {
   asset: PrimitiveSvgAsset;
   transform: TransformSnapshot;
   selected: boolean;
+  opacity?: number;
+  ghost?: boolean;
 };
 
 type PrefabNodeTreeEntry = {
@@ -2937,11 +2939,75 @@ function renderPreviewFrame(): void {
 }
 
 function getAssetAssemblyBillboards(): DrawableBillboard[] {
-  return flattenPrefabBillboards(
+  const evaluatedDrawables = flattenPrefabBillboards(
     getEvaluatedPrefabNodes(),
     new Matrix4(),
     (nodeId) => nodeId === selectedPrefabNodeId,
   );
+  const ghostDrawables = getSelectedPrefabTimelineGhostBillboards();
+
+  return [...evaluatedDrawables, ...ghostDrawables];
+}
+
+function getSelectedPrefabTimelineGhostBillboards(): DrawableBillboard[] {
+  const activeClip = getActiveTimelineClip();
+  const selectedNode =
+    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
+
+  if (!activeClip || !selectedNode) {
+    return [];
+  }
+
+  const selectedNodeIds =
+    selectedNode.kind === "group"
+      ? getPrefabNodeAndDescendantIds(selectedNode.id)
+      : new Set([selectedNode.id]);
+  const evaluatedNodes = getEvaluatedPrefabNodes();
+  const baseWorldTransforms = getPrefabWorldTransforms(prefabNodes);
+  const evaluatedWorldTransforms = getPrefabWorldTransforms(evaluatedNodes);
+  const ghostDrawables: DrawableBillboard[] = [];
+
+  for (const node of prefabNodes) {
+    if (
+      node.kind !== "primitive" ||
+      !selectedNodeIds.has(node.id) ||
+      !node.assetId
+    ) {
+      continue;
+    }
+
+    const asset = getAssetById(node.assetId);
+    const baseWorldMatrix = baseWorldTransforms.get(node.id);
+    const evaluatedWorldMatrix = evaluatedWorldTransforms.get(node.id);
+    const baseWorldTransform = baseWorldMatrix
+      ? matrixToTransform(baseWorldMatrix)
+      : null;
+    const evaluatedWorldTransform = evaluatedWorldMatrix
+      ? matrixToTransform(evaluatedWorldMatrix)
+      : null;
+
+    if (
+      !asset ||
+      !baseWorldTransform ||
+      !evaluatedWorldTransform ||
+      transformsAreNearlyEqual(baseWorldTransform, evaluatedWorldTransform)
+    ) {
+      continue;
+    }
+
+    ghostDrawables.push({
+      id: `${node.id}:timeline-ghost`,
+      asset,
+      transform: baseWorldTransform,
+      selected: false,
+      opacity: 0.5,
+      ghost: true,
+    });
+  }
+
+  return ghostDrawables;
 }
 
 function getSceneLayoutBillboards(): DrawableBillboard[] {
@@ -3048,12 +3114,21 @@ function drawBillboardNode(
     screenScale: number;
   },
 ): void {
-  const { asset, transform, projected, screenScale, selected } = drawable;
+  const {
+    asset,
+    transform,
+    projected,
+    screenScale,
+    selected,
+    opacity = 1,
+    ghost = false,
+  } = drawable;
   const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
   const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
   const assetScale = screenScale / largestDimension;
 
   context.save();
+  context.globalAlpha *= opacity;
   context.translate(projected.x, projected.y);
   context.rotate(transform.rotation[2]);
   context.scale(assetScale * transform.scale[0], assetScale * transform.scale[1]);
@@ -3064,9 +3139,10 @@ function drawBillboardNode(
   context.fillStyle = asset.fill;
   context.fill(asset.path, asset.fillRule);
 
-  if (selected) {
+  if (selected || ghost) {
     context.lineWidth = 3 / Math.max(assetScale, 0.001);
-    context.strokeStyle = "#ffcf4a";
+    context.strokeStyle = ghost ? "#ffffff" : "#ffcf4a";
+    context.setLineDash(ghost ? [8 / Math.max(assetScale, 0.001)] : []);
     context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
   }
 
@@ -3684,6 +3760,24 @@ function lerpVector3(
     roundTransformValue(start[1] + (end[1] - start[1]) * progress),
     roundTransformValue(start[2] + (end[2] - start[2]) * progress),
   ];
+}
+
+function transformsAreNearlyEqual(
+  left: TransformSnapshot,
+  right: TransformSnapshot,
+): boolean {
+  return (
+    vectorsAreNearlyEqual(left.position, right.position) &&
+    vectorsAreNearlyEqual(left.rotation, right.rotation) &&
+    vectorsAreNearlyEqual(left.scale, right.scale)
+  );
+}
+
+function vectorsAreNearlyEqual(
+  left: Vector3Tuple,
+  right: Vector3Tuple,
+): boolean {
+  return left.every((value, index) => Math.abs(value - right[index]) < 0.0001);
 }
 
 function vectorToTuple(value: Vector3): Vector3Tuple {
