@@ -292,7 +292,7 @@ try {
   );
 
   const validPrefabDocument: PrefabDocument = {
-    version: 3,
+    version: 4,
     nodes: [
       {
         id: "prefab-node-1",
@@ -360,9 +360,61 @@ try {
       ],
     },
   };
+  const pathAnimatedPrefabDocument: PrefabDocument = {
+    ...validPrefabDocument,
+    animation: {
+      snapFps: 10,
+      activeClipId: "path-idle",
+      clips: [
+        {
+          id: "path-idle",
+          name: "Path Idle",
+          durationMs: 1000,
+          loop: true,
+          tracks: [
+            {
+              id: "prefab-node-2-path",
+              target: {
+                nodeId: "prefab-node-2",
+                property: "path",
+              },
+              keyframes: [
+                {
+                  id: "prefab-node-2-path-key",
+                  timeMs: 0,
+                  value: firstAsset.bezierPath,
+                  easing: "linear",
+                },
+                {
+                  id: "prefab-node-2-path-key-2",
+                  timeMs: 1000,
+                  value: {
+                    ...firstAsset.bezierPath,
+                    segments: firstAsset.bezierPath.segments.map((segment, index) =>
+                      index === 0
+                        ? {
+                            ...segment,
+                            anchor: [
+                              segment.anchor[0] + 5,
+                              segment.anchor[1],
+                            ],
+                          }
+                        : segment,
+                    ),
+                  },
+                  easing: "easeInOut",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
 
   validatePrefabDocument(validPrefabDocument, { projectId: firstProject.id });
   validatePrefabDocument(animatedPrefabDocument, { projectId: firstProject.id });
+  validatePrefabDocument(pathAnimatedPrefabDocument, { projectId: firstProject.id });
   assert.throws(
     () =>
       validatePrefabDocument(
@@ -372,7 +424,18 @@ try {
         },
         { projectId: firstProject.id },
       ),
-    /version must be 3/,
+    /version must be 4/,
+  );
+  assert.throws(
+    () =>
+      validatePrefabDocument(
+        {
+          ...validPrefabDocument,
+          version: 3,
+        },
+        { projectId: firstProject.id },
+      ),
+    /version must be 4/,
   );
   assertInvalidPrefabDocument(
     {
@@ -542,6 +605,66 @@ try {
     /duplicate keyframe id/,
     firstProject.id,
   );
+  assertInvalidPrefabDocument(
+    {
+      ...pathAnimatedPrefabDocument,
+      animation: {
+        ...pathAnimatedPrefabDocument.animation,
+        clips: [
+          {
+            ...pathAnimatedPrefabDocument.animation.clips[0],
+            tracks: [
+              {
+                ...pathAnimatedPrefabDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  {
+                    id: "bad-path",
+                    timeMs: 0,
+                    value: [0, 1, 0],
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /structured Bezier path/,
+    firstProject.id,
+  );
+  assertInvalidPrefabDocument(
+    {
+      ...pathAnimatedPrefabDocument,
+      animation: {
+        ...pathAnimatedPrefabDocument.animation,
+        clips: [
+          {
+            ...pathAnimatedPrefabDocument.animation.clips[0],
+            tracks: [
+              {
+                ...pathAnimatedPrefabDocument.animation.clips[0].tracks[0],
+                keyframes: [
+                  pathAnimatedPrefabDocument.animation.clips[0].tracks[0].keyframes[0],
+                  {
+                    id: "missing-segment",
+                    timeMs: 1000,
+                    value: {
+                      ...firstAsset.bezierPath,
+                      segments: firstAsset.bezierPath.segments.slice(1),
+                    },
+                    easing: "linear",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    },
+    /same Bezier segment ids/,
+    firstProject.id,
+  );
   assert.throws(
     () =>
       validatePrefabDocument(
@@ -601,7 +724,7 @@ try {
     projectId: firstProject.id,
     name: "Demo Head",
     document: {
-      version: 3,
+      version: 4,
       nodes: [],
       animation: {
         snapFps: 10,

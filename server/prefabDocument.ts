@@ -1,9 +1,15 @@
 import type {
   PrefabDocument,
+  PrefabPathKeyframe,
   PrefabTrackEasing,
   PrefabTrackProperty,
+  PrefabVectorKeyframe,
   Vector3Tuple,
 } from "./types";
+import {
+  validateStructuredBezierPath,
+  type StructuredBezierPath,
+} from "../src/core/assets/structuredBezierPath";
 
 type PrefabDocumentContext = {
   projectId: string;
@@ -30,8 +36,8 @@ export function validatePrefabDocument(
     throw new PrefabDocumentValidationError(context, "document must be an object");
   }
 
-  if (value.version !== 3) {
-    throw new PrefabDocumentValidationError(context, "version must be 3");
+  if (value.version !== 4) {
+    throw new PrefabDocumentValidationError(context, "version must be 4");
   }
 
   if (!Array.isArray(value.nodes)) {
@@ -45,7 +51,7 @@ export function validatePrefabDocument(
   validatePrefabHierarchy(nodes, context);
 
   return {
-    version: 3,
+    version: 4,
     nodes,
     animation,
   };
@@ -276,12 +282,38 @@ function validatePrefabAnimationTrack(
     );
   }
 
+  if (target.property === "path") {
+    const pathTarget = {
+      nodeId: target.nodeId,
+      property: "path" as const,
+    };
+    const keyframes = value.keyframes.map((keyframe, index) =>
+      validatePrefabPathKeyframe(
+        keyframe,
+        `${path}.keyframes[${index}]`,
+        clipDurationMs,
+        context,
+      ),
+    );
+    validatePathKeyframeShapeConsistency(keyframes, path, context);
+    return {
+      id,
+      target: pathTarget,
+      keyframes: validateUniqueKeyframes(keyframes, path, context),
+    };
+  }
+
+  const vectorTarget = {
+    nodeId: target.nodeId,
+    property: target.property,
+  };
+
   return {
     id,
-    target,
+    target: vectorTarget,
     keyframes: validateUniqueKeyframes(
       value.keyframes.map((keyframe, index) =>
-        validatePrefabKeyframe(
+        validatePrefabVectorKeyframe(
           keyframe,
           `${path}.keyframes[${index}]`,
           clipDurationMs,
@@ -318,6 +350,7 @@ function validatePrefabTrackProperty(
     "position",
     "rotation",
     "scale",
+    "path",
   ];
 
   if (
@@ -330,12 +363,12 @@ function validatePrefabTrackProperty(
   return value as PrefabTrackProperty;
 }
 
-function validatePrefabKeyframe(
+function validatePrefabVectorKeyframe(
   value: unknown,
   path: string,
   clipDurationMs: number,
   context: PrefabDocumentContext,
-): PrefabDocument["animation"]["clips"][number]["tracks"][number]["keyframes"][number] {
+): PrefabVectorKeyframe {
   if (!isRecord(value)) {
     throw new PrefabDocumentValidationError(context, `${path} must be an object`);
   }
@@ -358,11 +391,39 @@ function validatePrefabKeyframe(
   };
 }
 
-function validateUniqueKeyframes(
-  keyframes: PrefabDocument["animation"]["clips"][number]["tracks"][number]["keyframes"],
+function validatePrefabPathKeyframe(
+  value: unknown,
+  path: string,
+  clipDurationMs: number,
+  context: PrefabDocumentContext,
+): PrefabPathKeyframe {
+  if (!isRecord(value)) {
+    throw new PrefabDocumentValidationError(context, `${path} must be an object`);
+  }
+
+  const id = readRequiredString(value.id, `${path}.id`, context);
+  const timeMs = readInteger(value.timeMs, `${path}.timeMs`, context);
+
+  if (timeMs < 0 || timeMs > clipDurationMs) {
+    throw new PrefabDocumentValidationError(
+      context,
+      `${path}.timeMs must be within the clip duration`,
+    );
+  }
+
+  return {
+    id,
+    timeMs,
+    value: readStructuredBezierPath(value.value, `${path}.value`, context),
+    easing: validatePrefabTrackEasing(value.easing, `${path}.easing`, context),
+  };
+}
+
+function validateUniqueKeyframes<T extends PrefabVectorKeyframe | PrefabPathKeyframe>(
+  keyframes: T[],
   path: string,
   context: PrefabDocumentContext,
-): PrefabDocument["animation"]["clips"][number]["tracks"][number]["keyframes"] {
+): T[] {
   const ids = new Set<string>();
 
   for (const keyframe of keyframes) {
@@ -377,6 +438,41 @@ function validateUniqueKeyframes(
   }
 
   return keyframes;
+}
+
+function validatePathKeyframeShapeConsistency(
+  keyframes: PrefabPathKeyframe[],
+  path: string,
+  context: PrefabDocumentContext,
+): void {
+  const firstPath = keyframes[0]?.value;
+
+  if (!firstPath || !isStructuredBezierPath(firstPath)) {
+    return;
+  }
+
+  const firstSegmentIds = firstPath.segments.map((segment) => segment.id);
+
+  for (const keyframe of keyframes) {
+    if (keyframe.value.closed !== firstPath.closed) {
+      throw new PrefabDocumentValidationError(
+        context,
+        `${path}.keyframes must keep the same path closed state`,
+      );
+    }
+
+    const segmentIds = keyframe.value.segments.map((segment) => segment.id);
+
+    if (
+      segmentIds.length !== firstSegmentIds.length ||
+      segmentIds.some((segmentId, index) => segmentId !== firstSegmentIds[index])
+    ) {
+      throw new PrefabDocumentValidationError(
+        context,
+        `${path}.keyframes must keep the same Bezier segment ids`,
+      );
+    }
+  }
 }
 
 function validatePrefabTrackEasing(
@@ -411,6 +507,30 @@ function readVector3(
     readFiniteNumber(value[1], `${path}[1]`, context),
     readFiniteNumber(value[2], `${path}[2]`, context),
   ];
+}
+
+function readStructuredBezierPath(
+  value: unknown,
+  path: string,
+  context: PrefabDocumentContext,
+): StructuredBezierPath {
+  try {
+    return validateStructuredBezierPath(value, {
+      expectedClosed: isRecord(value) && value.closed === true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid structured path";
+    throw new PrefabDocumentValidationError(context, `${path} ${message}`);
+  }
+}
+
+function isStructuredBezierPath(value: unknown): value is StructuredBezierPath {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    typeof value.closed === "boolean" &&
+    Array.isArray(value.segments)
+  );
 }
 
 function readRequiredString(

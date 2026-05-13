@@ -96,12 +96,12 @@ declare global {
               id: string;
               target: {
                 nodeId: string;
-                property: "position" | "rotation" | "scale";
+                property: "position" | "rotation" | "scale" | "path";
               };
               keyframes: Array<{
                 id: string;
                 timeMs: number;
-                value: [number, number, number];
+                value: [number, number, number] | StructuredBezierPathDebug;
                 easing: "linear" | "step" | "easeInOut";
               }>;
             }>;
@@ -110,7 +110,7 @@ declare global {
         currentTimeMs: number;
         isPlaying: boolean;
         selectedClipId: string | null;
-        activeTrackProperty: "position" | "rotation" | "scale";
+        activeTrackProperty: "position" | "rotation" | "scale" | "path";
         selectedKeyframeId: string | null;
         evaluatedNodes: Array<{
           id: string;
@@ -123,12 +123,31 @@ declare global {
           scale: [number, number, number];
           billboardMode: "spherical";
         }>;
+        evaluatedPathOverrides: Array<{
+          nodeId: string;
+          path: StructuredBezierPathDebug;
+        }>;
       };
       getPathEditState: () => {
         assetId: string | null;
         selectedSegmentId: string | null;
         selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
         hasDraft: boolean;
+        draftBezierPath: StructuredBezierPathDebug | null;
+        controls: Array<{
+          segmentId: string;
+          component: "anchor" | "handleIn" | "handleOut";
+          x: number;
+          y: number;
+        }>;
+      };
+      getInPlacePathEditState: () => {
+        nodeId: string | null;
+        assetId: string | null;
+        active: boolean;
+        hasDraft: boolean;
+        selectedSegmentId: string | null;
+        selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
         draftBezierPath: StructuredBezierPathDebug | null;
         controls: Array<{
           segmentId: string;
@@ -169,6 +188,7 @@ declare global {
         selectedNodeId: string | null;
         transformMode: "translate" | "rotate" | "scale";
       };
+      getActiveEditorTool: () => "translate" | "rotate" | "scale" | "path";
       getScenes: () => Array<{
         id: string;
         projectId: string;

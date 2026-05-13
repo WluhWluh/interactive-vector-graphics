@@ -320,6 +320,185 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editedTransformState?.rotation).toEqual([0, 0, 0.75]);
   expect(editedTransformState?.scale).toEqual([1, 1, 1]);
   await expect(page.getByLabel("Scale Y")).toHaveValue("1");
+
+  await page.getByLabel("Transform mode").getByRole("button", { name: "Path" }).click();
+  await expect(page.locator("#inspector-fields")).toContainText("In-Place Path");
+  await expect(page.locator("#inspector-fields")).toContainText("Preview only");
+  await expect(page.getByLabel("In-place path anchor X")).toHaveValue("-42");
+  await expect(page.locator("#transform-path-button")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await expect(page.locator("#transform-translate-button")).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
+  await expect(page.locator("#transform-rotate-button")).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
+  await expect(page.locator("#transform-scale-button")).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
+
+  const inPlaceInitialState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+
+    return {
+      path: debug?.getInPlacePathEditState() ?? null,
+      assetAnchor: asset?.bezierPath.segments[0]?.anchor ?? null,
+      activeTool: debug?.getActiveEditorTool() ?? null,
+    };
+  });
+
+  expect(inPlaceInitialState.path).toMatchObject({
+    nodeId: "prefab-node-1",
+    assetId: "uploaded-face",
+    active: true,
+    hasDraft: true,
+    selectedSegmentId: "seg-1",
+    selectedComponent: "anchor",
+  });
+  expect(inPlaceInitialState.path?.controls.length).toBeGreaterThan(0);
+  expect(inPlaceInitialState.path?.draftBezierPath?.segments[0]?.anchor).toEqual([
+    -42,
+    0,
+  ]);
+  expect(inPlaceInitialState.assetAnchor).toEqual([-42, 0]);
+  expect(inPlaceInitialState.activeTool).toBe("path");
+  await page.getByLabel("In-place path anchor X").fill("-30");
+  await page.getByLabel("In-place path anchor X").blur();
+
+  const inPlaceEditedState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+
+    return {
+      path: debug?.getInPlacePathEditState() ?? null,
+      assetAnchor: asset?.bezierPath.segments[0]?.anchor ?? null,
+    };
+  });
+
+  expect(inPlaceEditedState.path?.draftBezierPath?.segments[0]?.anchor).toEqual([
+    -30,
+    0,
+  ]);
+  expect(inPlaceEditedState.assetAnchor).toEqual([-42, 0]);
+  await page.locator("#timeline-clip-name-input").fill("Pose Check");
+  await page.locator("#timeline-create-clip-button").click();
+  await page.locator("#timeline-duration-input").fill("1000");
+  await page.locator("#timeline-duration-input").blur();
+  await page.locator("#timeline-time-input").fill("0");
+  await page.locator("#timeline-time-input").blur();
+  await page.getByLabel("Transform mode").getByRole("button", { name: "Path" }).click();
+  await page.getByLabel("In-place path anchor X").fill("-30");
+  await page.getByLabel("In-place path anchor X").blur();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await page.locator("#timeline-time-input").fill("1000");
+  await page.locator("#timeline-time-input").blur();
+  await page.getByLabel("In-place path anchor X").fill("-10");
+  await page.getByLabel("In-place path anchor X").blur();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await page.locator("#timeline-scrub-input").fill("500");
+
+  const pathKeyframeState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+    const timeline = debug?.getPrefabTimeline();
+    const pathTrack = timeline?.animation.clips[0]?.tracks.find(
+      (track) => track.target.property === "path",
+    );
+    const firstPathValue = pathTrack?.keyframes[0]?.value ?? null;
+    const secondPathValue = pathTrack?.keyframes[1]?.value ?? null;
+    const override = timeline?.evaluatedPathOverrides.find(
+      (candidate) => candidate.nodeId === "prefab-node-1",
+    );
+
+    return {
+      assetAnchor: asset?.bezierPath.segments[0]?.anchor ?? null,
+      pathTrackKeyframeCount: pathTrack?.keyframes.length ?? 0,
+      firstPathKeyframeAnchor: Array.isArray(firstPathValue)
+        ? null
+        : (firstPathValue?.segments[0]?.anchor ?? null),
+      secondPathKeyframeAnchor: Array.isArray(secondPathValue)
+        ? null
+        : (secondPathValue?.segments[0]?.anchor ?? null),
+      overrideAnchor: override?.path.segments[0]?.anchor ?? null,
+      inPlaceAnchor:
+        debug?.getInPlacePathEditState().draftBezierPath?.segments[0]?.anchor ??
+        null,
+    };
+  });
+
+  expect(pathKeyframeState.assetAnchor).toEqual([-42, 0]);
+  expect(pathKeyframeState.pathTrackKeyframeCount).toBe(2);
+  expect(pathKeyframeState.firstPathKeyframeAnchor).toEqual([-30, 0]);
+  expect(pathKeyframeState.secondPathKeyframeAnchor).toEqual([-10, 0]);
+  expect(pathKeyframeState.overrideAnchor).toEqual([-20, 0]);
+  expect(pathKeyframeState.inPlaceAnchor).toEqual([-10, 0]);
+  await page
+    .getByLabel("Transform mode")
+    .getByRole("button", { name: "Move" })
+    .click();
+  await expect(page.locator("#transform-path-button")).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
+  await expect(page.locator("#transform-translate-button")).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await page.locator("#timeline-time-input").fill("0");
+  await page.locator("#timeline-time-input").blur();
+  await page
+    .getByLabel("Transform mode")
+    .getByRole("button", { name: "Move" })
+    .click();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await page.getByLabel("Position X").fill("4");
+  await page.getByLabel("Position X").blur();
+  await page.locator("#timeline-time-input").fill("1000");
+  await page.locator("#timeline-time-input").blur();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await page.locator("#timeline-scrub-input").fill("500");
+  await page.getByLabel("Transform mode").getByRole("button", { name: "Path" }).click();
+
+  const inPlaceAfterTimelineState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+
+    return {
+      path: debug?.getInPlacePathEditState() ?? null,
+      basePosition: debug?.getPrefabAssembly().nodes[0]?.position ?? null,
+      evaluatedPosition: debug?.getPrefabTimeline().evaluatedNodes[0]?.position ?? null,
+    };
+  });
+
+  expect(inPlaceAfterTimelineState.path?.active).toBe(true);
+  expect(inPlaceAfterTimelineState.basePosition).toEqual([4, 1, 0]);
+  expect(inPlaceAfterTimelineState.evaluatedPosition).toEqual([3.25, 1, 0]);
+  await page
+    .getByLabel("Transform mode")
+    .getByRole("button", { name: "Move" })
+    .click();
+
+  const inPlaceDiscardedState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+
+    return {
+      path: debug?.getInPlacePathEditState() ?? null,
+      assetAnchor: asset?.bezierPath.segments[0]?.anchor ?? null,
+    };
+  });
+
+  expect(inPlaceDiscardedState.path?.hasDraft).toBe(false);
+  expect(inPlaceDiscardedState.assetAnchor).toEqual([-42, 0]);
+  await page.locator("#timeline-delete-clip-button").click();
+  await page.getByLabel("Position X").fill("1.5");
+  await page.getByLabel("Position X").blur();
+
   await page.locator("#prefab-copy-button").click();
   await expect(page.locator("#prefab-copy-button")).toHaveText("Paste");
   await expect(page.locator("#prefab-cut-button")).toHaveText("Cancel");
@@ -507,6 +686,22 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await page.getByRole("button", { name: "Group: Root Group" }).click();
   await expect(page.locator("#timeline-add-keyframe-button")).toBeDisabled();
   await page.locator('[data-prefab-node-id="prefab-node-1"]').click();
+  await page.getByLabel("Transform mode").getByRole("button", { name: "Path" }).click();
+  await page.getByLabel("In-place path anchor X").fill("-18");
+  await page.getByLabel("In-place path anchor X").blur();
+  await page.locator("#timeline-add-keyframe-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__vectorEditorDebug
+            ?.getPrefabTimeline()
+            .animation.clips[0]?.tracks.some(
+              (track) => track.target.property === "path",
+            ) ?? false,
+      ),
+    )
+    .toBe(true);
   await page.locator("#prefab-name-input").fill("Face Prefab");
   await page.locator("#create-prefab-button").click();
   await expect(page.getByRole("button", { name: /Face Prefab/ })).toBeVisible();
@@ -539,7 +734,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
             ?.tracks.length ?? 0,
       ),
     )
-    .toBe(3);
+    .toBe(4);
   await expect
     .poll(async () =>
       page.evaluate(

@@ -45,6 +45,7 @@ body {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 320px;
   min-width: 960px;
+  min-height: 0;
   color: #eef4ff;
   background: #10151f;
 }
@@ -52,6 +53,7 @@ body {
 .editor-panel {
   display: flex;
   min-height: 0;
+  overflow-y: auto;
   flex-direction: column;
   gap: 16px;
   padding: 18px;
@@ -610,6 +612,7 @@ body {
   display: grid;
   grid-template-columns: minmax(84px, max-content) minmax(0, 1fr);
   gap: 10px 12px;
+  min-height: 0;
   margin: 0;
   font-size: 12px;
 }
@@ -708,9 +711,18 @@ body[data-path-edit-active="true"] #paper-canvas {
   pointer-events: auto;
 }
 
+body[data-in-place-path-edit-active="true"] #paper-canvas {
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
 body[data-path-edit-active="true"] #three-background-canvas,
 body[data-path-edit-active="true"] #three-overlay-canvas {
   opacity: 0;
+  pointer-events: none;
+}
+
+body[data-in-place-path-edit-active="true"] #three-overlay-canvas {
   pointer-events: none;
 }
 

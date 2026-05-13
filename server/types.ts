@@ -37,10 +37,41 @@ export type SceneTrackProperty =
   | "zoom";
 export type SceneKeyframeValue = number | Vector3Tuple;
 export type PrefabTrackEasing = "linear" | "step" | "easeInOut";
-export type PrefabTrackProperty = "position" | "rotation" | "scale";
+export type PrefabVectorTrackProperty = "position" | "rotation" | "scale";
+export type PrefabPathTrackProperty = "path";
+export type PrefabTrackProperty = PrefabVectorTrackProperty | PrefabPathTrackProperty;
+export type PrefabVectorKeyframe = {
+  id: string;
+  timeMs: number;
+  value: Vector3Tuple;
+  easing: PrefabTrackEasing;
+};
+export type PrefabPathKeyframe = {
+  id: string;
+  timeMs: number;
+  value: StructuredBezierPath;
+  easing: PrefabTrackEasing;
+};
+export type PrefabAnimationTrack =
+  | {
+      id: string;
+      target: {
+        nodeId: string;
+        property: PrefabVectorTrackProperty;
+      };
+      keyframes: PrefabVectorKeyframe[];
+    }
+  | {
+      id: string;
+      target: {
+        nodeId: string;
+        property: PrefabPathTrackProperty;
+      };
+      keyframes: PrefabPathKeyframe[];
+    };
 
 export type PrefabDocument = {
-  version: 3;
+  version: 4;
   nodes: Array<{
     id: string;
     kind: "group" | "primitive";
@@ -60,19 +91,7 @@ export type PrefabDocument = {
       name: string;
       durationMs: number;
       loop: boolean;
-      tracks: Array<{
-        id: string;
-        target: {
-          nodeId: string;
-          property: PrefabTrackProperty;
-        };
-        keyframes: Array<{
-          id: string;
-          timeMs: number;
-          value: Vector3Tuple;
-          easing: PrefabTrackEasing;
-        }>;
-      }>;
+      tracks: PrefabAnimationTrack[];
     }>;
   };
 };

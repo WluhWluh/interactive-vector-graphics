@@ -51,7 +51,9 @@ export type PrefabNode = {
 };
 
 export type PrefabTrackEasing = "linear" | "step" | "easeInOut";
-export type PrefabTrackProperty = "position" | "rotation" | "scale";
+export type PrefabVectorTrackProperty = "position" | "rotation" | "scale";
+export type PrefabPathTrackProperty = "path";
+export type PrefabTrackProperty = PrefabVectorTrackProperty | PrefabPathTrackProperty;
 
 export type PrefabAnimation = {
   snapFps: number;
@@ -67,24 +69,48 @@ export type PrefabAnimationClip = {
   tracks: PrefabAnimationTrack[];
 };
 
-export type PrefabAnimationTrack = {
+export type PrefabVectorAnimationTrack = {
   id: string;
   target: {
     nodeId: string;
-    property: PrefabTrackProperty;
+    property: PrefabVectorTrackProperty;
   };
-  keyframes: PrefabAnimationKeyframe[];
+  keyframes: PrefabVectorAnimationKeyframe[];
 };
 
-export type PrefabAnimationKeyframe = {
+export type PrefabPathAnimationTrack = {
+  id: string;
+  target: {
+    nodeId: string;
+    property: PrefabPathTrackProperty;
+  };
+  keyframes: PrefabPathAnimationKeyframe[];
+};
+
+export type PrefabAnimationTrack =
+  | PrefabVectorAnimationTrack
+  | PrefabPathAnimationTrack;
+
+export type PrefabVectorAnimationKeyframe = {
   id: string;
   timeMs: number;
   value: Vector3Tuple;
   easing: PrefabTrackEasing;
 };
 
+export type PrefabPathAnimationKeyframe = {
+  id: string;
+  timeMs: number;
+  value: StructuredBezierPath;
+  easing: PrefabTrackEasing;
+};
+
+export type PrefabAnimationKeyframe =
+  | PrefabVectorAnimationKeyframe
+  | PrefabPathAnimationKeyframe;
+
 export type PrefabDocument = {
-  version: 3;
+  version: 4;
   nodes: PrefabNode[];
   animation: PrefabAnimation;
 };

@@ -32,9 +32,13 @@ import {
   updateAssetPath,
   uploadAsset,
   type PrefabAnimation,
-  type PrefabAnimationKeyframe,
   type PrefabAnimationClip,
   type PrefabAnimationTrack,
+  type PrefabPathAnimationKeyframe,
+  type PrefabPathAnimationTrack,
+  type PrefabVectorAnimationKeyframe,
+  type PrefabVectorAnimationTrack,
+  type PrefabVectorTrackProperty,
   type PrefabTrackEasing,
   type PrefabTrackProperty,
   type PrefabDocument,
@@ -48,6 +52,25 @@ import {
   type SceneRecord,
 } from "./api";
 import {
+  addBezierPoints,
+  createPathEditSession,
+  dragPathEditControl as dragPathEditCoreControl,
+  findNearestPathEditControl,
+  getPathEditComponentPoint,
+  getPathEditControls,
+  getPathEditScreenControls as getCorePathEditScreenControls,
+  getPathEditSegment,
+  getSelectedPathEditSegment,
+  roundBezierValue,
+  selectPathEditControl as selectPathEditCoreControl,
+  setPathEditComponentAxisValue,
+  type PathEditComponent,
+  type PathEditDragState,
+  type PathEditScreenControl,
+  type PathEditSession,
+  type PathEditViewportAdapter,
+} from "./pathEditCore";
+import {
   ThreeEditorViewport,
   tupleToVector,
   type CameraProjection,
@@ -58,7 +81,9 @@ import {
 
 type EditorMode = "asset" | "path" | "scene";
 type TransformProperty = "position" | "rotation" | "scale";
-type TimelineVectorProperty = PrefabTrackProperty;
+type EditorTool = TransformMode | "path";
+type TimelineVectorProperty = PrefabVectorTrackProperty;
+type TimelineLaneProperty = PrefabTrackProperty;
 type TimelinePointerDrag = {
   keyframeId: string;
   property: PrefabTrackProperty;
@@ -70,24 +95,12 @@ type PendingPrefabClipboard = {
   mode: PrefabClipboardMode;
   sourceNodeId: string;
 };
-type PathEditComponent = "anchor" | "handleIn" | "handleOut";
-type PathEditSelection = {
-  segmentId: string;
-  component: PathEditComponent;
-};
-type PathEditSession = {
+type SourcePathEditSession = PathEditSession & {
   assetId: string;
-  draft: StructuredBezierPath;
-  selected: PathEditSelection | null;
 };
-type PathEditDragState = {
-  segmentId: string;
-  component: PathEditComponent;
-};
-type PathEditControl = {
-  segmentId: string;
-  component: PathEditComponent;
-  point: BezierPoint;
+type InPlacePathEditSession = PathEditSession & {
+  nodeId: string;
+  assetId: string;
 };
 type CollapsibleModuleId =
   | "projects"
@@ -167,6 +180,7 @@ type EditorElements = {
   transformTranslateButton: HTMLButtonElement;
   transformRotateButton: HTMLButtonElement;
   transformScaleButton: HTMLButtonElement;
+  transformPathButton: HTMLButtonElement;
   resetViewButton: HTMLButtonElement;
   importError: HTMLParagraphElement;
   inspectorFields: HTMLDListElement;
@@ -185,6 +199,7 @@ type DrawableBillboard = {
   selected: boolean;
   opacity?: number;
   ghost?: boolean;
+  pathOverride?: StructuredBezierPath;
 };
 
 type PrefabNodeTreeEntry = {
@@ -210,6 +225,10 @@ const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
   "position",
   "rotation",
   "scale",
+];
+const TIMELINE_LANE_PROPERTIES: TimelineLaneProperty[] = [
+  ...TIMELINE_VECTOR_PROPERTIES,
+  "path",
 ];
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
@@ -238,12 +257,15 @@ let timelineCurrentTimeMs = 0;
 let isTimelinePlaying = false;
 let selectedTimelineKeyframeId: string | null = null;
 let timelinePointerDrag: TimelinePointerDrag | null = null;
+let activeEditorTool: EditorTool = "translate";
 let selectedSceneId: string | null = null;
 let loadedSceneId: string | null = null;
 let selectedSceneNodeId: string | null = null;
 let pendingPrefabClipboard: PendingPrefabClipboard | null = null;
-let pathEditSession: PathEditSession | null = null;
+let pathEditSession: SourcePathEditSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
+let inPlacePathEditSession: InPlacePathEditSession | null = null;
+let inPlacePathEditDragState: PathEditDragState | null = null;
 let lastImportError: string | null = null;
 let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
@@ -292,6 +314,10 @@ declare global {
         activeTrackProperty: PrefabTrackProperty;
         selectedKeyframeId: string | null;
         evaluatedNodes: PrefabNode[];
+        evaluatedPathOverrides: Array<{
+          nodeId: string;
+          path: StructuredBezierPath;
+        }>;
       };
       getPathEditState: () => {
         assetId: string | null;
@@ -299,12 +325,17 @@ declare global {
         selectedComponent: PathEditComponent | null;
         hasDraft: boolean;
         draftBezierPath: StructuredBezierPath | null;
-        controls: Array<{
-          segmentId: string;
-          component: PathEditComponent;
-          x: number;
-          y: number;
-        }>;
+        controls: PathEditScreenControl[];
+      };
+      getInPlacePathEditState: () => {
+        nodeId: string | null;
+        assetId: string | null;
+        active: boolean;
+        hasDraft: boolean;
+        selectedSegmentId: string | null;
+        selectedComponent: PathEditComponent | null;
+        draftBezierPath: StructuredBezierPath | null;
+        controls: PathEditScreenControl[];
       };
       getExperimentScene: () => {
         camera: {
@@ -320,6 +351,7 @@ declare global {
         selectedNodeId: string | null;
         transformMode: TransformMode;
       };
+      getActiveEditorTool: () => EditorTool;
       getScenes: () => SceneRecord[];
       getEditorMode: () => EditorMode;
       getSelectedProjectId: () => string | null;
@@ -457,24 +489,30 @@ function bindEditorEvents(): void {
     deleteSelectedTimelineKeyframe();
   });
   window.addEventListener("pointerdown", (event) => {
+    selectInPlacePathEditControl(event);
     selectPathEditControl(event);
   });
   window.addEventListener("mousedown", (event) => {
+    selectInPlacePathEditControl(event);
     selectPathEditControl(event);
   });
   window.addEventListener("pointermove", (event) => {
     dragSelectedTimelineKeyframe(event);
     dragPathEditControl(event);
+    dragInPlacePathEditControl(event);
   });
   window.addEventListener("mousemove", (event) => {
     dragPathEditControl(event);
+    dragInPlacePathEditControl(event);
   });
   window.addEventListener("pointerup", () => {
     timelinePointerDrag = null;
     pathEditDragState = null;
+    inPlacePathEditDragState = null;
   });
   window.addEventListener("mouseup", () => {
     pathEditDragState = null;
+    inPlacePathEditDragState = null;
   });
   elements.createSceneButton.addEventListener("click", () => {
     void createSceneFromInput("empty");
@@ -523,13 +561,16 @@ function bindEditorEvents(): void {
     toggleProjection();
   });
   elements.transformTranslateButton.addEventListener("click", () => {
-    setTransformMode("translate");
+    setActiveEditorTool("translate");
   });
   elements.transformRotateButton.addEventListener("click", () => {
-    setTransformMode("rotate");
+    setActiveEditorTool("rotate");
   });
   elements.transformScaleButton.addEventListener("click", () => {
-    setTransformMode("scale");
+    setActiveEditorTool("scale");
+  });
+  elements.transformPathButton.addEventListener("click", () => {
+    setActiveEditorTool("path");
   });
   elements.resetViewButton.addEventListener("click", () => {
     threeViewport.resetView();
@@ -542,6 +583,7 @@ function bindEditorEvents(): void {
   threeViewport.setCallbacks({
     onSelectionChange: (nodeId) => {
       if (editorMode === "asset") {
+        exitPathTool();
         selectedPrefabNodeId = nodeId;
         syncSelectionFromPrefabNode();
       } else if (editorMode === "scene") {
@@ -763,14 +805,11 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
   selectedAssetId = asset.id;
   editorMode = "path";
   pathEditSession = {
+    ...createPathEditSession(asset.bezierPath),
     assetId: asset.id,
-    draft: cloneStructuredBezierPath(asset.bezierPath),
-    selected: {
-      segmentId: asset.bezierPath.segments[0]?.id ?? "",
-      component: "anchor",
-    },
   };
   pathEditDragState = null;
+  exitPathTool();
   lastImportError = null;
   hideError();
   renderEditorShell();
@@ -798,6 +837,9 @@ async function importSelectedFile(): Promise<void> {
   try {
     const asset = await uploadAsset(selectedProjectId, file);
     selectedAssetId = asset.id;
+    if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+      selectedPrefabNodeId = null;
+    }
     lastImportError = null;
     hideError();
     elements.fileInput.value = "";
@@ -816,10 +858,14 @@ async function deleteSelectedAsset(): Promise<void> {
   }
 
   try {
+    const deletedAssetId = selectedAssetId;
     await deleteAsset(selectedProjectId, selectedAssetId);
-    if (pathEditSession?.assetId === selectedAssetId) {
+    if (pathEditSession?.assetId === deletedAssetId) {
       pathEditSession = null;
       pathEditDragState = null;
+    }
+    if (inPlacePathEditSession?.assetId === deletedAssetId) {
+      exitPathTool();
     }
     selectedAssetId = null;
     lastImportError = null;
@@ -1001,6 +1047,12 @@ function deleteSelectedPrefabNode(): void {
   }
 
   const deletedNodeIds = getPrefabNodeAndDescendantIds(selectedPrefabNodeId);
+  if (
+    inPlacePathEditSession &&
+    deletedNodeIds.has(inPlacePathEditSession.nodeId)
+  ) {
+    exitPathTool();
+  }
   prefabNodes = prefabNodes.filter((node) => !deletedNodeIds.has(node.id));
   selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
   clearInvalidPrefabClipboard();
@@ -1159,13 +1211,73 @@ function toggleProjection(): void {
   exposeEditorDebugHooks();
 }
 
-function setTransformMode(mode: TransformMode): void {
-  threeViewport.setTransformMode(mode);
+function setActiveEditorTool(tool: EditorTool): void {
+  if (tool === "path") {
+    activeEditorTool = "path";
+    threeViewport.setTransformControlsVisible(false);
+    startInPlacePathEditSession();
+    return;
+  }
+
+  activeEditorTool = tool;
+  discardInPlacePathEditSession();
+  threeViewport.setTransformMode(tool);
+  threeViewport.setTransformControlsVisible(true);
   renderEditorShell();
   exposeEditorDebugHooks();
 }
 
+function startInPlacePathEditSession(): boolean {
+  const selectedNode =
+    editorMode === "asset" &&
+    selectedPrefabNodeId &&
+    selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
+  const asset =
+    selectedNode?.kind === "primitive" && selectedNode.assetId
+      ? getAssetById(selectedNode.assetId)
+      : null;
+
+  if (!selectedNode || selectedNode.kind !== "primitive" || !asset) {
+    exitPathTool();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return false;
+  }
+
+  const evaluatedPath =
+    getEvaluatedPrefabPathOverrides().get(selectedNode.id) ?? asset.bezierPath;
+
+  pauseTimeline();
+  inPlacePathEditSession = {
+    ...createPathEditSession(evaluatedPath),
+    nodeId: selectedNode.id,
+    assetId: asset.id,
+  };
+  inPlacePathEditDragState = null;
+  lastImportError = null;
+  hideError();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+  return true;
+}
+
+function discardInPlacePathEditSession(): void {
+  inPlacePathEditSession = null;
+  inPlacePathEditDragState = null;
+}
+
+function exitPathTool(): void {
+  discardInPlacePathEditSession();
+  activeEditorTool = threeViewport.currentTransformMode;
+  threeViewport.setTransformControlsVisible(true);
+}
+
 function setEditorMode(mode: EditorMode): void {
+  if (mode !== "asset" || editorMode !== "asset") {
+    exitPathTool();
+  }
   editorMode = mode;
   rebuildViewportProxies();
   renderEditorShell();
@@ -1173,6 +1285,7 @@ function setEditorMode(mode: EditorMode): void {
 }
 
 function clearProjectWorkspace(): void {
+  exitPathTool();
   assets = [];
   prefabs = [];
   prefabDocuments = new Map();
@@ -1209,13 +1322,14 @@ function clearSceneLayout(): void {
 
 function createCurrentPrefabDocument(): PrefabDocument {
   return {
-    version: 3,
+    version: 4,
     nodes: prefabNodes.map(clonePrefabNode),
     animation: clonePrefabAnimation(prefabAnimation),
   };
 }
 
 function applyPrefabDocument(document: PrefabDocument): void {
+  exitPathTool();
   prefabNodes = document.nodes.map(clonePrefabNode);
   prefabAnimation = clonePrefabAnimation(document.animation);
   timelineCurrentTimeMs = 0;
@@ -1373,7 +1487,11 @@ function getActiveTimelineClip(): PrefabAnimationClip | null {
 }
 
 function getActiveTimelineProperty(): PrefabTrackProperty {
-  switch (threeViewport.currentTransformMode) {
+  if (activeEditorTool === "path") {
+    return "path";
+  }
+
+  switch (activeEditorTool) {
     case "rotate":
       return "rotation";
     case "scale":
@@ -1381,12 +1499,19 @@ function getActiveTimelineProperty(): PrefabTrackProperty {
     case "translate":
       return "position";
   }
+
+  return "position";
 }
 
 function setActiveTimelineProperty(property: PrefabTrackProperty): void {
+  if (property === "path") {
+    setActiveEditorTool("path");
+    return;
+  }
+
   const mode: TransformMode =
     property === "rotation" ? "rotate" : property === "scale" ? "scale" : "translate";
-  setTransformMode(mode);
+  setActiveEditorTool(mode);
 }
 
 function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
@@ -1442,6 +1567,10 @@ function getEvaluatedPrefabNodes(): PrefabNode[] {
   const timeMs = clampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
 
   for (const track of activeClip.tracks) {
+    if (!isPrefabVectorTrack(track)) {
+      continue;
+    }
+
     const node = nodeById.get(track.target.nodeId);
 
     if (!node) {
@@ -1459,7 +1588,7 @@ function getEvaluatedPrefabNodes(): PrefabNode[] {
 }
 
 function evaluatePrefabTrack(
-  track: PrefabAnimationTrack,
+  track: PrefabVectorAnimationTrack,
   timeMs: number,
 ): Vector3Tuple | null {
   const keyframes = [...track.keyframes].sort((a, b) => a.timeMs - b.timeMs);
@@ -1508,11 +1637,124 @@ function evaluatePrefabTrack(
   return null;
 }
 
+function getEvaluatedPrefabPathOverrides(): Map<string, StructuredBezierPath> {
+  const overrides = new Map<string, StructuredBezierPath>();
+  const activeClip = getActiveTimelineClip();
+
+  if (!activeClip) {
+    return overrides;
+  }
+
+  const timeMs = clampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
+
+  for (const track of activeClip.tracks) {
+    if (!isPrefabPathTrack(track)) {
+      continue;
+    }
+
+    const path = evaluatePrefabPathTrack(track, timeMs);
+
+    if (path) {
+      overrides.set(track.target.nodeId, path);
+    }
+  }
+
+  return overrides;
+}
+
+function evaluatePrefabPathTrack(
+  track: PrefabPathAnimationTrack,
+  timeMs: number,
+): StructuredBezierPath | null {
+  const keyframes = [...track.keyframes].sort((a, b) => a.timeMs - b.timeMs);
+
+  if (keyframes.length === 0) {
+    return null;
+  }
+
+  const firstKeyframe = keyframes[0];
+  const lastKeyframe = keyframes[keyframes.length - 1];
+
+  if (!firstKeyframe || !lastKeyframe) {
+    return null;
+  }
+
+  if (timeMs <= firstKeyframe.timeMs) {
+    return cloneStructuredBezierPath(firstKeyframe.value);
+  }
+
+  if (timeMs >= lastKeyframe.timeMs) {
+    return cloneStructuredBezierPath(lastKeyframe.value);
+  }
+
+  for (let index = 0; index < keyframes.length - 1; index += 1) {
+    const current = keyframes[index];
+    const next = keyframes[index + 1];
+
+    if (!current || !next || timeMs < current.timeMs || timeMs > next.timeMs) {
+      continue;
+    }
+
+    if (
+      current.easing === "step" ||
+      current.timeMs === next.timeMs ||
+      !canInterpolateBezierPaths(current.value, next.value)
+    ) {
+      return cloneStructuredBezierPath(current.value);
+    }
+
+    const span = next.timeMs - current.timeMs;
+    const rawProgress = (timeMs - current.timeMs) / span;
+    const progress =
+      current.easing === "easeInOut"
+        ? smoothstep(rawProgress)
+        : rawProgress;
+
+    return interpolateBezierPaths(current.value, next.value, progress);
+  }
+
+  return null;
+}
+
+function canInterpolateBezierPaths(
+  start: StructuredBezierPath,
+  end: StructuredBezierPath,
+): boolean {
+  return (
+    start.closed === end.closed &&
+    start.segments.length === end.segments.length &&
+    start.segments.every(
+      (segment, index) => segment.id === end.segments[index]?.id,
+    )
+  );
+}
+
+function interpolateBezierPaths(
+  start: StructuredBezierPath,
+  end: StructuredBezierPath,
+  progress: number,
+): StructuredBezierPath {
+  return {
+    version: 1,
+    closed: start.closed,
+    segments: start.segments.map((segment, index) => {
+      const endSegment = end.segments[index] ?? segment;
+
+      return {
+        id: segment.id,
+        anchor: lerpBezierPoint(segment.anchor, endSegment.anchor, progress),
+        handleIn: lerpBezierPoint(segment.handleIn, endSegment.handleIn, progress),
+        handleOut: lerpBezierPoint(segment.handleOut, endSegment.handleOut, progress),
+      };
+    }),
+  };
+}
+
 function upsertPrefabKeyframe(
   clip: PrefabAnimationClip,
   input: {
     nodeId: string;
-    property: PrefabTrackProperty;
+    property: PrefabVectorTrackProperty;
     timeMs: number;
     value: Vector3Tuple;
     easing: PrefabTrackEasing;
@@ -1521,7 +1763,8 @@ function upsertPrefabKeyframe(
   const trackId = `${input.nodeId}-${input.property}`;
   const tracks = clip.tracks.map(clonePrefabAnimationTrack);
   let track = tracks.find(
-    (candidate) =>
+    (candidate): candidate is PrefabVectorAnimationTrack =>
+      isPrefabVectorTrack(candidate) &&
       candidate.target.nodeId === input.nodeId &&
       candidate.target.property === input.property,
   );
@@ -1543,6 +1786,69 @@ function upsertPrefabKeyframe(
     id: "",
     timeMs: snappedTimeMs,
     value: [...input.value] as Vector3Tuple,
+    easing: input.easing,
+  };
+  const existingIndex = track.keyframes.findIndex(
+    (keyframe) => keyframe.timeMs === snappedTimeMs,
+  );
+
+  if (existingIndex >= 0) {
+    const existingKeyframe = track.keyframes[existingIndex];
+    track.keyframes[existingIndex] = {
+      ...nextKeyframe,
+      id: existingKeyframe?.id ?? createUniqueTimelineKeyframeId(track),
+    };
+    selectedTimelineKeyframeId = track.keyframes[existingIndex]?.id ?? null;
+  } else {
+    const createdKeyframe = {
+      ...nextKeyframe,
+      id: createUniqueTimelineKeyframeId(track),
+    };
+    track.keyframes.push(createdKeyframe);
+    selectedTimelineKeyframeId = createdKeyframe.id;
+  }
+
+  track.keyframes.sort((a, b) => a.timeMs - b.timeMs);
+
+  return {
+    ...clip,
+    tracks,
+  };
+}
+
+function upsertPrefabPathKeyframe(
+  clip: PrefabAnimationClip,
+  input: {
+    nodeId: string;
+    timeMs: number;
+    value: StructuredBezierPath;
+    easing: PrefabTrackEasing;
+  },
+): PrefabAnimationClip {
+  const trackId = `${input.nodeId}-path`;
+  const tracks = clip.tracks.map(clonePrefabAnimationTrack);
+  let track = tracks.find(
+    (candidate): candidate is PrefabPathAnimationTrack =>
+      isPrefabPathTrack(candidate) && candidate.target.nodeId === input.nodeId,
+  );
+
+  if (!track) {
+    track = {
+      id: createUniqueTimelineTrackId(trackId, tracks),
+      target: {
+        nodeId: input.nodeId,
+        property: "path",
+      },
+      keyframes: [],
+    };
+    tracks.push(track);
+  }
+
+  const snappedTimeMs = snapTimelineTimeMs(input.timeMs);
+  const nextKeyframe: PrefabPathAnimationKeyframe = {
+    id: "",
+    timeMs: snappedTimeMs,
+    value: cloneStructuredBezierPath(input.value),
     easing: input.easing,
   };
   const existingIndex = track.keyframes.findIndex(
@@ -1728,10 +2034,7 @@ function applyTimelineDurationInput(): void {
   updateActiveTimelineClip({
     ...activeClip,
     durationMs,
-    tracks: activeClip.tracks.map((track) => ({
-      ...clonePrefabAnimationTrack(track),
-      keyframes: track.keyframes.map(clonePrefabAnimationKeyframe),
-    })),
+    tracks: activeClip.tracks.map(clonePrefabAnimationTrack),
   });
   timelineCurrentTimeMs = clampTimelineTimeMs(
     timelineCurrentTimeMs,
@@ -1782,7 +2085,12 @@ function applySelectedKeyframeTimeInput(): void {
   const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
   const nextTimeMs = Number(elements.timelineKeyframeTimeInput.value.trim());
 
-  if (!activeClip || !selected || !Number.isFinite(nextTimeMs)) {
+  if (
+    !activeClip ||
+    !selected ||
+    !isPrefabVectorTrack(selected.track) ||
+    !Number.isFinite(nextTimeMs)
+  ) {
     renderEditorShell();
     return;
   }
@@ -1802,6 +2110,7 @@ function applySelectedKeyframeValueInput(): void {
 
   if (
     !selected ||
+    !isPrefabVectorTrack(selected.track) ||
     !Number.isFinite(x) ||
     !Number.isFinite(y) ||
     !Number.isFinite(z)
@@ -1821,7 +2130,11 @@ function applySelectedKeyframeEasingInput(): void {
   const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
   const easing = elements.timelineKeyframeEasingSelect.value as PrefabTrackEasing;
 
-  if (!selected || !["linear", "step", "easeInOut"].includes(easing)) {
+  if (
+    !selected ||
+    !isPrefabVectorTrack(selected.track) ||
+    !["linear", "step", "easeInOut"].includes(easing)
+  ) {
     renderEditorShell();
     return;
   }
@@ -1840,12 +2153,37 @@ function deleteSelectedTimelineKeyframe(): void {
     return;
   }
 
-  const nextClip = {
+  if (!isPrefabVectorTrack(selected.track)) {
+    const nextClip: PrefabAnimationClip = {
+      ...activeClip,
+      tracks: activeClip.tracks.map((track) =>
+        track.id === selected.track.id && isPrefabPathTrack(track)
+          ? {
+              ...track,
+              keyframes: track.keyframes
+                .filter((keyframe) => keyframe.id !== selected.keyframe.id)
+                .map(clonePrefabPathAnimationKeyframe),
+            }
+          : clonePrefabAnimationTrack(track),
+      ),
+    };
+
+    selectedTimelineKeyframeId = null;
+    updateActiveTimelineClip(nextClip);
+    loadedPrefabId = null;
+    rebuildViewportProxies();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return;
+  }
+
+  const selectedVectorTrack = selected.track;
+  const nextClip: PrefabAnimationClip = {
     ...activeClip,
     tracks: activeClip.tracks.map((track) =>
-      track.id === selected.track.id
+      track.id === selectedVectorTrack.id && isPrefabVectorTrack(track)
         ? {
-            ...clonePrefabAnimationTrack(track),
+            ...track,
             keyframes: track.keyframes
               .filter((keyframe) => keyframe.id !== selected.keyframe.id)
               .map(clonePrefabAnimationKeyframe),
@@ -1862,7 +2200,9 @@ function deleteSelectedTimelineKeyframe(): void {
   exposeEditorDebugHooks();
 }
 
-function updateSelectedTimelineKeyframe(nextKeyframe: PrefabAnimationKeyframe): void {
+function updateSelectedTimelineKeyframe(
+  nextKeyframe: PrefabVectorAnimationKeyframe | PrefabPathAnimationKeyframe,
+): void {
   const activeClip = getActiveTimelineClip();
   const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
 
@@ -1878,21 +2218,47 @@ function updateSelectedTimelineKeyframe(nextKeyframe: PrefabAnimationKeyframe): 
         return clonePrefabAnimationTrack(track);
       }
 
-      const nextKeyframes = track.keyframes
-        .filter((keyframe) => keyframe.id !== selected.keyframe.id)
-        .filter((keyframe) => keyframe.timeMs !== nextTimeMs)
-        .map(clonePrefabAnimationKeyframe);
+      if (isPrefabPathTrack(selected.track) && isPrefabPathTrack(track)) {
+        const pathKeyframe = nextKeyframe as PrefabPathAnimationKeyframe;
+        const nextKeyframes = track.keyframes
+          .filter((keyframe) => keyframe.id !== selected.keyframe.id)
+          .filter((keyframe) => keyframe.timeMs !== nextTimeMs)
+          .map(clonePrefabPathAnimationKeyframe);
 
-      nextKeyframes.push({
-        ...nextKeyframe,
-        timeMs: nextTimeMs,
-      });
-      nextKeyframes.sort((a, b) => a.timeMs - b.timeMs);
+        nextKeyframes.push({
+          ...pathKeyframe,
+          timeMs: nextTimeMs,
+          value: cloneStructuredBezierPath(pathKeyframe.value),
+        });
+        nextKeyframes.sort((a, b) => a.timeMs - b.timeMs);
 
-      return {
-        ...clonePrefabAnimationTrack(track),
-        keyframes: nextKeyframes,
-      };
+        return {
+          ...track,
+          keyframes: nextKeyframes,
+        };
+      }
+
+      if (isPrefabVectorTrack(selected.track) && isPrefabVectorTrack(track)) {
+        const vectorKeyframe = nextKeyframe as PrefabVectorAnimationKeyframe;
+        const nextKeyframes = track.keyframes
+          .filter((keyframe) => keyframe.id !== selected.keyframe.id)
+          .filter((keyframe) => keyframe.timeMs !== nextTimeMs)
+          .map(clonePrefabAnimationKeyframe);
+
+        nextKeyframes.push({
+          ...vectorKeyframe,
+          timeMs: nextTimeMs,
+          value: [...vectorKeyframe.value],
+        });
+        nextKeyframes.sort((a, b) => a.timeMs - b.timeMs);
+
+        return {
+          ...track,
+          keyframes: nextKeyframes,
+        };
+      }
+
+      return clonePrefabAnimationTrack(track);
     }),
   };
 
@@ -1947,6 +2313,40 @@ function addKeyframeForSelectedPrefabNode(): void {
 
   const property = getActiveTimelineProperty();
   const timeMs = snapAndClampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
+
+  if (property === "path") {
+    const pathSession =
+      inPlacePathEditSession?.nodeId === selectedNode.id
+        ? inPlacePathEditSession
+        : null;
+
+    if (!pathSession || selectedNode.kind !== "primitive") {
+      setImportError(new Error("Use the Path tool to edit a primitive path before adding a keyframe."));
+      return;
+    }
+
+    const nextClip = upsertPrefabPathKeyframe(clonePrefabAnimationClip(activeClip), {
+      nodeId: selectedNode.id,
+      timeMs,
+      value: pathSession.draft,
+      easing: "linear",
+    });
+
+    updateActiveTimelineClip(nextClip);
+    timelineCurrentTimeMs = timeMs;
+    loadedPrefabId = null;
+    lastImportError = null;
+    hideError();
+    rebuildViewportProxies();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return;
+  }
+
+  if (!isPrefabVectorTrackProperty(property)) {
+    return;
+  }
+
   let nextClip = clonePrefabAnimationClip(activeClip);
 
   nextClip = upsertPrefabKeyframe(nextClip, {
@@ -2400,6 +2800,7 @@ function getEditorElements(): EditorElements {
       "transform-scale-button",
       HTMLButtonElement,
     ),
+    transformPathButton: getRequiredElement("transform-path-button", HTMLButtonElement),
     resetViewButton: getRequiredElement("reset-view-button", HTMLButtonElement),
     importError: getRequiredElement("import-error", HTMLParagraphElement),
     inspectorFields: getRequiredElement("inspector-fields", HTMLDListElement),
@@ -2440,6 +2841,9 @@ function renderEditorShell(): void {
   document.body.dataset.pathEditActive = String(
     editorMode === "path" && Boolean(pathEditSession),
   );
+  document.body.dataset.inPlacePathEditActive = String(
+    Boolean(getValidInPlacePathEditSession()),
+  );
   elements.fileInput.disabled = !selectedProjectId;
   elements.deleteProjectButton.disabled = !selectedProjectId;
   elements.prefabNameInput.disabled = !selectedProjectId;
@@ -2474,8 +2878,11 @@ function renderEditorShell(): void {
   elements.timelineSnapFpsInput.disabled = !selectedProjectId;
   elements.timelineLoopInput.disabled = !activeTimelineClip;
   elements.timelineScrubInput.disabled = !activeTimelineClip;
+  const activeTimelineProperty = getActiveTimelineProperty();
   elements.timelineAddKeyframeButton.disabled =
-    !activeTimelineClip || !selectedRealPrefabNode;
+    !activeTimelineClip ||
+    !selectedRealPrefabNode ||
+    (activeTimelineProperty === "path" && !getValidInPlacePathEditSession());
   elements.timelineSnapBaseButton.disabled =
     !activeTimelineClip || !selectedRealPrefabNode;
   elements.sceneNameInput.disabled = !selectedProjectId;
@@ -2496,13 +2903,18 @@ function renderEditorShell(): void {
       ? "Perspective"
       : "Orthographic";
   elements.transformTranslateButton.dataset.selected = String(
-    threeViewport.currentTransformMode === "translate",
+    activeEditorTool === "translate",
   );
   elements.transformRotateButton.dataset.selected = String(
-    threeViewport.currentTransformMode === "rotate",
+    activeEditorTool === "rotate",
   );
   elements.transformScaleButton.dataset.selected = String(
-    threeViewport.currentTransformMode === "scale",
+    activeEditorTool === "scale",
+  );
+  const canEditInPlacePath = Boolean(getSelectedInPlacePathNodeAndAsset());
+  elements.transformPathButton.disabled = editorMode !== "asset" || !canEditInPlacePath;
+  elements.transformPathButton.dataset.selected = String(
+    activeEditorTool === "path",
   );
 }
 
@@ -2617,6 +3029,9 @@ function renderPrefabNodeList(): void {
   rootButton.dataset.selected = String(selectedPrefabNodeId === PREFAB_ROOT_NODE_ID);
   rootButton.textContent = "Group: Root Group";
   rootButton.addEventListener("click", () => {
+    if (selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID) {
+      exitPathTool();
+    }
     selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
     threeViewport.setSelectedNode(null);
     renderEditorShell();
@@ -2645,6 +3060,9 @@ function renderPrefabNodeList(): void {
       button.style.paddingLeft = `${12 + depth * 14}px`;
       button.textContent = label;
       button.addEventListener("click", () => {
+        if (selectedPrefabNodeId !== node.id) {
+          exitPathTool();
+        }
         selectedPrefabNodeId = node.id;
         syncSelectionFromPrefabNode();
         if (editorMode === "asset") {
@@ -2720,7 +3138,7 @@ function renderTimelineTrackLanes(
   selectedNode: PrefabNode | null,
   activeProperty: PrefabTrackProperty,
 ): void {
-  const lanes = TIMELINE_VECTOR_PROPERTIES.map((property) => {
+  const lanes = TIMELINE_LANE_PROPERTIES.map((property) => {
     const lane = document.createElement("div");
     const labelButton = document.createElement("button");
     const trackBar = document.createElement("div");
@@ -2835,23 +3253,32 @@ function appendTimelineSnapTicks(
 function renderTimelineKeyframeEditor(activeClip: PrefabAnimationClip): void {
   const selected = getSelectedTimelineKeyframe(activeClip);
 
-  if (!selected) {
+  if (!selected || !isPrefabVectorTrack(selected.track)) {
+    elements.timelineKeyframeEditor.hidden = true;
+    return;
+  }
+
+  const keyframe = selected.track.keyframes.find(
+    (candidate) => candidate.id === selected.keyframe.id,
+  );
+
+  if (!keyframe) {
     elements.timelineKeyframeEditor.hidden = true;
     return;
   }
 
   elements.timelineKeyframeEditor.hidden = false;
-  elements.timelineKeyframeTimeInput.value = String(selected.keyframe.timeMs);
+  elements.timelineKeyframeTimeInput.value = String(keyframe.timeMs);
   elements.timelineKeyframeValueXInput.value = formatTransformValue(
-    selected.keyframe.value[0],
+    keyframe.value[0],
   );
   elements.timelineKeyframeValueYInput.value = formatTransformValue(
-    selected.keyframe.value[1],
+    keyframe.value[1],
   );
   elements.timelineKeyframeValueZInput.value = formatTransformValue(
-    selected.keyframe.value[2],
+    keyframe.value[2],
   );
-  elements.timelineKeyframeEasingSelect.value = selected.keyframe.easing;
+  elements.timelineKeyframeEasingSelect.value = keyframe.easing;
 }
 
 function renderSceneList(): void {
@@ -2930,7 +3357,7 @@ function renderSourcePathEditPanel(): void {
     return;
   }
 
-  const selectedSegment = getSelectedPathEditSegment();
+  const selectedSegment = getSelectedPathEditSegment(pathEditSession);
   status.textContent = pathEditSession.selected
     ? `${pathEditSession.selected.segmentId} / ${pathEditSession.selected.component}`
     : "Select an anchor or handle";
@@ -3015,6 +3442,7 @@ function renderAssetModeInspector(): void {
   appendTransformInspectorRow("Rotation", selectedNode, "rotation");
   appendTransformInspectorRow("Scale", selectedNode, "scale");
   appendInspectorRow("Billboard", selectedNode.billboardMode);
+  renderInPlacePathEditInspector(selectedNode);
 }
 
 function renderSceneModeInspector(): void {
@@ -3084,6 +3512,82 @@ function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
   appendInspectorRow("Source Path Edit", "Use the Source Path Edit mode");
 }
 
+function renderInPlacePathEditInspector(node: PrefabNode): void {
+  if (editorMode !== "asset" || node.kind !== "primitive") {
+    return;
+  }
+
+  const session =
+    inPlacePathEditSession?.nodeId === node.id ? inPlacePathEditSession : null;
+
+  if (!session) {
+    appendInspectorRow("In-Place Path", "Use the Path tool to preview-edit this node");
+    return;
+  }
+
+  const selectedSegment = getSelectedPathEditSegment(session);
+
+  appendInspectorRow("In-Place Path", "Preview only");
+  appendInspectorRow(
+    "Path Target",
+    session.selected
+      ? `${session.selected.segmentId} / ${session.selected.component}`
+      : "Select an anchor or handle",
+  );
+
+  if (selectedSegment && session.selected) {
+    appendPathEditInspectorInputRow(
+      "Path Point",
+      session,
+      selectedSegment,
+      session.selected.component,
+    );
+  }
+
+  appendInspectorActionRow("Discard Path Preview", () => {
+    exitPathTool();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  });
+}
+
+function appendPathEditInspectorInputRow(
+  label: string,
+  session: PathEditSession,
+  segment: BezierSegment,
+  component: PathEditComponent,
+): void {
+  const term = document.createElement("dt");
+  const description = document.createElement("dd");
+
+  term.textContent = label;
+  description.append(
+    createPathEditPointInputRow(segment, component, {
+      session,
+      ariaPrefix: "In-place path",
+      onApplied: () => {
+        renderInspector();
+        exposeEditorDebugHooks();
+      },
+    }),
+  );
+  elements.inspectorFields.append(term, description);
+}
+
+function appendInspectorActionRow(label: string, onClick: () => void): void {
+  const term = document.createElement("dt");
+  const description = document.createElement("dd");
+  const button = document.createElement("button");
+
+  term.textContent = "Action";
+  button.type = "button";
+  button.className = "editor-button";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  description.append(button);
+  elements.inspectorFields.append(term, description);
+}
+
 function appendInspectorRow(label: string, value: string): void {
   const term = document.createElement("dt");
   const description = document.createElement("dd");
@@ -3096,9 +3600,16 @@ function appendInspectorRow(label: string, value: string): void {
 function createPathEditPointInputRow(
   segment: BezierSegment,
   component: PathEditComponent,
+  options?: {
+    session?: PathEditSession;
+    ariaPrefix?: string;
+    onApplied?: () => void;
+  },
 ): HTMLDivElement {
   const row = document.createElement("div");
   const point = getPathEditComponentPoint(segment, component);
+  const session = options?.session ?? pathEditSession;
+  const ariaPrefix = options?.ariaPrefix ?? "Path";
 
   row.className = "path-edit-point-row";
 
@@ -3109,13 +3620,20 @@ function createPathEditPointInputRow(
     input.className = "transform-number-input";
     input.type = "text";
     input.inputMode = "decimal";
-    input.ariaLabel = `Path ${component} ${axisName}`;
+    input.ariaLabel = `${ariaPrefix} ${component} ${axisName}`;
     input.value = formatTransformValue(value);
     input.addEventListener("focus", () => {
       input.dataset.previousValue = input.value;
     });
     input.addEventListener("blur", () => {
-      applyPathEditPointInput(input, segment.id, component, axisIndex);
+      applyPathEditPointInput(
+        input,
+        session,
+        segment.id,
+        component,
+        axisIndex,
+        options?.onApplied,
+      );
     });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -3136,29 +3654,31 @@ function createPathEditPointInputRow(
 
 function applyPathEditPointInput(
   input: HTMLInputElement,
+  session: PathEditSession | null,
   segmentId: string,
   component: PathEditComponent,
   axisIndex: number,
+  onApplied?: () => void,
 ): void {
-  const segment = getPathEditSegment(segmentId);
+  const segment = getPathEditSegment(session, segmentId);
   const parsedValue = Number(input.value.trim());
 
-  if (!segment || !Number.isFinite(parsedValue)) {
+  if (!session || !segment || !Number.isFinite(parsedValue)) {
     restorePathEditPointInput(input, segment, component, axisIndex);
     return;
   }
 
-  const point = getPathEditComponentPoint(segment, component);
-  point[axisIndex] = roundTransformValue(parsedValue);
-
-  if (component === "anchor") {
-    segment.anchor = point;
-  } else {
-    segment[component] = point;
+  if (!setPathEditComponentAxisValue(session, segmentId, component, axisIndex, parsedValue)) {
+    restorePathEditPointInput(input, segment, component, axisIndex);
+    return;
   }
 
-  renderSourcePathEditPanel();
-  exposeEditorDebugHooks();
+  if (onApplied) {
+    onApplied();
+  } else {
+    renderSourcePathEditPanel();
+    exposeEditorDebugHooks();
+  }
 }
 
 function restorePathEditPointInput(
@@ -3297,6 +3817,7 @@ function renderPreviewFrame(): void {
 
     if (drawables.length > 0) {
       drawBillboards(context, drawables);
+      renderInPlacePathEditOverlay();
       return;
     }
 
@@ -3360,19 +3881,69 @@ function renderPathEditFrame(): void {
   drawPathEditControls(paperContext, previewAsset, pathEditSession);
 }
 
+function renderInPlacePathEditOverlay(): void {
+  const paperContext = stage.getLayer("paper-canvas").context;
+  const session = getValidInPlacePathEditSession();
+  const asset = session ? getAssetById(session.assetId) : null;
+
+  if (!session || !asset) {
+    return;
+  }
+
+  const adapter = getInPlacePathEditAdapter();
+
+  if (adapter) {
+    drawPathEditControls(paperContext, asset, session, adapter);
+  }
+}
+
 function buildPathEditPathD(path: StructuredBezierPath): string {
   return path.segments.length > 0 ? structuredBezierToPathD(path) : "";
 }
 
 function getAssetAssemblyBillboards(): DrawableBillboard[] {
+  const pathOverrides = getEvaluatedPrefabPathOverrides();
   const evaluatedDrawables = flattenPrefabBillboards(
     getEvaluatedPrefabNodes(),
     new Matrix4(),
     (nodeId) => nodeId === selectedPrefabNodeId,
+    "",
+    pathOverrides,
   );
   const ghostDrawables = getSelectedPrefabTimelineGhostBillboards();
+  const inPlaceGhost = getInPlacePathEditGhostBillboard();
 
-  return [...evaluatedDrawables, ...ghostDrawables];
+  return [
+    ...evaluatedDrawables,
+    ...ghostDrawables,
+    ...(inPlaceGhost ? [inPlaceGhost] : []),
+  ];
+}
+
+function getInPlacePathEditGhostBillboard(): DrawableBillboard | null {
+  const session = getValidInPlacePathEditSession();
+  const node = session ? getPrefabNode(session.nodeId) : null;
+  const asset = session ? getAssetById(session.assetId) : null;
+
+  if (!session || !node || node.kind !== "primitive" || !asset) {
+    return null;
+  }
+
+  const worldMatrix = getPrefabWorldTransforms(prefabNodes).get(node.id);
+
+  if (!worldMatrix) {
+    return null;
+  }
+
+  return {
+    id: `${node.id}:in-place-path`,
+    asset,
+    transform: matrixToTransform(worldMatrix),
+    selected: false,
+    opacity: 0.5,
+    ghost: true,
+    pathOverride: session.draft,
+  };
 }
 
 function getSelectedPrefabTimelineGhostBillboards(): DrawableBillboard[] {
@@ -3394,12 +3965,14 @@ function getSelectedPrefabTimelineGhostBillboards(): DrawableBillboard[] {
   const baseWorldTransforms = getPrefabWorldTransforms(prefabNodes);
   const evaluatedWorldTransforms = getPrefabWorldTransforms(evaluatedNodes);
   const ghostDrawables: DrawableBillboard[] = [];
+  const inPlaceSession = getValidInPlacePathEditSession();
 
   for (const node of prefabNodes) {
     if (
       node.kind !== "primitive" ||
       !selectedNodeIds.has(node.id) ||
-      !node.assetId
+      !node.assetId ||
+      inPlaceSession?.nodeId === node.id
     ) {
       continue;
     }
@@ -3479,6 +4052,7 @@ function flattenPrefabBillboards(
   baseMatrix: Matrix4,
   isSelected: (nodeId: string) => boolean,
   idPrefix = "",
+  pathOverrides: Map<string, StructuredBezierPath> = new Map(),
 ): DrawableBillboard[] {
   const worldTransforms = getPrefabWorldTransforms(nodes, baseMatrix);
   const drawables: DrawableBillboard[] = [];
@@ -3500,6 +4074,7 @@ function flattenPrefabBillboards(
       asset,
       transform: matrixToTransform(matrix),
       selected: isSelected(node.id),
+      pathOverride: pathOverrides.get(node.id),
     });
   }
 
@@ -3552,6 +4127,9 @@ function drawBillboardNode(
   const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
   const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
   const assetScale = screenScale / largestDimension;
+  const drawAsset = drawable.pathOverride
+    ? createPrimitiveAssetPathPreview(asset, drawable.pathOverride)
+    : asset;
 
   context.save();
   context.globalAlpha *= opacity;
@@ -3562,7 +4140,7 @@ function drawBillboardNode(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  drawPrimitiveAssetPath(context, asset);
+  drawPrimitiveAssetPath(context, drawAsset);
 
   if (selected || ghost) {
     context.lineWidth = 3 / Math.max(assetScale, 0.001);
@@ -3572,6 +4150,20 @@ function drawBillboardNode(
   }
 
   context.restore();
+}
+
+function createPrimitiveAssetPathPreview(
+  asset: PrimitiveSvgAsset,
+  bezierPath: StructuredBezierPath,
+): PrimitiveSvgAsset {
+  const pathD = buildPathEditPathD(bezierPath);
+
+  return {
+    ...asset,
+    bezierPath,
+    pathD,
+    path: new Path2D(pathD),
+  };
 }
 
 function drawPrimitiveAssetPath(
@@ -3596,30 +4188,35 @@ function drawPathEditControls(
   context: CanvasRenderingContext2D,
   asset: PrimitiveSvgAsset,
   session: PathEditSession,
+  adapter = getSourcePathEditAdapter(asset),
 ): void {
-  const transform = getPathEditViewTransform(asset);
   const controls = getPathEditControls(session.draft);
 
   context.save();
   context.font = "600 12px system-ui, sans-serif";
 
   for (const segment of session.draft.segments) {
-    const anchor = pathPointToScreen(segment.anchor, transform);
-    const handleIn = pathPointToScreen(
-      addBezierPoints(segment.anchor, segment.handleIn),
-      transform,
-    );
-    const handleOut = pathPointToScreen(
+    const anchor = adapter?.pathToScreen(segment.anchor);
+    const handleIn = adapter?.pathToScreen(addBezierPoints(segment.anchor, segment.handleIn));
+    const handleOut = adapter?.pathToScreen(
       addBezierPoints(segment.anchor, segment.handleOut),
-      transform,
     );
+
+    if (!anchor || !handleIn || !handleOut) {
+      continue;
+    }
 
     drawPathEditHandleLine(context, anchor, handleIn);
     drawPathEditHandleLine(context, anchor, handleOut);
   }
 
   for (const control of controls) {
-    const screenPoint = pathPointToScreen(control.point, transform);
+    const screenPoint = adapter?.pathToScreen(control.point);
+
+    if (!screenPoint) {
+      continue;
+    }
+
     const selected =
       session.selected?.segmentId === control.segmentId &&
       session.selected.component === control.component;
@@ -3634,7 +4231,7 @@ function drawPathEditPreview(
   context: CanvasRenderingContext2D,
   asset: PrimitiveSvgAsset,
 ): void {
-  const transform = getPathEditViewTransform(asset);
+  const transform = getSourcePathEditViewTransform(asset);
 
   context.save();
   context.translate(transform.offsetX, transform.offsetY);
@@ -3689,15 +4286,17 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
   }
 
   const asset = getAssetById(pathEditSession.assetId);
+  const adapter = asset ? getSourcePathEditAdapter(asset) : null;
 
-  if (!asset) {
+  if (!asset || !adapter) {
     return;
   }
 
   const control = findNearestPathEditControl(
     getCanvasPointerPoint(event),
-    asset,
     pathEditSession,
+    adapter,
+    PATH_EDIT_HIT_RADIUS,
   );
 
   if (!control) {
@@ -3708,10 +4307,7 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
     segmentId: control.segmentId,
     component: control.component,
   };
-  pathEditDragState = {
-    segmentId: control.segmentId,
-    component: control.component,
-  };
+  pathEditDragState = selectPathEditCoreControl(pathEditSession, control);
   event.preventDefault();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
@@ -3723,29 +4319,23 @@ function dragPathEditControl(event: PointerEvent | MouseEvent): void {
   }
 
   const asset = getAssetById(pathEditSession.assetId);
-  const segment = getPathEditSegment(pathEditDragState.segmentId);
+  const adapter = asset ? getSourcePathEditAdapter(asset) : null;
 
-  if (!asset || !segment) {
+  if (!asset || !adapter) {
     pathEditDragState = null;
     return;
   }
 
-  const transform = getPathEditViewTransform(asset);
-  const pathPoint = screenPointToPath(getCanvasPointerPoint(event), transform);
+  const pathPoint = adapter.screenToPath(getCanvasPointerPoint(event));
 
-  if (pathEditDragState.component === "anchor") {
-    segment.anchor = pathPoint;
-  } else {
-    segment[pathEditDragState.component] = subtractBezierPoints(
-      pathPoint,
-      segment.anchor,
-    );
+  if (!pathPoint) {
+    return;
   }
 
-  pathEditSession.selected = {
-    segmentId: pathEditDragState.segmentId,
-    component: pathEditDragState.component,
-  };
+  dragPathEditCoreControl(pathEditSession, pathEditDragState, pathPoint, {
+    altKey: event.altKey,
+    shiftKey: event.shiftKey,
+  });
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3760,65 +4350,7 @@ function getCanvasPointerPoint(event: PointerEvent | MouseEvent): BezierPoint {
   ];
 }
 
-function findNearestPathEditControl(
-  screenPoint: BezierPoint,
-  asset: PrimitiveSvgAsset,
-  session: PathEditSession,
-): PathEditControl | null {
-  const transform = getPathEditViewTransform(asset);
-  const controls = getPathEditControls(session.draft);
-  let nearest: { control: PathEditControl; distance: number } | null = null;
-
-  for (const control of controls) {
-    const projected = pathPointToScreen(control.point, transform);
-    const distance = Math.hypot(
-      projected[0] - screenPoint[0],
-      projected[1] - screenPoint[1],
-    );
-
-    if (distance > PATH_EDIT_HIT_RADIUS) {
-      continue;
-    }
-
-    if (
-      !nearest ||
-      distance < nearest.distance ||
-      (distance === nearest.distance &&
-        nearest.control.component === "anchor" &&
-        control.component !== "anchor")
-    ) {
-      nearest = { control, distance };
-    }
-  }
-
-  return nearest?.control ?? null;
-}
-
-function getPathEditControls(path: StructuredBezierPath): PathEditControl[] {
-  const controls: PathEditControl[] = [];
-
-  for (const segment of path.segments) {
-    controls.push({
-      segmentId: segment.id,
-      component: "handleIn",
-      point: addBezierPoints(segment.anchor, segment.handleIn),
-    });
-    controls.push({
-      segmentId: segment.id,
-      component: "handleOut",
-      point: addBezierPoints(segment.anchor, segment.handleOut),
-    });
-    controls.push({
-      segmentId: segment.id,
-      component: "anchor",
-      point: segment.anchor,
-    });
-  }
-
-  return controls;
-}
-
-function getPathEditViewTransform(asset: PrimitiveSvgAsset): {
+function getSourcePathEditViewTransform(asset: PrimitiveSvgAsset): {
   scale: number;
   offsetX: number;
   offsetY: number;
@@ -3839,38 +4371,21 @@ function getPathEditViewTransform(asset: PrimitiveSvgAsset): {
   };
 }
 
-function pathPointToScreen(
-  point: BezierPoint,
-  transform: { scale: number; offsetX: number; offsetY: number },
-): BezierPoint {
-  return [
-    transform.offsetX + point[0] * transform.scale,
-    transform.offsetY + point[1] * transform.scale,
-  ];
-}
+function getSourcePathEditAdapter(
+  asset: PrimitiveSvgAsset,
+): PathEditViewportAdapter {
+  const transform = getSourcePathEditViewTransform(asset);
 
-function screenPointToPath(
-  point: BezierPoint,
-  transform: { scale: number; offsetX: number; offsetY: number },
-): BezierPoint {
-  return [
-    roundTransformValue((point[0] - transform.offsetX) / transform.scale),
-    roundTransformValue((point[1] - transform.offsetY) / transform.scale),
-  ];
-}
-
-function addBezierPoints(left: BezierPoint, right: BezierPoint): BezierPoint {
-  return [
-    roundTransformValue(left[0] + right[0]),
-    roundTransformValue(left[1] + right[1]),
-  ];
-}
-
-function subtractBezierPoints(left: BezierPoint, right: BezierPoint): BezierPoint {
-  return [
-    roundTransformValue(left[0] - right[0]),
-    roundTransformValue(left[1] - right[1]),
-  ];
+  return {
+    pathToScreen: (point) => [
+      transform.offsetX + point[0] * transform.scale,
+      transform.offsetY + point[1] * transform.scale,
+    ],
+    screenToPath: (point) => [
+      roundBezierValue((point[0] - transform.offsetX) / transform.scale),
+      roundBezierValue((point[1] - transform.offsetY) / transform.scale),
+    ],
+  };
 }
 
 function getPathEditScreenControls(): Array<{
@@ -3889,18 +4404,213 @@ function getPathEditScreenControls(): Array<{
     return [];
   }
 
-  const transform = getPathEditViewTransform(asset);
+  return getCorePathEditScreenControls(
+    pathEditSession,
+    getSourcePathEditAdapter(asset),
+  );
+}
 
-  return getPathEditControls(pathEditSession.draft).map((control) => {
-    const [x, y] = pathPointToScreen(control.point, transform);
+function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
+  const session = getValidInPlacePathEditSession();
+  const adapter = getInPlacePathEditAdapter();
 
-    return {
-      segmentId: control.segmentId,
-      component: control.component,
-      x,
-      y,
-    };
+  if (!session || !adapter) {
+    return;
+  }
+
+  const control = findNearestPathEditControl(
+    getCanvasPointerPoint(event),
+    session,
+    adapter,
+    PATH_EDIT_HIT_RADIUS,
+  );
+
+  if (!control) {
+    return;
+  }
+
+  inPlacePathEditDragState = selectPathEditCoreControl(session, control);
+  event.preventDefault();
+  renderInspector();
+  exposeEditorDebugHooks();
+}
+
+function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
+  const session = getValidInPlacePathEditSession();
+  const adapter = getInPlacePathEditAdapter();
+
+  if (!session || !adapter || !inPlacePathEditDragState) {
+    return;
+  }
+
+  const pathPoint = adapter.screenToPath(getCanvasPointerPoint(event));
+
+  if (!pathPoint) {
+    return;
+  }
+
+  dragPathEditCoreControl(session, inPlacePathEditDragState, pathPoint, {
+    altKey: event.altKey,
+    shiftKey: event.shiftKey,
   });
+  renderInspector();
+  exposeEditorDebugHooks();
+}
+
+function getInPlacePathEditAdapter(): PathEditViewportAdapter | null {
+  const session = getValidInPlacePathEditSession();
+  const asset = session ? getAssetById(session.assetId) : null;
+  const node = session ? getPrefabNode(session.nodeId) : null;
+
+  if (!session || !asset || !node) {
+    return null;
+  }
+
+  const worldMatrix = getPrefabWorldTransforms(prefabNodes).get(node.id);
+  const worldTransform = worldMatrix ? matrixToTransform(worldMatrix) : null;
+
+  if (!worldTransform) {
+    return null;
+  }
+
+  const billboard = getBillboardScreenTransform(asset, worldTransform);
+
+  if (!billboard) {
+    return null;
+  }
+
+  return {
+    pathToScreen: (point) => pathPointToBillboardScreen(point, billboard),
+    screenToPath: (point) => billboardScreenPointToPath(point, billboard),
+  };
+}
+
+function getInPlacePathEditScreenControls(): PathEditScreenControl[] {
+  return getCorePathEditScreenControls(
+    getValidInPlacePathEditSession(),
+    getInPlacePathEditAdapter(),
+  );
+}
+
+function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
+  if (editorMode !== "asset" || activeEditorTool !== "path" || !inPlacePathEditSession) {
+    return null;
+  }
+
+  const node = getPrefabNode(inPlacePathEditSession.nodeId);
+  const asset = getAssetById(inPlacePathEditSession.assetId);
+
+  if (
+    !node ||
+    node.kind !== "primitive" ||
+    node.id !== selectedPrefabNodeId ||
+    !asset ||
+    node.assetId !== asset.id
+  ) {
+    exitPathTool();
+    return null;
+  }
+
+  return inPlacePathEditSession;
+}
+
+function getSelectedInPlacePathNodeAndAsset(): {
+  node: PrefabNode;
+  asset: PrimitiveSvgAsset;
+} | null {
+  const node =
+    editorMode === "asset" &&
+    selectedPrefabNodeId &&
+    selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(selectedPrefabNodeId)
+      : null;
+  const asset =
+    node?.kind === "primitive" && node.assetId ? getAssetById(node.assetId) : null;
+
+  return node && node.kind === "primitive" && asset ? { node, asset } : null;
+}
+
+function getBillboardScreenTransform(
+  asset: PrimitiveSvgAsset,
+  transform: TransformSnapshot,
+): {
+  projected: { x: number; y: number };
+  assetScale: number;
+  rotation: number;
+  nodeScale: [number, number];
+  viewBoxCenter: BezierPoint;
+} | null {
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const worldPosition = tupleToVector(transform.position);
+  const projected = threeViewport.projectWorldPosition(worldPosition, stage.size);
+
+  if (!projected) {
+    return null;
+  }
+
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
+  const screenScale = threeViewport.getDistanceScale(worldPosition, 1);
+  const assetScale = screenScale / largestDimension;
+
+  return {
+    projected,
+    assetScale,
+    rotation: transform.rotation[2],
+    nodeScale: [transform.scale[0], transform.scale[1]],
+    viewBoxCenter: [viewBoxX + viewBoxWidth / 2, viewBoxY + viewBoxHeight / 2],
+  };
+}
+
+function pathPointToBillboardScreen(
+  point: BezierPoint,
+  transform: NonNullable<ReturnType<typeof getBillboardScreenTransform>>,
+): BezierPoint {
+  const localX =
+    (point[0] - transform.viewBoxCenter[0]) *
+    transform.assetScale *
+    transform.nodeScale[0];
+  const localY =
+    (point[1] - transform.viewBoxCenter[1]) *
+    transform.assetScale *
+    transform.nodeScale[1];
+  const cos = Math.cos(transform.rotation);
+  const sin = Math.sin(transform.rotation);
+
+  return [
+    roundBezierValue(transform.projected.x + localX * cos - localY * sin),
+    roundBezierValue(transform.projected.y + localX * sin + localY * cos),
+  ];
+}
+
+function billboardScreenPointToPath(
+  point: BezierPoint,
+  transform: NonNullable<ReturnType<typeof getBillboardScreenTransform>>,
+): BezierPoint {
+  const dx = point[0] - transform.projected.x;
+  const dy = point[1] - transform.projected.y;
+  const cos = Math.cos(-transform.rotation);
+  const sin = Math.sin(-transform.rotation);
+  const localX = dx * cos - dy * sin;
+  const localY = dx * sin + dy * cos;
+
+  return [
+    roundBezierValue(
+      localX / safeBillboardScale(transform.assetScale * transform.nodeScale[0]) +
+        transform.viewBoxCenter[0],
+    ),
+    roundBezierValue(
+      localY / safeBillboardScale(transform.assetScale * transform.nodeScale[1]) +
+        transform.viewBoxCenter[1],
+    ),
+  ];
+}
+
+function safeBillboardScale(value: number): number {
+  if (Math.abs(value) < 0.0001) {
+    return value < 0 ? -0.0001 : 0.0001;
+  }
+
+  return value;
 }
 
 function getSelectedProject(): ProjectRecord | null {
@@ -3921,32 +4631,6 @@ function getSelectedScene(): SceneRecord | null {
 
 function getAssetById(assetId: string): PrimitiveSvgAsset | null {
   return assets.find((asset) => asset.id === assetId) ?? null;
-}
-
-function getSelectedPathEditSegment(): BezierSegment | null {
-  if (!pathEditSession?.selected) {
-    return null;
-  }
-
-  return getPathEditSegment(pathEditSession.selected.segmentId);
-}
-
-function getPathEditSegment(segmentId: string): BezierSegment | null {
-  return (
-    pathEditSession?.draft.segments.find((segment) => segment.id === segmentId) ??
-    null
-  );
-}
-
-function getPathEditComponentPoint(
-  segment: BezierSegment,
-  component: PathEditComponent,
-): BezierPoint {
-  if (component === "anchor") {
-    return [...segment.anchor];
-  }
-
-  return [...segment[component]];
 }
 
 function getPrefabRecordById(prefabId: string): PrefabRecord | null {
@@ -4018,8 +4702,7 @@ function findTimelineTrack(
 ): PrefabAnimationTrack | null {
   return (
     clip.tracks.find(
-      (track) =>
-        track.target.nodeId === nodeId && track.target.property === property,
+      (track) => track.target.nodeId === nodeId && track.target.property === property,
     ) ?? null
   );
 }
@@ -4028,7 +4711,7 @@ function getSelectedTimelineKeyframe(
   clip: PrefabAnimationClip,
 ): {
   track: PrefabAnimationTrack;
-  keyframe: PrefabAnimationKeyframe;
+  keyframe: PrefabAnimationTrack["keyframes"][number];
 } | null {
   if (!selectedTimelineKeyframeId) {
     return null;
@@ -4103,7 +4786,15 @@ function getTimelinePropertyLabel(property: PrefabTrackProperty): string {
       return "Rotation";
     case "scale":
       return "Scale";
+    case "path":
+      return "Path";
   }
+}
+
+function isPrefabVectorTrackProperty(
+  property: PrefabTrackProperty,
+): property is PrefabVectorTrackProperty {
+  return property === "position" || property === "rotation" || property === "scale";
 }
 
 function copyPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
@@ -4356,6 +5047,17 @@ function clonePrefabAnimationClip(clip: PrefabAnimationClip): PrefabAnimationCli
 function clonePrefabAnimationTrack(
   track: PrefabAnimationTrack,
 ): PrefabAnimationTrack {
+  if (isPrefabPathTrack(track)) {
+    return {
+      id: track.id,
+      target: {
+        nodeId: track.target.nodeId,
+        property: "path",
+      },
+      keyframes: track.keyframes.map(clonePrefabPathAnimationKeyframe),
+    };
+  }
+
   return {
     id: track.id,
     target: {
@@ -4367,14 +5069,37 @@ function clonePrefabAnimationTrack(
 }
 
 function clonePrefabAnimationKeyframe(
-  keyframe: PrefabAnimationTrack["keyframes"][number],
-): PrefabAnimationTrack["keyframes"][number] {
+  keyframe: PrefabVectorAnimationKeyframe,
+): PrefabVectorAnimationKeyframe {
   return {
     id: keyframe.id,
     timeMs: keyframe.timeMs,
     value: [...keyframe.value],
     easing: keyframe.easing,
   };
+}
+
+function clonePrefabPathAnimationKeyframe(
+  keyframe: PrefabPathAnimationKeyframe,
+): PrefabPathAnimationKeyframe {
+  return {
+    id: keyframe.id,
+    timeMs: keyframe.timeMs,
+    value: cloneStructuredBezierPath(keyframe.value),
+    easing: keyframe.easing,
+  };
+}
+
+function isPrefabVectorTrack(
+  track: PrefabAnimationTrack,
+): track is PrefabVectorAnimationTrack {
+  return track.target.property !== "path";
+}
+
+function isPrefabPathTrack(
+  track: PrefabAnimationTrack,
+): track is Extract<PrefabAnimationTrack, { target: { property: "path" } }> {
+  return track.target.property === "path";
 }
 
 function clonePrefabNode(node: PrefabNode): PrefabNode {
@@ -4554,6 +5279,17 @@ function lerpVector3(
   ];
 }
 
+function lerpBezierPoint(
+  start: BezierPoint,
+  end: BezierPoint,
+  progress: number,
+): BezierPoint {
+  return [
+    roundBezierValue(start[0] + (end[0] - start[0]) * progress),
+    roundBezierValue(start[1] + (end[1] - start[1]) * progress),
+  ];
+}
+
 function transformsAreNearlyEqual(
   left: TransformSnapshot,
   right: TransformSnapshot,
@@ -4635,6 +5371,12 @@ function exposeEditorDebugHooks(): void {
       activeTrackProperty: getActiveTimelineProperty(),
       selectedKeyframeId: selectedTimelineKeyframeId,
       evaluatedNodes: getEvaluatedPrefabNodes(),
+      evaluatedPathOverrides: [...getEvaluatedPrefabPathOverrides()].map(
+        ([nodeId, path]) => ({
+          nodeId,
+          path: cloneStructuredBezierPath(path),
+        }),
+      ),
     }),
     getPathEditState: () => ({
       assetId: pathEditSession?.assetId ?? null,
@@ -4645,6 +5387,18 @@ function exposeEditorDebugHooks(): void {
         ? cloneStructuredBezierPath(pathEditSession.draft)
         : null,
       controls: getPathEditScreenControls(),
+    }),
+    getInPlacePathEditState: () => ({
+      nodeId: inPlacePathEditSession?.nodeId ?? null,
+      assetId: inPlacePathEditSession?.assetId ?? null,
+      active: Boolean(getValidInPlacePathEditSession()),
+      hasDraft: Boolean(inPlacePathEditSession),
+      selectedSegmentId: inPlacePathEditSession?.selected?.segmentId ?? null,
+      selectedComponent: inPlacePathEditSession?.selected?.component ?? null,
+      draftBezierPath: inPlacePathEditSession
+        ? cloneStructuredBezierPath(inPlacePathEditSession.draft)
+        : null,
+      controls: getInPlacePathEditScreenControls(),
     }),
     getExperimentScene: () => {
       const camera = threeViewport.getCameraSnapshot();
@@ -4664,6 +5418,7 @@ function exposeEditorDebugHooks(): void {
         transformMode: threeViewport.currentTransformMode,
       };
     },
+    getActiveEditorTool: () => activeEditorTool,
     getScenes: () => [...scenes],
     getEditorMode: () => editorMode,
     getSelectedProjectId: () => selectedProjectId,

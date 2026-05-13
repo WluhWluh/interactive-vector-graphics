@@ -101,6 +101,7 @@ export class ThreeEditorViewport {
   private readonly pointerDownPosition = new Vector2();
   private readonly scaleDragStart = new Vector3(1, 1, 1);
   private shiftKeyPressed = false;
+  private transformControlsVisible = true;
   private projection: CameraProjection = "perspective";
   private transformMode: TransformMode = "translate";
   private selectedNodeId: string | null = null;
@@ -163,6 +164,14 @@ export class ThreeEditorViewport {
         this.applyShiftUniformScale();
         this.onObjectTransform?.(this.selectedNodeId);
       }
+    });
+    this.orbitControls.addEventListener("start", () => {
+      this.transformControls.enabled = false;
+      this.transformControls.axis = null;
+    });
+    this.orbitControls.addEventListener("end", () => {
+      this.transformControls.enabled = this.transformControlsVisible;
+      this.transformControls.axis = null;
     });
 
     this.overlayCanvas.addEventListener("pointerdown", (event) => {
@@ -290,7 +299,7 @@ export class ThreeEditorViewport {
     this.selectedNodeId = nodeId;
     const proxy = nodeId ? this.proxies.get(nodeId) : null;
 
-    if (proxy) {
+    if (proxy && this.transformControlsVisible) {
       this.transformControls.attach(proxy.root);
     } else {
       this.transformControls.detach();
@@ -327,6 +336,25 @@ export class ThreeEditorViewport {
   setTransformMode(mode: TransformMode): void {
     this.transformMode = mode;
     this.transformControls.setMode(mode);
+  }
+
+  setTransformControlsVisible(visible: boolean): void {
+    if (visible === this.transformControlsVisible) {
+      return;
+    }
+
+    this.transformControlsVisible = visible;
+    this.transformControls.enabled = visible;
+
+    if (visible) {
+      const proxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
+
+      if (proxy) {
+        this.transformControls.attach(proxy.root);
+      }
+    } else {
+      this.transformControls.detach();
+    }
   }
 
   resetView(): void {
