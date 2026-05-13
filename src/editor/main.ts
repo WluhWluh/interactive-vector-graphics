@@ -65,6 +65,7 @@ import {
   selectPathEditControl as selectPathEditCoreControl,
   setPathEditComponentAxisValue,
   type PathEditComponent,
+  type PathEditControl,
   type PathEditDragState,
   type PathEditScreenControl,
   type PathEditSession,
@@ -202,6 +203,12 @@ type DrawableBillboard = {
   pathOverride?: StructuredBezierPath;
 };
 
+type RgbColor = {
+  r: number;
+  g: number;
+  b: number;
+};
+
 type PrefabNodeTreeEntry = {
   node: PrefabNode;
   depth: number;
@@ -264,12 +271,16 @@ let selectedSceneNodeId: string | null = null;
 let pendingPrefabClipboard: PendingPrefabClipboard | null = null;
 let pathEditSession: SourcePathEditSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
+let pathEditHoveredControl: PathEditDragState | null = null;
 let inPlacePathEditSession: InPlacePathEditSession | null = null;
 let inPlacePathEditDragState: PathEditDragState | null = null;
+let inPlacePathEditHoveredControl: PathEditDragState | null = null;
+let inPlacePathEditCameraDragActive = false;
 let lastImportError: string | null = null;
 let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
 let nextPrefabNodeNumber = 1;
+let pendingCameraInspectorRender = false;
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
@@ -323,6 +334,8 @@ declare global {
         assetId: string | null;
         selectedSegmentId: string | null;
         selectedComponent: PathEditComponent | null;
+        hoveredSegmentId: string | null;
+        hoveredComponent: PathEditComponent | null;
         hasDraft: boolean;
         draftBezierPath: StructuredBezierPath | null;
         controls: PathEditScreenControl[];
@@ -334,6 +347,8 @@ declare global {
         hasDraft: boolean;
         selectedSegmentId: string | null;
         selectedComponent: PathEditComponent | null;
+        hoveredSegmentId: string | null;
+        hoveredComponent: PathEditComponent | null;
         draftBezierPath: StructuredBezierPath | null;
         controls: PathEditScreenControl[];
       };
@@ -488,13 +503,51 @@ function bindEditorEvents(): void {
   elements.timelineDeleteKeyframeButton.addEventListener("click", () => {
     deleteSelectedTimelineKeyframe();
   });
-  window.addEventListener("pointerdown", (event) => {
-    selectInPlacePathEditControl(event);
+  const paperCanvas = stage.getLayer("paper-canvas").canvas;
+  const threeOverlayCanvas = document.getElementById("three-overlay-canvas");
+
+  if (!(threeOverlayCanvas instanceof HTMLCanvasElement)) {
+    throw new Error("Expected #three-overlay-canvas to be a canvas element.");
+  }
+
+  paperCanvas.addEventListener("pointerdown", (event) => {
     selectPathEditControl(event);
   });
+  paperCanvas.addEventListener("mousemove", (event) => {
+    updatePathEditHover(event);
+  });
+  paperCanvas.addEventListener("mouseleave", () => {
+    clearPathEditHover();
+  });
+  threeOverlayCanvas.addEventListener(
+    "pointerdown",
+    (event) => {
+      const capturedPathControl = selectInPlacePathEditControl(event);
+
+      inPlacePathEditCameraDragActive =
+        Boolean(getValidInPlacePathEditSession()) && !capturedPathControl;
+
+      if (inPlacePathEditCameraDragActive) {
+        clearInPlacePathEditHover();
+      }
+    },
+    { capture: true },
+  );
+  threeOverlayCanvas.addEventListener("mousemove", (event) => {
+    updateInPlacePathEditHover(event);
+  });
+  threeOverlayCanvas.addEventListener("mouseleave", () => {
+    clearInPlacePathEditHover();
+  });
+  window.addEventListener("pointerdown", (event) => {
+    if (event.target !== paperCanvas) {
+      selectPathEditControl(event);
+    }
+  });
   window.addEventListener("mousedown", (event) => {
-    selectInPlacePathEditControl(event);
-    selectPathEditControl(event);
+    if (event.target !== paperCanvas) {
+      selectPathEditControl(event);
+    }
   });
   window.addEventListener("pointermove", (event) => {
     dragSelectedTimelineKeyframe(event);
@@ -508,11 +561,17 @@ function bindEditorEvents(): void {
   window.addEventListener("pointerup", () => {
     timelinePointerDrag = null;
     pathEditDragState = null;
+    pathEditHoveredControl = null;
     inPlacePathEditDragState = null;
+    inPlacePathEditHoveredControl = null;
+    inPlacePathEditCameraDragActive = false;
   });
   window.addEventListener("mouseup", () => {
     pathEditDragState = null;
+    pathEditHoveredControl = null;
     inPlacePathEditDragState = null;
+    inPlacePathEditHoveredControl = null;
+    inPlacePathEditCameraDragActive = false;
   });
   elements.createSceneButton.addEventListener("click", () => {
     void createSceneFromInput("empty");
@@ -606,9 +665,31 @@ function bindEditorEvents(): void {
       if (editorMode === "scene") {
         loadedSceneId = null;
       }
-      renderInspector();
+      scheduleCameraInspectorRender();
       exposeEditorDebugHooks();
     },
+  });
+}
+
+function scheduleCameraInspectorRender(): void {
+  if (pendingCameraInspectorRender) {
+    return;
+  }
+
+  pendingCameraInspectorRender = true;
+  requestAnimationFrame(() => {
+    pendingCameraInspectorRender = false;
+
+    if (
+      document.activeElement instanceof HTMLInputElement ||
+      document.activeElement instanceof HTMLSelectElement ||
+      document.activeElement instanceof HTMLTextAreaElement
+    ) {
+      return;
+    }
+
+    renderInspector();
+    exposeEditorDebugHooks();
   });
 }
 
@@ -1215,6 +1296,7 @@ function setActiveEditorTool(tool: EditorTool): void {
   if (tool === "path") {
     activeEditorTool = "path";
     threeViewport.setTransformControlsVisible(false);
+    threeViewport.setOrbitControlsEnabled(true);
     startInPlacePathEditSession();
     return;
   }
@@ -1266,6 +1348,8 @@ function startInPlacePathEditSession(): boolean {
 function discardInPlacePathEditSession(): void {
   inPlacePathEditSession = null;
   inPlacePathEditDragState = null;
+  inPlacePathEditHoveredControl = null;
+  inPlacePathEditCameraDragActive = false;
 }
 
 function exitPathTool(): void {
@@ -2388,9 +2472,45 @@ function snapSelectedPrefabBaseToTimeline(): void {
     return;
   }
 
+  let evaluatedPathForSnap: StructuredBezierPath | null = null;
+  let pathSessionForSnap: InPlacePathEditSession | null = null;
+
+  if (activeEditorTool === "path" && selectedNode.kind === "primitive") {
+    const asset = selectedNode.assetId ? getAssetById(selectedNode.assetId) : null;
+    const session = getValidInPlacePathEditSession();
+
+    evaluatedPathForSnap =
+      getEvaluatedPrefabPathOverrides().get(selectedNode.id) ??
+      asset?.bezierPath ??
+      null;
+
+    if (!asset || !evaluatedPathForSnap || !session || session.nodeId !== selectedNode.id) {
+      setImportError(new Error("Use the Path tool on a primitive node before snapping path data."));
+      return;
+    }
+
+    pathSessionForSnap = session;
+  }
+
   selectedNode.position = [...evaluatedNode.position];
   selectedNode.rotation = [...evaluatedNode.rotation];
   selectedNode.scale = [...evaluatedNode.scale];
+
+  if (evaluatedPathForSnap && pathSessionForSnap) {
+    const previousSelection = pathSessionForSnap.selected;
+    pathSessionForSnap.draft = cloneStructuredBezierPath(evaluatedPathForSnap);
+    pathSessionForSnap.selected =
+      previousSelection &&
+      pathSessionForSnap.draft.segments.some(
+        (segment) => segment.id === previousSelection.segmentId,
+      )
+        ? previousSelection
+        : {
+            segmentId: pathSessionForSnap.draft.segments[0]?.id ?? "",
+            component: "anchor",
+          };
+  }
+
   pauseTimeline();
   loadedPrefabId = null;
   lastImportError = null;
@@ -2841,8 +2961,14 @@ function renderEditorShell(): void {
   document.body.dataset.pathEditActive = String(
     editorMode === "path" && Boolean(pathEditSession),
   );
+  const validInPlacePathEditSession =
+    editorMode === "asset" &&
+    activeEditorTool === "path" &&
+    inPlacePathEditSession
+      ? inPlacePathEditSession
+      : null;
   document.body.dataset.inPlacePathEditActive = String(
-    Boolean(getValidInPlacePathEditSession()),
+    Boolean(validInPlacePathEditSession),
   );
   elements.fileInput.disabled = !selectedProjectId;
   elements.deleteProjectButton.disabled = !selectedProjectId;
@@ -2882,7 +3008,7 @@ function renderEditorShell(): void {
   elements.timelineAddKeyframeButton.disabled =
     !activeTimelineClip ||
     !selectedRealPrefabNode ||
-    (activeTimelineProperty === "path" && !getValidInPlacePathEditSession());
+    (activeTimelineProperty === "path" && !validInPlacePathEditSession);
   elements.timelineSnapBaseButton.disabled =
     !activeTimelineClip || !selectedRealPrefabNode;
   elements.sceneNameInput.disabled = !selectedProjectId;
@@ -3878,7 +4004,13 @@ function renderPathEditFrame(): void {
   };
 
   drawPathEditPreview(vectorContext, previewAsset);
-  drawPathEditControls(paperContext, previewAsset, pathEditSession);
+  drawPathEditControls(
+    paperContext,
+    previewAsset,
+    pathEditSession,
+    getSourcePathEditAdapter(previewAsset),
+    pathEditHoveredControl,
+  );
 }
 
 function renderInPlacePathEditOverlay(): void {
@@ -3893,7 +4025,13 @@ function renderInPlacePathEditOverlay(): void {
   const adapter = getInPlacePathEditAdapter();
 
   if (adapter) {
-    drawPathEditControls(paperContext, asset, session, adapter);
+    drawPathEditControls(
+      paperContext,
+      asset,
+      session,
+      adapter,
+      inPlacePathEditHoveredControl,
+    );
   }
 }
 
@@ -4101,7 +4239,11 @@ function drawBillboards(
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .sort((a, b) => b.projected.depth - a.projected.depth);
+    .sort((a, b) => {
+      const ghostOrder = Number(Boolean(a.ghost)) - Number(Boolean(b.ghost));
+
+      return ghostOrder === 0 ? b.projected.depth - a.projected.depth : ghostOrder;
+    });
 
   for (const drawable of sortedDrawables) {
     drawBillboardNode(context, drawable);
@@ -4130,6 +4272,7 @@ function drawBillboardNode(
   const drawAsset = drawable.pathOverride
     ? createPrimitiveAssetPathPreview(asset, drawable.pathOverride)
     : asset;
+  const ghostColor = ghost ? getPrimitiveGhostColor(asset) : null;
 
   context.save();
   context.globalAlpha *= opacity;
@@ -4140,11 +4283,11 @@ function drawBillboardNode(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  drawPrimitiveAssetPath(context, drawAsset);
+  drawPrimitiveAssetPath(context, drawAsset, ghostColor ?? undefined);
 
   if (selected || ghost) {
     context.lineWidth = 3 / Math.max(assetScale, 0.001);
-    context.strokeStyle = ghost ? "#ffffff" : "#ffcf4a";
+    context.strokeStyle = ghostColor ?? "#ffcf4a";
     context.setLineDash(ghost ? [8 / Math.max(assetScale, 0.001)] : []);
     context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
   }
@@ -4169,9 +4312,10 @@ function createPrimitiveAssetPathPreview(
 function drawPrimitiveAssetPath(
   context: CanvasRenderingContext2D,
   asset: PrimitiveSvgAsset,
+  colorOverride?: string,
 ): void {
   if (asset.assetKind === "strokePath") {
-    context.strokeStyle = asset.stroke;
+    context.strokeStyle = colorOverride ?? asset.stroke;
     context.lineWidth = asset.strokeWidth;
     context.lineCap = "round";
     context.lineJoin = "round";
@@ -4180,8 +4324,118 @@ function drawPrimitiveAssetPath(
     return;
   }
 
-  context.fillStyle = asset.fill;
+  context.fillStyle = colorOverride ?? asset.fill;
   context.fill(asset.path, asset.fillRule);
+}
+
+const primitiveGhostColorCache = new Map<string, string>();
+const GHOST_COLOR_CANDIDATES: RgbColor[] = [
+  { r: 255, g: 207, b: 74 },
+  { r: 91, g: 196, b: 191 },
+  { r: 244, g: 114, b: 182 },
+  { r: 163, g: 230, b: 53 },
+  { r: 56, g: 189, b: 248 },
+  { r: 249, g: 115, b: 22 },
+  { r: 248, g: 250, b: 252 },
+];
+
+function getPrimitiveGhostColor(asset: PrimitiveSvgAsset): string {
+  const sourceColor = asset.assetKind === "strokePath" ? asset.stroke : asset.fill;
+  const cachedColor = primitiveGhostColorCache.get(sourceColor);
+
+  if (cachedColor) {
+    return cachedColor;
+  }
+
+  const sourceRgb = parseCssColorToRgb(sourceColor);
+  const selectedColor = sourceRgb
+    ? GHOST_COLOR_CANDIDATES.reduce((best, candidate) =>
+        getRgbContrastScore(candidate, sourceRgb) >
+        getRgbContrastScore(best, sourceRgb)
+          ? candidate
+          : best,
+      )
+    : GHOST_COLOR_CANDIDATES[0];
+  const color = rgbToHex(selectedColor);
+  primitiveGhostColorCache.set(sourceColor, color);
+  return color;
+}
+
+function parseCssColorToRgb(color: string): RgbColor | null {
+  const canonicalColor = getCanonicalCanvasColor(color);
+  const hexMatch = /^#([0-9a-f]{6})$/i.exec(canonicalColor);
+
+  if (hexMatch?.[1]) {
+    return {
+      r: Number.parseInt(hexMatch[1].slice(0, 2), 16),
+      g: Number.parseInt(hexMatch[1].slice(2, 4), 16),
+      b: Number.parseInt(hexMatch[1].slice(4, 6), 16),
+    };
+  }
+
+  const rgbMatch =
+    /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i.exec(
+      canonicalColor,
+    );
+
+  if (!rgbMatch?.[1] || !rgbMatch[2] || !rgbMatch[3]) {
+    return null;
+  }
+
+  return {
+    r: clampColorChannel(Number(rgbMatch[1])),
+    g: clampColorChannel(Number(rgbMatch[2])),
+    b: clampColorChannel(Number(rgbMatch[3])),
+  };
+}
+
+function getCanonicalCanvasColor(color: string): string {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return color;
+  }
+
+  context.fillStyle = "#000000";
+  context.fillStyle = color;
+  return context.fillStyle;
+}
+
+function getRgbContrastScore(left: RgbColor, right: RgbColor): number {
+  const channelDistance =
+    Math.abs(left.r - right.r) +
+    Math.abs(left.g - right.g) +
+    Math.abs(left.b - right.b);
+  const luminanceDistance = Math.abs(getRelativeLuminance(left) - getRelativeLuminance(right));
+
+  return channelDistance + luminanceDistance * 255;
+}
+
+function getRelativeLuminance(color: RgbColor): number {
+  return (
+    0.2126 * normalizeColorChannel(color.r) +
+    0.7152 * normalizeColorChannel(color.g) +
+    0.0722 * normalizeColorChannel(color.b)
+  );
+}
+
+function normalizeColorChannel(channel: number): number {
+  const value = channel / 255;
+
+  return value <= 0.03928
+    ? value / 12.92
+    : ((value + 0.055) / 1.055) ** 2.4;
+}
+
+function clampColorChannel(channel: number): number {
+  return Math.max(0, Math.min(255, Math.round(channel)));
+}
+
+function rgbToHex(color: RgbColor): string {
+  return `#${[color.r, color.g, color.b]
+    .map((channel) => clampColorChannel(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
 }
 
 function drawPathEditControls(
@@ -4189,6 +4443,7 @@ function drawPathEditControls(
   asset: PrimitiveSvgAsset,
   session: PathEditSession,
   adapter = getSourcePathEditAdapter(asset),
+  hoveredControl: PathEditDragState | null = null,
 ): void {
   const controls = getPathEditControls(session.draft);
 
@@ -4220,8 +4475,17 @@ function drawPathEditControls(
     const selected =
       session.selected?.segmentId === control.segmentId &&
       session.selected.component === control.component;
+    const hovered =
+      hoveredControl?.segmentId === control.segmentId &&
+      hoveredControl.component === control.component;
 
-    drawPathEditControlPoint(context, screenPoint, control.component, selected);
+    drawPathEditControlPoint(
+      context,
+      screenPoint,
+      control.component,
+      selected,
+      hovered,
+    );
   }
 
   context.restore();
@@ -4260,19 +4524,20 @@ function drawPathEditControlPoint(
   point: BezierPoint,
   component: PathEditComponent,
   selected: boolean,
+  hovered: boolean,
 ): void {
   context.save();
   context.fillStyle = selected ? "#ffcf4a" : "#5bc4bf";
-  context.strokeStyle = "rgba(17, 24, 39, 0.86)";
-  context.lineWidth = 2;
+  context.strokeStyle = hovered ? "#ffffff" : "rgba(17, 24, 39, 0.86)";
+  context.lineWidth = hovered ? 3 : 2;
 
   if (component === "anchor") {
     context.beginPath();
-    context.arc(point[0], point[1], selected ? 6 : 5, 0, Math.PI * 2);
+    context.arc(point[0], point[1], selected || hovered ? 6 : 5, 0, Math.PI * 2);
     context.fill();
     context.stroke();
   } else {
-    const size = selected ? 10 : 8;
+    const size = selected || hovered ? 10 : 8;
     context.fillRect(point[0] - size / 2, point[1] - size / 2, size, size);
     context.strokeRect(point[0] - size / 2, point[1] - size / 2, size, size);
   }
@@ -4300,9 +4565,14 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
   );
 
   if (!control) {
+    updatePathEditHoveredControl(null);
     return;
   }
 
+  pathEditHoveredControl = {
+    segmentId: control.segmentId,
+    component: control.component,
+  };
   pathEditSession.selected = {
     segmentId: control.segmentId,
     component: control.component,
@@ -4311,6 +4581,49 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
   event.preventDefault();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
+}
+
+function updatePathEditHover(event: PointerEvent | MouseEvent): void {
+  if (editorMode !== "path" || !pathEditSession || pathEditDragState) {
+    if (pathEditHoveredControl) {
+      clearPathEditHover();
+    }
+    return;
+  }
+
+  const asset = getAssetById(pathEditSession.assetId);
+  const adapter = asset ? getSourcePathEditAdapter(asset) : null;
+  const hoveredControl =
+    asset && adapter
+      ? findNearestPathEditControl(
+          getCanvasPointerPoint(event),
+          pathEditSession,
+          adapter,
+          PATH_EDIT_HIT_RADIUS,
+        )
+      : null;
+
+  updatePathEditHoveredControl(hoveredControl);
+}
+
+function updatePathEditHoveredControl(control: PathEditControl | null): void {
+  const nextHover = control
+    ? {
+        segmentId: control.segmentId,
+        component: control.component,
+      }
+    : null;
+
+  if (pathEditSelectionsEqual(pathEditHoveredControl, nextHover)) {
+    return;
+  }
+
+  pathEditHoveredControl = nextHover;
+  exposeEditorDebugHooks();
+}
+
+function clearPathEditHover(): void {
+  updatePathEditHoveredControl(null);
 }
 
 function dragPathEditControl(event: PointerEvent | MouseEvent): void {
@@ -4410,12 +4723,12 @@ function getPathEditScreenControls(): Array<{
   );
 }
 
-function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
+function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean {
   const session = getValidInPlacePathEditSession();
   const adapter = getInPlacePathEditAdapter();
 
   if (!session || !adapter) {
-    return;
+    return false;
   }
 
   const control = findNearestPathEditControl(
@@ -4426,13 +4739,88 @@ function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
   );
 
   if (!control) {
+    updateInPlacePathEditHoveredControl(null);
+    return false;
+  }
+
+  inPlacePathEditHoveredControl = {
+    segmentId: control.segmentId,
+    component: control.component,
+  };
+  inPlacePathEditDragState = selectPathEditCoreControl(session, control);
+  event.preventDefault();
+  event.stopPropagation();
+  if ("stopImmediatePropagation" in event) {
+    event.stopImmediatePropagation();
+  }
+  renderInspector();
+  exposeEditorDebugHooks();
+  return true;
+}
+
+function updateInPlacePathEditHover(event: PointerEvent | MouseEvent): void {
+  if (
+    !getValidInPlacePathEditSession() ||
+    inPlacePathEditDragState ||
+    inPlacePathEditCameraDragActive
+  ) {
+    if (inPlacePathEditHoveredControl) {
+      clearInPlacePathEditHover();
+    }
     return;
   }
 
-  inPlacePathEditDragState = selectPathEditCoreControl(session, control);
-  event.preventDefault();
-  renderInspector();
+  const hoveredControl = findInPlacePathEditControl(event);
+
+  updateInPlacePathEditHoveredControl(hoveredControl);
+}
+
+function updateInPlacePathEditHoveredControl(control: PathEditControl | null): void {
+  const nextHover = control
+    ? {
+        segmentId: control.segmentId,
+        component: control.component,
+      }
+    : null;
+
+  if (pathEditSelectionsEqual(inPlacePathEditHoveredControl, nextHover)) {
+    return;
+  }
+
+  inPlacePathEditHoveredControl = nextHover;
   exposeEditorDebugHooks();
+}
+
+function clearInPlacePathEditHover(): void {
+  updateInPlacePathEditHoveredControl(null);
+}
+
+function pathEditSelectionsEqual(
+  left: PathEditDragState | null,
+  right: PathEditDragState | null,
+): boolean {
+  return (
+    left?.segmentId === right?.segmentId &&
+    left?.component === right?.component
+  );
+}
+
+function findInPlacePathEditControl(
+  event: PointerEvent | MouseEvent,
+): PathEditControl | null {
+  const session = getValidInPlacePathEditSession();
+  const adapter = getInPlacePathEditAdapter();
+
+  if (!session || !adapter) {
+    return null;
+  }
+
+  return findNearestPathEditControl(
+    getCanvasPointerPoint(event),
+    session,
+    adapter,
+    PATH_EDIT_HIT_RADIUS,
+  );
 }
 
 function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
@@ -4453,6 +4841,7 @@ function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
     altKey: event.altKey,
     shiftKey: event.shiftKey,
   });
+  event.preventDefault();
   renderInspector();
   exposeEditorDebugHooks();
 }
@@ -5378,13 +5767,15 @@ function exposeEditorDebugHooks(): void {
         }),
       ),
     }),
-    getPathEditState: () => ({
-      assetId: pathEditSession?.assetId ?? null,
-      selectedSegmentId: pathEditSession?.selected?.segmentId ?? null,
-      selectedComponent: pathEditSession?.selected?.component ?? null,
-      hasDraft: Boolean(pathEditSession),
-      draftBezierPath: pathEditSession
-        ? cloneStructuredBezierPath(pathEditSession.draft)
+      getPathEditState: () => ({
+        assetId: pathEditSession?.assetId ?? null,
+        selectedSegmentId: pathEditSession?.selected?.segmentId ?? null,
+        selectedComponent: pathEditSession?.selected?.component ?? null,
+        hoveredSegmentId: pathEditHoveredControl?.segmentId ?? null,
+        hoveredComponent: pathEditHoveredControl?.component ?? null,
+        hasDraft: Boolean(pathEditSession),
+        draftBezierPath: pathEditSession
+          ? cloneStructuredBezierPath(pathEditSession.draft)
         : null,
       controls: getPathEditScreenControls(),
     }),
@@ -5395,6 +5786,8 @@ function exposeEditorDebugHooks(): void {
       hasDraft: Boolean(inPlacePathEditSession),
       selectedSegmentId: inPlacePathEditSession?.selected?.segmentId ?? null,
       selectedComponent: inPlacePathEditSession?.selected?.component ?? null,
+      hoveredSegmentId: inPlacePathEditHoveredControl?.segmentId ?? null,
+      hoveredComponent: inPlacePathEditHoveredControl?.component ?? null,
       draftBezierPath: inPlacePathEditSession
         ? cloneStructuredBezierPath(inPlacePathEditSession.draft)
         : null,

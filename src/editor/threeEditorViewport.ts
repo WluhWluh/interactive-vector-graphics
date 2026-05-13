@@ -102,6 +102,8 @@ export class ThreeEditorViewport {
   private readonly scaleDragStart = new Vector3(1, 1, 1);
   private shiftKeyPressed = false;
   private transformControlsVisible = true;
+  private orbitDisabledForTransformPointer = false;
+  private orbitInteractionActive = false;
   private projection: CameraProjection = "perspective";
   private transformMode: TransformMode = "translate";
   private selectedNodeId: string | null = null;
@@ -150,7 +152,9 @@ export class ThreeEditorViewport {
       }
     });
     this.transformControls.addEventListener("dragging-changed", (event) => {
-      this.orbitControls.enabled = !Boolean(event.value);
+      const isTransformDragging = Boolean(event.value);
+      this.orbitInteractionActive = false;
+      this.orbitControls.enabled = !isTransformDragging;
     });
     this.transformControls.addEventListener("mouseDown", () => {
       const proxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
@@ -166,19 +170,51 @@ export class ThreeEditorViewport {
       }
     });
     this.orbitControls.addEventListener("start", () => {
+      this.orbitInteractionActive = true;
       this.transformControls.enabled = false;
       this.transformControls.axis = null;
     });
     this.orbitControls.addEventListener("end", () => {
+      this.orbitInteractionActive = false;
       this.transformControls.enabled = this.transformControlsVisible;
       this.transformControls.axis = null;
     });
 
+    this.overlayCanvas.addEventListener(
+      "pointerdown",
+      (event) => {
+        this.pointerDownPosition.set(event.clientX, event.clientY);
+
+        if (!this.transformControlsVisible || event.button !== 0) {
+          return;
+        }
+
+        this.transformControls.pointerHover(this.getTransformControlsPointer(event));
+
+        if (this.transformControls.axis !== null) {
+          this.orbitDisabledForTransformPointer = true;
+          this.orbitControls.enabled = false;
+        }
+      },
+      { capture: true },
+    );
     this.overlayCanvas.addEventListener("pointerdown", (event) => {
       this.pointerDownPosition.set(event.clientX, event.clientY);
     });
     this.overlayCanvas.addEventListener("pointerup", (event) => {
+      if (this.orbitDisabledForTransformPointer && !this.transformControls.dragging) {
+        this.orbitControls.enabled = true;
+      }
+
+      this.orbitDisabledForTransformPointer = false;
       this.handlePointerUp(event);
+    });
+    this.overlayCanvas.addEventListener("pointercancel", () => {
+      if (this.orbitDisabledForTransformPointer && !this.transformControls.dragging) {
+        this.orbitControls.enabled = true;
+      }
+
+      this.orbitDisabledForTransformPointer = false;
     });
   }
 
@@ -228,6 +264,9 @@ export class ThreeEditorViewport {
     const cameraChanged = this.orbitControls.update();
     if (cameraChanged) {
       this.onCameraChange?.();
+    }
+    if (this.orbitInteractionActive && !this.transformControls.dragging) {
+      this.transformControls.axis = null;
     }
     this.backgroundRenderer.render(this.backgroundScene, this.activeCamera);
     this.overlayRenderer.render(this.overlayScene, this.activeCamera);
@@ -355,6 +394,12 @@ export class ThreeEditorViewport {
     } else {
       this.transformControls.detach();
     }
+  }
+
+  setOrbitControlsEnabled(enabled: boolean): void {
+    this.orbitControls.enabled = enabled;
+    this.orbitDisabledForTransformPointer = false;
+    this.orbitInteractionActive = false;
   }
 
   resetView(): void {
@@ -551,6 +596,16 @@ export class ThreeEditorViewport {
     proxy.edgeLines.visible = selected;
     const material = proxy.edgeLines.material as LineBasicMaterial;
     material.color.set(selected ? "#ffcf4a" : "#5bc4bf");
+  }
+
+  private getTransformControlsPointer(event: PointerEvent): PointerEvent {
+    const rect = this.overlayCanvas.getBoundingClientRect();
+
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      button: event.button,
+    } as unknown as PointerEvent;
   }
 }
 

@@ -368,6 +368,48 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   ]);
   expect(inPlaceInitialState.assetAnchor).toEqual([-42, 0]);
   expect(inPlaceInitialState.activeTool).toBe("path");
+  const firstPathControl = inPlaceInitialState.path?.controls[0];
+  const viewportBox = await page.locator("#three-overlay-canvas").boundingBox();
+
+  expect(firstPathControl).toBeTruthy();
+  expect(viewportBox).toBeTruthy();
+  const firstPathControlPageX = (viewportBox?.x ?? 0) + (firstPathControl?.x ?? 0);
+  const firstPathControlPageY = (viewportBox?.y ?? 0) + (firstPathControl?.y ?? 0);
+  await page.mouse.move(firstPathControlPageX, firstPathControlPageY);
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__vectorEditorDebug?.getInPlacePathEditState().hoveredSegmentId ??
+          null,
+      ),
+    )
+    .toBe(firstPathControl?.segmentId);
+
+  const cameraBeforePathOrbit = await page.evaluate(
+    () => window.__vectorEditorDebug?.getExperimentScene().camera.position ?? null,
+  );
+  const pathOrbitStartX = (viewportBox?.x ?? 0) + (viewportBox?.width ?? 0) - 72;
+  const pathOrbitStartY = (viewportBox?.y ?? 0) + 110;
+  await page.mouse.move(pathOrbitStartX, pathOrbitStartY);
+  await page.mouse.down();
+  await page.mouse.move(pathOrbitStartX - 160, pathOrbitStartY + 30);
+  await page.mouse.up();
+
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getExperimentScene().camera.position ?? null,
+      ),
+    )
+    .not.toEqual(cameraBeforePathOrbit);
+  const pathOrbitState = await page.evaluate(() => ({
+    controls: window.__vectorEditorDebug?.getInPlacePathEditState().controls ?? [],
+    hasDraft: window.__vectorEditorDebug?.getInPlacePathEditState().hasDraft ?? false,
+  }));
+
+  expect(pathOrbitState.hasDraft).toBe(true);
+  expect(pathOrbitState.controls.length).toBeGreaterThan(0);
   await page.getByLabel("In-place path anchor X").fill("-30");
   await page.getByLabel("In-place path anchor X").blur();
 
@@ -438,6 +480,17 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(pathKeyframeState.secondPathKeyframeAnchor).toEqual([-10, 0]);
   expect(pathKeyframeState.overrideAnchor).toEqual([-20, 0]);
   expect(pathKeyframeState.inPlaceAnchor).toEqual([-10, 0]);
+  await page.locator("#timeline-snap-base-button").click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          window.__vectorEditorDebug
+            ?.getInPlacePathEditState()
+            .draftBezierPath?.segments[0]?.anchor ?? null,
+      ),
+    )
+    .toEqual([-20, 0]);
   await page
     .getByLabel("Transform mode")
     .getByRole("button", { name: "Move" })

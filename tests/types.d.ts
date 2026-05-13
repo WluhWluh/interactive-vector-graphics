@@ -132,6 +132,8 @@ declare global {
         assetId: string | null;
         selectedSegmentId: string | null;
         selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
+        hoveredSegmentId: string | null;
+        hoveredComponent: "anchor" | "handleIn" | "handleOut" | null;
         hasDraft: boolean;
         draftBezierPath: StructuredBezierPathDebug | null;
         controls: Array<{
@@ -148,6 +150,8 @@ declare global {
         hasDraft: boolean;
         selectedSegmentId: string | null;
         selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
+        hoveredSegmentId: string | null;
+        hoveredComponent: "anchor" | "handleIn" | "handleOut" | null;
         draftBezierPath: StructuredBezierPathDebug | null;
         controls: Array<{
           segmentId: string;
