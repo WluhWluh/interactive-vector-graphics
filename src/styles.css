@@ -83,6 +83,8 @@ body {
 
 .editor-panel-header {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 4px;
 }
 
@@ -96,6 +98,42 @@ body {
 .editor-panel-header span {
   color: rgba(238, 244, 255, 0.56);
   font-size: 12px;
+}
+
+.collapsible-module {
+  display: grid;
+  gap: 12px;
+}
+
+.collapsible-module-body {
+  display: grid;
+  gap: 12px;
+}
+
+.collapsible-module-body[hidden] {
+  display: none;
+}
+
+.module-collapse-button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: rgba(238, 244, 255, 0.78);
+  background: rgba(238, 244, 255, 0.06);
+  border: 1px solid rgba(238, 244, 255, 0.12);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.module-collapse-button:hover {
+  color: #111827;
+  background: #5bc4bf;
+  border-color: #5bc4bf;
 }
 
 .file-import-button {

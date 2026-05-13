@@ -85,6 +85,58 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Inspector" })).toBeVisible();
+  await expect(page.locator('[data-module-collapse-button="projects"]')).toHaveText("▴");
+  await expect(
+    page.locator('[data-module-collapse-button="primitive-assets"]'),
+  ).toHaveText("▴");
+  await expect(page.locator('[data-module-collapse-button="prefabs"]')).toHaveText(
+    "▴",
+  );
+  await expect(
+    page.locator('[data-module-collapse-button="prefab-contents"]'),
+  ).toHaveText("▴");
+  await expect(
+    page.locator('[data-module-collapse-button="scene-documents"]'),
+  ).toHaveText("▴");
+  await expect(
+    page.locator('[data-module-collapse-button="scene-contents"]'),
+  ).toHaveText("▴");
+
+  await page.locator('[data-module-collapse-button="primitive-assets"]').click();
+  await expect(
+    page.locator('[data-collapsible-module="primitive-assets"] .collapsible-module-body'),
+  ).toBeHidden();
+  await expect(
+    page.locator('[data-module-collapse-button="primitive-assets"]'),
+  ).toHaveText("▾");
+  expect(
+    await page.evaluate(() =>
+      window.__vectorEditorDebug?.getCollapsedModules() ?? [],
+    ),
+  ).toEqual(["primitive-assets"]);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Primitive Assets" })).toBeVisible();
+  await expect(
+    page.locator('[data-collapsible-module="primitive-assets"] .collapsible-module-body'),
+  ).toBeHidden();
+  await expect(
+    page.locator('[data-module-collapse-button="primitive-assets"]'),
+  ).toHaveText("▾");
+
+  await page.locator('[data-module-collapse-button="primitive-assets"]').click();
+  await expect(
+    page.locator('[data-collapsible-module="primitive-assets"] .collapsible-module-body'),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.locator('[data-collapsible-module="primitive-assets"] .collapsible-module-body'),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      window.__vectorEditorDebug?.getCollapsedModules() ?? [],
+    ),
+  ).toEqual([]);
 
   await page.locator("#project-name-input").fill("Playwright Project");
   await page.locator("#project-form").getByRole("button", { name: "Create" }).click();

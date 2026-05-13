@@ -20,135 +20,267 @@
             Scene Layout
           </button>
         </div>
+        <p id="import-error" class="editor-error" role="alert" hidden></p>
 
         <section id="asset-mode-panel" class="mode-panel">
-        <header class="editor-panel-header">
-          <h1>Projects</h1>
-          <span>Persistent workspace</span>
-        </header>
-        <form id="project-form" class="project-form">
-          <input
-            id="project-name-input"
-            class="text-input"
-            type="text"
-            placeholder="New project name"
-            autocomplete="off"
-          />
-          <button class="editor-button" type="submit">Create</button>
-        </form>
-        <ul id="project-list" class="asset-list" aria-label="Projects"></ul>
-        <button id="delete-project-button" class="danger-button" type="button">
-          Delete Project
-        </button>
+          <section
+            class="collapsible-module"
+            data-collapsible-module="projects"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h1>Projects</h1>
+                <span>Persistent workspace</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Projects"
+                aria-expanded="true"
+                data-module-collapse-button="projects"
+              >
+                ▴
+              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <form id="project-form" class="project-form">
+                <input
+                  id="project-name-input"
+                  class="text-input"
+                  type="text"
+                  placeholder="New project name"
+                  autocomplete="off"
+                />
+                <button class="editor-button" type="submit">Create</button>
+              </form>
+              <ul id="project-list" class="asset-list" aria-label="Projects"></ul>
+              <button id="delete-project-button" class="danger-button" type="button">
+                Delete Project
+              </button>
+            </div>
+          </section>
 
-        <header class="editor-panel-header">
-          <h2>Primitive Assets</h2>
-          <span>Primitive SVG</span>
-        </header>
-        <label class="file-import-button" for="svg-file-input">
-          Import SVG
-        </label>
-        <input
-          id="svg-file-input"
-          class="file-input"
-          type="file"
-          accept=".svg,image/svg+xml"
-        />
-        <p id="import-error" class="editor-error" role="alert" hidden></p>
-        <ul id="asset-list" class="asset-list" aria-label="Primitive assets"></ul>
-        <button id="add-node-button" class="editor-button" type="button">
-          Add Primitive to Prefab
-        </button>
-        <button id="delete-asset-button" class="danger-button" type="button">
-          Delete Imported Asset
-        </button>
+          <section
+            class="collapsible-module"
+            data-collapsible-module="primitive-assets"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h2>Primitive Assets</h2>
+                <span>Primitive SVG</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Primitive Assets"
+                aria-expanded="true"
+                data-module-collapse-button="primitive-assets"
+              >
+                ▴
+              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <label class="file-import-button" for="svg-file-input">
+                Import SVG
+              </label>
+              <input
+                id="svg-file-input"
+                class="file-input"
+                type="file"
+                accept=".svg,image/svg+xml"
+              />
+              <ul id="asset-list" class="asset-list" aria-label="Primitive assets"></ul>
+              <button id="add-node-button" class="editor-button" type="button">
+                Add Primitive to Prefab
+              </button>
+              <button id="delete-asset-button" class="danger-button" type="button">
+                Delete Imported Asset
+              </button>
+            </div>
+          </section>
 
-        <header class="editor-panel-header">
-          <h2>Prefabs</h2>
-          <span>Reusable assemblies</span>
-        </header>
-        <div class="scene-create-row">
-          <input
-            id="prefab-name-input"
-            class="text-input"
-            type="text"
-            placeholder="New prefab name"
-            autocomplete="off"
-          />
-          <button id="create-prefab-button" class="editor-button" type="button">
-            Create Prefab
-          </button>
-        </div>
-        <ul id="prefab-list" class="asset-list" aria-label="Prefabs"></ul>
-        <div class="scene-action-grid">
-          <button id="load-prefab-button" class="editor-button" type="button">
-            Load Prefab
-          </button>
-          <button id="save-prefab-button" class="editor-button" type="button">
-            Save Prefab
-          </button>
-          <button id="delete-prefab-button" class="danger-button" type="button">
-            Delete Prefab
-          </button>
-        </div>
+          <section
+            class="collapsible-module"
+            data-collapsible-module="prefabs"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h2>Prefabs</h2>
+                <span>Reusable assemblies</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Prefabs"
+                aria-expanded="true"
+                data-module-collapse-button="prefabs"
+              >
+                ▴
+              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <div class="scene-create-row">
+                <input
+                  id="prefab-name-input"
+                  class="text-input"
+                  type="text"
+                  placeholder="New prefab name"
+                  autocomplete="off"
+                />
+                <button id="create-prefab-button" class="editor-button" type="button">
+                  Create Prefab
+                </button>
+              </div>
+              <ul id="prefab-list" class="asset-list" aria-label="Prefabs"></ul>
+              <div class="scene-action-grid">
+                <button id="load-prefab-button" class="editor-button" type="button">
+                  Load Prefab
+                </button>
+                <button id="save-prefab-button" class="editor-button" type="button">
+                  Save Prefab
+                </button>
+                <button id="delete-prefab-button" class="danger-button" type="button">
+                  Delete Prefab
+                </button>
+              </div>
+            </div>
+          </section>
 
-        <header class="editor-panel-header">
-          <h2>Prefab Contents</h2>
-          <span>Local assembly tree</span>
-        </header>
-        <button id="create-prefab-group-button" class="editor-button" type="button">
-          Create Group
-        </button>
-        <ul id="prefab-node-list" class="asset-list" aria-label="Prefab nodes"></ul>
-        <button id="delete-prefab-node-button" class="danger-button" type="button">
-          Delete Prefab Node
-        </button>
+          <section
+            class="collapsible-module"
+            data-collapsible-module="prefab-contents"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h2>Prefab Contents</h2>
+                <span>Local assembly tree</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Prefab Contents"
+                aria-expanded="true"
+                data-module-collapse-button="prefab-contents"
+              >
+                ▴
+              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <button
+                id="create-prefab-group-button"
+                class="editor-button"
+                type="button"
+              >
+                Create Group
+              </button>
+              <ul
+                id="prefab-node-list"
+                class="asset-list"
+                aria-label="Prefab nodes"
+              ></ul>
+              <button
+                id="delete-prefab-node-button"
+                class="danger-button"
+                type="button"
+              >
+                Delete Prefab Node
+              </button>
+            </div>
+          </section>
         </section>
 
         <section id="scene-mode-panel" class="mode-panel">
-        <header class="editor-panel-header">
-          <h2>Scene Documents</h2>
-          <span>Saved layouts</span>
-        </header>
-        <div class="scene-create-row">
-          <input
-            id="scene-name-input"
-            class="text-input"
-            type="text"
-            placeholder="New scene name"
-            autocomplete="off"
-          />
-          <button id="create-scene-button" class="editor-button" type="button">
-            Create Empty
-          </button>
-          <button id="clone-scene-button" class="editor-button" type="button">
-            Clone Current
-          </button>
-        </div>
-        <ul id="scene-list" class="asset-list" aria-label="Saved scenes"></ul>
-        <div class="scene-action-grid">
-          <button id="load-scene-button" class="editor-button" type="button">
-            Load Scene
-          </button>
-          <button id="save-scene-button" class="editor-button" type="button">
-            Save Scene
-          </button>
-          <button id="delete-scene-button" class="danger-button" type="button">
-            Delete Scene
-          </button>
-        </div>
+          <section
+            class="collapsible-module"
+            data-collapsible-module="scene-documents"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h2>Scene Documents</h2>
+                <span>Saved layouts</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Scene Documents"
+                aria-expanded="true"
+                data-module-collapse-button="scene-documents"
+              >
+                ▴
+              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <div class="scene-create-row">
+                <input
+                  id="scene-name-input"
+                  class="text-input"
+                  type="text"
+                  placeholder="New scene name"
+                  autocomplete="off"
+                />
+                <button id="create-scene-button" class="editor-button" type="button">
+                  Create Empty
+                </button>
+                <button id="clone-scene-button" class="editor-button" type="button">
+                  Clone Current
+                </button>
+              </div>
+              <ul id="scene-list" class="asset-list" aria-label="Saved scenes"></ul>
+              <div class="scene-action-grid">
+                <button id="load-scene-button" class="editor-button" type="button">
+                  Load Scene
+                </button>
+                <button id="save-scene-button" class="editor-button" type="button">
+                  Save Scene
+                </button>
+                <button id="delete-scene-button" class="danger-button" type="button">
+                  Delete Scene
+                </button>
+              </div>
+            </div>
+          </section>
 
-        <header class="editor-panel-header">
-          <h2>Scene Contents</h2>
-          <span>Layout instances</span>
-        </header>
-        <button id="add-prefab-instance-button" class="editor-button" type="button">
-          Add Prefab Instance to Scene
-        </button>
-        <ul id="scene-node-list" class="asset-list" aria-label="Scene nodes"></ul>
-        <button id="delete-scene-node-button" class="danger-button" type="button">
-          Delete Scene Node
-        </button>
+          <section
+            class="collapsible-module"
+            data-collapsible-module="scene-contents"
+          >
+            <header class="editor-panel-header">
+              <div>
+                <h2>Scene Contents</h2>
+                <span>Layout instances</span>
+              </div>
+              <button
+                class="module-collapse-button"
+                type="button"
+                aria-label="Toggle Scene Contents"
+                aria-expanded="true"
+                data-module-collapse-button="scene-contents"
+              >
+                ▴
+              </button>
+            </header>
+            <div class="collapsible-module-body">
+              <button
+                id="add-prefab-instance-button"
+                class="editor-button"
+                type="button"
+              >
+                Add Prefab Instance to Scene
+              </button>
+              <ul
+                id="scene-node-list"
+                class="asset-list"
+                aria-label="Scene nodes"
+              ></ul>
+              <button
+                id="delete-scene-node-button"
+                class="danger-button"
+                type="button"
+              >
+                Delete Scene Node
+              </button>
+            </div>
+          </section>
         </section>
       </aside>
 

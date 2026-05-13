@@ -102,6 +102,14 @@ declare global {
       }>;
       getSelectedSceneId: () => string | null;
       getLoadedSceneId: () => string | null;
+      getCollapsedModules: () => Array<
+        | "projects"
+        | "primitive-assets"
+        | "prefabs"
+        | "prefab-contents"
+        | "scene-documents"
+        | "scene-contents"
+      >;
     };
   }
 }
