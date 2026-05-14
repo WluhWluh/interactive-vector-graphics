@@ -320,6 +320,18 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(editedTransformState?.rotation).toEqual([0, 0, 0.75]);
   expect(editedTransformState?.scale).toEqual([1, 1, 1]);
   await expect(page.getByLabel("Scale Y")).toHaveValue("1");
+  await expect(page.locator("#transform-path-button")).toBeDisabled();
+
+  await page.locator("#timeline-clip-name-input").fill("Pose Check");
+  await page.locator("#timeline-create-clip-button").click();
+  await page.locator("#timeline-duration-input").fill("1000");
+  await page.locator("#timeline-duration-input").blur();
+  await page.locator("#timeline-time-input").fill("0");
+  await page.locator("#timeline-time-input").blur();
+  await expect(page.getByRole("button", { name: "Base Pose" })).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
 
   await page.getByLabel("Transform mode").getByRole("button", { name: "Path" }).click();
   await expect(page.locator("#inspector-fields")).toContainText("In-Place Path");
@@ -368,14 +380,25 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   ]);
   expect(inPlaceInitialState.assetAnchor).toEqual([-42, 0]);
   expect(inPlaceInitialState.activeTool).toBe("path");
-  const firstPathControl = inPlaceInitialState.path?.controls[0];
   const viewportBox = await page.locator("#three-overlay-canvas").boundingBox();
+  const firstPathControl = inPlaceInitialState.path?.controls.find((control) => {
+    const width = viewportBox?.width ?? 0;
+    const height = viewportBox?.height ?? 0;
+
+    return control.x >= 0 && control.x <= width && control.y >= 0 && control.y <= height;
+  });
 
   expect(firstPathControl).toBeTruthy();
   expect(viewportBox).toBeTruthy();
   const firstPathControlPageX = (viewportBox?.x ?? 0) + (firstPathControl?.x ?? 0);
   const firstPathControlPageY = (viewportBox?.y ?? 0) + (firstPathControl?.y ?? 0);
   await page.mouse.move(firstPathControlPageX, firstPathControlPageY);
+  await page.locator("#three-overlay-canvas").dispatchEvent("pointermove", {
+    clientX: firstPathControlPageX,
+    clientY: firstPathControlPageY,
+    bubbles: true,
+    pointerType: "mouse",
+  });
   await expect
     .poll(async () =>
       page.evaluate(
@@ -428,10 +451,6 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     0,
   ]);
   expect(inPlaceEditedState.assetAnchor).toEqual([-42, 0]);
-  await page.locator("#timeline-clip-name-input").fill("Pose Check");
-  await page.locator("#timeline-create-clip-button").click();
-  await page.locator("#timeline-duration-input").fill("1000");
-  await page.locator("#timeline-duration-input").blur();
   await page.locator("#timeline-time-input").fill("0");
   await page.locator("#timeline-time-input").blur();
   await page.getByLabel("Transform mode").getByRole("button", { name: "Path" }).click();
@@ -503,6 +522,22 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     "data-selected",
     "true",
   );
+  const stagingAfterMoveToolState = await page.evaluate(() => {
+    const timeline = window.__vectorEditorDebug?.getPrefabTimeline();
+
+    return {
+      stagingPathAnchor:
+        timeline?.stagingPose?.pathDraft?.segments[0]?.anchor ?? null,
+      basePathAnchor:
+        window.__vectorEditorDebug
+          ?.getAssets()
+          .find((candidate) => candidate.id === "uploaded-face")
+          ?.bezierPath.segments[0]?.anchor ?? null,
+    };
+  });
+
+  expect(stagingAfterMoveToolState.stagingPathAnchor).toEqual([-20, 0]);
+  expect(stagingAfterMoveToolState.basePathAnchor).toEqual([-42, 0]);
   await page.locator("#timeline-time-input").fill("0");
   await page.locator("#timeline-time-input").blur();
   await page
@@ -525,12 +560,15 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       path: debug?.getInPlacePathEditState() ?? null,
       basePosition: debug?.getPrefabAssembly().nodes[0]?.position ?? null,
       evaluatedPosition: debug?.getPrefabTimeline().evaluatedNodes[0]?.position ?? null,
+      stagingPosition:
+        debug?.getPrefabTimeline().stagingPose?.transform.position ?? null,
     };
   });
 
   expect(inPlaceAfterTimelineState.path?.active).toBe(true);
-  expect(inPlaceAfterTimelineState.basePosition).toEqual([4, 1, 0]);
+  expect(inPlaceAfterTimelineState.basePosition).toEqual([2.5, 1, 0]);
   expect(inPlaceAfterTimelineState.evaluatedPosition).toEqual([3.25, 1, 0]);
+  expect(inPlaceAfterTimelineState.stagingPosition).toEqual([4, 1, 0]);
   await page
     .getByLabel("Transform mode")
     .getByRole("button", { name: "Move" })
@@ -542,12 +580,41 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
     return {
       path: debug?.getInPlacePathEditState() ?? null,
+      stagingPathAnchor:
+        debug?.getPrefabTimeline().stagingPose?.pathDraft?.segments[0]?.anchor ??
+        null,
       assetAnchor: asset?.bezierPath.segments[0]?.anchor ?? null,
     };
   });
 
-  expect(inPlaceDiscardedState.path?.hasDraft).toBe(false);
+  expect(inPlaceDiscardedState.path?.active).toBe(false);
+  expect(inPlaceDiscardedState.stagingPathAnchor).toEqual([-20, 0]);
   expect(inPlaceDiscardedState.assetAnchor).toEqual([-42, 0]);
+  await page.getByRole("button", { name: "Base Pose" }).click();
+  await expect(page.getByRole("button", { name: "Base Pose" })).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
+  await expect(page.locator("#transform-path-button")).toBeDisabled();
+  await page.getByLabel("Position X").fill("1.75");
+  await page.getByLabel("Position X").blur();
+  const basePoseEditedState = await page.evaluate(() => ({
+    basePosition: window.__vectorEditorDebug?.getPrefabAssembly().nodes[0]?.position ?? null,
+    selectedClipId: window.__vectorEditorDebug?.getPrefabTimeline().selectedClipId ?? null,
+    stagingPose: window.__vectorEditorDebug?.getPrefabTimeline().stagingPose ?? null,
+  }));
+
+  expect(basePoseEditedState.basePosition).toEqual([1.75, 1, 0]);
+  expect(basePoseEditedState.selectedClipId).toBeNull();
+  expect(basePoseEditedState.stagingPose).toBeNull();
+  await page.getByRole("button", { name: "Pose Check (1000 ms)" }).click();
+  expect(
+    await page.evaluate(
+      () =>
+        window.__vectorEditorDebug?.getPrefabTimeline().stagingPose?.pathDraft
+          ?.segments[0]?.anchor ?? null,
+    ),
+  ).toEqual([-20, 0]);
   await page.locator("#timeline-delete-clip-button").click();
   await page.getByLabel("Position X").fill("1.5");
   await page.getByLabel("Position X").blur();
@@ -698,12 +765,15 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     await page.evaluate(
       () => window.__vectorEditorDebug?.getPrefabAssembly().nodes[0]?.position,
     ),
-  ).toEqual([2, 1, 0]);
+  ).toEqual([0, 1, 0]);
+  expect(timelineState?.stagingPose?.transform.position).toEqual([2, 1, 0]);
   await page.locator("#timeline-snap-base-button").click();
   await expect
     .poll(async () =>
       page.evaluate(
-        () => window.__vectorEditorDebug?.getPrefabAssembly().nodes[0]?.position,
+        () =>
+          window.__vectorEditorDebug?.getPrefabTimeline().stagingPose?.transform
+            .position ?? null,
       ),
     )
     .toEqual([1, 1, 0]);

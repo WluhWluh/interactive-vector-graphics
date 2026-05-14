@@ -127,6 +127,17 @@ declare global {
           nodeId: string;
           path: StructuredBezierPathDebug;
         }>;
+        stagingPose: {
+          clipId: string;
+          nodeId: string;
+          transform: {
+            position: [number, number, number];
+            rotation: [number, number, number];
+            scale: [number, number, number];
+          };
+          hasPathDraft: boolean;
+          pathDraft: StructuredBezierPathDebug | null;
+        } | null;
       };
       getPathEditState: () => {
         assetId: string | null;
