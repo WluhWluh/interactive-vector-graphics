@@ -61,7 +61,6 @@ import {
   type SceneRecord,
 } from "./api";
 import {
-  createPathEditSession,
   dragPathEditControl as dragPathEditCoreControl,
   findNearestPathEditControl,
   getPathEditComponentPoint,
@@ -215,6 +214,14 @@ import {
   type PrefabClipboardMode,
 } from "./controllers/prefabAssemblyController";
 import {
+  createInPlacePathEditSession as createInPlacePathEditSessionForState,
+  createSourcePathEditSession,
+  getRestoredPathEditSelection,
+  isInPlacePathEditSessionValid,
+  type InPlacePathEditSession,
+  type SourcePathEditSession,
+} from "./controllers/pathEditController";
+import {
   createTimelineClip,
   deleteActiveTimelineClip,
   deleteTimelineKeyframe,
@@ -236,13 +243,6 @@ type TimelinePointerDrag = {
   property: PrefabTrackProperty;
 };
 type SceneCreateSource = "empty" | "current";
-type SourcePathEditSession = PathEditSession & {
-  assetId: string;
-};
-type InPlacePathEditSession = PathEditSession & {
-  nodeId: string;
-  assetId: string;
-};
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
   "position",
@@ -949,24 +949,15 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
   pathEditSession = null;
   pathEdit3DSession = null;
   threeViewport.clearCurve3DControls();
+  const sessionDraft = createSourcePathEditSession(asset);
 
-  if (asset.assetKind === "bezierCurve3d") {
-    pathEdit3DSession = {
-      assetId: asset.id,
-      draft: cloneStructuredBezierPath3D(asset.bezierPath3d),
-      selected: {
-        segmentId: asset.bezierPath3d.segments[0]?.id ?? "",
-        component: "anchor",
-      },
-    };
+  if (sessionDraft.mode === "3d") {
+    pathEdit3DSession = sessionDraft.session;
     threeViewport.setTransformMode("translate");
     threeViewport.setTransformControlsVisible(true);
     threeViewport.setOrbitControlsEnabled(true);
   } else {
-    pathEditSession = {
-      ...createPathEditSession(asset.bezierPath),
-      assetId: asset.id,
-    };
+    pathEditSession = sessionDraft.session;
   }
   pathEditDragState = null;
   exitPathTool();
@@ -1461,26 +1452,26 @@ function startInPlacePathEditSession(): boolean {
   }
 
   const stagingPose = getOrCreateTimelineStagingPose(selectedNode, activeClip, asset);
+  const sessionResult = createInPlacePathEditSessionForState({
+    selectedNode,
+    asset,
+    stagingPose,
+    previousSession: inPlacePathEditSession,
+  });
+
+  if (!sessionResult.ok) {
+    if (sessionResult.error) {
+      setImportError(new Error(sessionResult.error));
+    }
+    exitPathTool();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return false;
+  }
 
   pauseTimeline();
-  inPlacePathEditSession = {
-    draft: stagingPose.pathDraft
-      ? cloneStructuredBezierPath(stagingPose.pathDraft)
-      : cloneStructuredBezierPath(asset.bezierPath),
-    selected:
-      inPlacePathEditSession?.nodeId === selectedNode.id
-        ? inPlacePathEditSession.selected
-        : {
-            segmentId:
-              stagingPose.pathDraft?.segments[0]?.id ??
-              asset.bezierPath.segments[0]?.id ??
-              "",
-            component: "anchor",
-          },
-    nodeId: selectedNode.id,
-    assetId: asset.id,
-  };
-  stagingPose.pathDraft = cloneStructuredBezierPath(inPlacePathEditSession.draft);
+  inPlacePathEditSession = sessionResult.session;
+  stagingPose.pathDraft = cloneStructuredBezierPath(sessionResult.pathDraft);
   inPlacePathEditDragState = null;
   lastImportError = null;
   hideError();
@@ -2316,16 +2307,10 @@ function snapSelectedPrefabBaseToTimeline(): void {
     if (inPlacePathEditSession?.nodeId === selectedNode.id) {
       const previousSelection = inPlacePathEditSession.selected;
       inPlacePathEditSession.draft = cloneStructuredBezierPath(evaluatedPathForSnap);
-      inPlacePathEditSession.selected =
-      previousSelection &&
-      inPlacePathEditSession.draft.segments.some(
-        (segment) => segment.id === previousSelection.segmentId,
-      )
-        ? previousSelection
-        : {
-            segmentId: inPlacePathEditSession.draft.segments[0]?.id ?? "",
-            component: "anchor",
-          };
+      inPlacePathEditSession.selected = getRestoredPathEditSelection(
+        inPlacePathEditSession.draft,
+        previousSelection,
+      );
     }
   }
 
@@ -4206,14 +4191,20 @@ function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
   const stagingPose = getTimelineStagingPose(inPlacePathEditSession.nodeId, activeClip);
 
   if (
-    !activeClip ||
-    !node ||
-    node.kind !== "primitive" ||
-    node.id !== selectedPrefabNodeId ||
-    !asset ||
-    node.assetId !== asset.id ||
-    !stagingPose
+    !isInPlacePathEditSessionValid({
+      session: inPlacePathEditSession,
+      selectedNodeId: selectedPrefabNodeId,
+      node,
+      asset,
+      stagingPose,
+      hasActiveClip: Boolean(activeClip),
+    })
   ) {
+    exitPathTool();
+    return null;
+  }
+
+  if (!stagingPose) {
     exitPathTool();
     return null;
   }
