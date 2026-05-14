@@ -149,6 +149,15 @@ import {
 } from "./render/pathEditDrawing";
 import { renderTimelinePanel } from "./ui/timelinePanel";
 import {
+  appendAssetInspectorRows as appendAssetInspectorRowsForUi,
+  appendInspectorActionRow as appendInspectorActionRowForUi,
+  appendInspectorRow as appendInspectorRowForUi,
+  appendPathEditInspectorInputRow as appendPathEditInspectorInputRowForUi,
+  appendTransformInspectorRow as appendTransformInspectorRowForUi,
+  createPathEdit3DPointInputRow as createPathEdit3DPointInputRowForUi,
+  createPathEditPointInputRow as createPathEditPointInputRowForUi,
+} from "./ui/inspector";
+import {
   clonePrefabNode,
   cloneSceneNode,
   getPrefabNodeAndDescendantIds as getPrefabNodeAndDescendantIdsFromNodes,
@@ -3144,10 +3153,9 @@ function renderSourcePathEditPanel(): void {
 
     if (selectedSegment && pathEdit3DSession.selected) {
       elements.pathEditFields.append(
-        createPathEdit3DPointInputRow(
-          selectedSegment,
-          pathEdit3DSession.selected.component,
-        ),
+        createPathEdit3DPointInputRowForUi(selectedSegment, pathEdit3DSession.selected.component, {
+          onApply: applyPathEdit3DPointInput,
+        }),
       );
     }
     return;
@@ -3170,10 +3178,17 @@ function renderSourcePathEditPanel(): void {
 
   if (selectedSegment && pathEditSession.selected) {
     elements.pathEditFields.append(
-      createPathEditPointInputRow(
-        selectedSegment,
-        pathEditSession.selected.component,
-      ),
+      createPathEditPointInputRowForUi(selectedSegment, pathEditSession.selected.component, {
+        onApply: (input, segmentId, component, axisIndex) => {
+          applyPathEditPointInput(
+            input,
+            pathEditSession,
+            segmentId,
+            component,
+            axisIndex,
+          );
+        },
+      }),
     );
   }
 }
@@ -3292,38 +3307,7 @@ function renderSceneModeInspector(): void {
 }
 
 function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
-  if (!asset) {
-    appendInspectorRow("Asset", "No primitive selected");
-    return;
-  }
-
-  appendInspectorRow("Asset ID", asset.id);
-  appendInspectorRow("Type", asset.assetKind);
-  appendInspectorRow("Name", asset.name);
-  appendInspectorRow("Source", asset.sourceUrl);
-  appendInspectorRow("ViewBox", asset.viewBox.join(", "));
-  appendInspectorRow("Bezier Segments", String(asset.bezierPath.segments.length));
-  appendInspectorRow("Closed Path", asset.bezierPath.closed ? "true" : "false");
-
-  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
-    appendInspectorRow("Stroke", asset.stroke);
-    appendInspectorRow("Stroke Width", String(asset.strokeWidth));
-    appendInspectorRow("Line Cap", "round");
-    appendInspectorRow("Line Join", "round");
-    if (asset.assetKind === "bezierCurve3d") {
-      appendInspectorRow(
-        "3D Bezier Segments",
-        String(asset.bezierPath3d.segments.length),
-      );
-      appendInspectorRow("3D Source", "true");
-    }
-  } else {
-    appendInspectorRow("Fill", asset.fill);
-    appendInspectorRow("Fill Rule", asset.fillRule);
-  }
-
-  appendInspectorRow("Path Length", `${asset.pathD.length} chars`);
-  appendInspectorRow("Source Path Edit", "Use the Source Path Edit mode");
+  appendAssetInspectorRowsForUi(elements, asset);
 }
 
 function getAssetModeEditableTransform(node: PrefabNode): EditorTransformNode {
@@ -3384,141 +3368,31 @@ function appendPathEditInspectorInputRow(
   segment: BezierSegment,
   component: PathEditComponent,
 ): void {
-  const term = document.createElement("dt");
-  const description = document.createElement("dd");
-
-  term.textContent = label;
-  description.append(
-    createPathEditPointInputRow(segment, component, {
-      session,
-      ariaPrefix: "In-place path",
-      onApplied: () => {
-        syncInPlacePathSessionToStagingPose();
-        renderInspector();
-        exposeEditorDebugHooks();
-      },
-    }),
-  );
-  elements.inspectorFields.append(term, description);
-}
-
-function appendInspectorActionRow(label: string, onClick: () => void): void {
-  const term = document.createElement("dt");
-  const description = document.createElement("dd");
-  const button = document.createElement("button");
-
-  term.textContent = "Action";
-  button.type = "button";
-  button.className = "editor-button";
-  button.textContent = label;
-  button.addEventListener("click", onClick);
-  description.append(button);
-  elements.inspectorFields.append(term, description);
-}
-
-function appendInspectorRow(label: string, value: string): void {
-  const term = document.createElement("dt");
-  const description = document.createElement("dd");
-
-  term.textContent = label;
-  description.textContent = value;
-  elements.inspectorFields.append(term, description);
-}
-
-function createPathEditPointInputRow(
-  segment: BezierSegment,
-  component: PathEditComponent,
-  options?: {
-    session?: PathEditSession;
-    ariaPrefix?: string;
-    onApplied?: () => void;
-  },
-): HTMLDivElement {
-  const row = document.createElement("div");
-  const point = getPathEditComponentPoint(segment, component);
-  const session = options?.session ?? pathEditSession;
-  const ariaPrefix = options?.ariaPrefix ?? "Path";
-
-  row.className = "path-edit-point-row";
-
-  point.forEach((value, axisIndex) => {
-    const input = document.createElement("input");
-    const axisName = axisIndex === 0 ? "X" : "Y";
-
-    input.className = "transform-number-input";
-    input.type = "text";
-    input.inputMode = "decimal";
-    input.ariaLabel = `${ariaPrefix} ${component} ${axisName}`;
-    input.value = formatTransformValue(value);
-    input.addEventListener("focus", () => {
-      input.dataset.previousValue = input.value;
-    });
-    input.addEventListener("blur", () => {
+  appendPathEditInspectorInputRowForUi(elements, label, segment, component, {
+    ariaPrefix: "In-place path",
+    onApply: (input, segmentId, inputComponent, axisIndex) => {
       applyPathEditPointInput(
         input,
         session,
-        segment.id,
-        component,
+        segmentId,
+        inputComponent,
         axisIndex,
-        options?.onApplied,
+        () => {
+          syncInPlacePathSessionToStagingPose();
+          renderInspector();
+          exposeEditorDebugHooks();
+        },
       );
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        input.blur();
-      }
-
-      if (event.key === "Escape") {
-        input.value = input.dataset.previousValue ?? formatTransformValue(value);
-        input.blur();
-      }
-    });
-
-    row.append(input);
+    },
   });
-
-  return row;
 }
 
-function createPathEdit3DPointInputRow(
-  segment: BezierSegment3D,
-  component: PathEditComponent,
-): HTMLDivElement {
-  const row = document.createElement("div");
-  const point = getPathEdit3DComponentPoint(segment, component);
+function appendInspectorActionRow(label: string, onClick: () => void): void {
+  appendInspectorActionRowForUi(elements, label, onClick);
+}
 
-  row.className = "path-edit-point-row";
-
-  point.forEach((value, axisIndex) => {
-    const input = document.createElement("input");
-    const axisName = ["X", "Y", "Z"][axisIndex] ?? "?";
-
-    input.className = "transform-number-input";
-    input.type = "text";
-    input.inputMode = "decimal";
-    input.ariaLabel = `3D path ${component} ${axisName}`;
-    input.value = formatTransformValue(value);
-    input.addEventListener("focus", () => {
-      input.dataset.previousValue = input.value;
-    });
-    input.addEventListener("blur", () => {
-      applyPathEdit3DPointInput(input, segment.id, component, axisIndex);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        input.blur();
-      }
-
-      if (event.key === "Escape") {
-        input.value = input.dataset.previousValue ?? formatTransformValue(value);
-        input.blur();
-      }
-    });
-
-    row.append(input);
-  });
-
-  return row;
+function appendInspectorRow(label: string, value: string): void {
+  appendInspectorRowForUi(elements, label, value);
 }
 
 function applyPathEdit3DPointInput(
@@ -3608,46 +3482,9 @@ function appendTransformInspectorRow(
   node: EditorTransformNode,
   property: TransformProperty,
 ): void {
-  const term = document.createElement("dt");
-  const description = document.createElement("dd");
-  const editor = document.createElement("div");
-
-  term.textContent = label;
-  editor.className = "transform-input-row";
-
-  node[property].forEach((value, axisIndex) => {
-    const input = document.createElement("input");
-    const axisName = ["X", "Y", "Z"][axisIndex] ?? "?";
-
-    input.className = "transform-number-input";
-    input.type = "text";
-    input.inputMode = "decimal";
-    input.dataset.transformProperty = property;
-    input.dataset.transformAxis = axisName.toLowerCase();
-    input.ariaLabel = `${label} ${axisName}`;
-    input.value = formatTransformValue(value);
-    input.addEventListener("focus", () => {
-      input.dataset.previousValue = input.value;
-    });
-    input.addEventListener("blur", () => {
-      applyTransformInput(input, node.id, property, axisIndex);
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        input.blur();
-      }
-
-      if (event.key === "Escape") {
-        input.value = input.dataset.previousValue ?? formatTransformValue(value);
-        input.blur();
-      }
-    });
-
-    editor.append(input);
+  appendTransformInspectorRowForUi(elements, label, node, property, {
+    onApply: applyTransformInput,
   });
-
-  description.append(editor);
-  elements.inspectorFields.append(term, description);
 }
 
 function applyTransformInput(
