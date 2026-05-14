@@ -119,7 +119,6 @@ import {
   type TimelineStagingPruneOptions,
 } from "./timeline/stagingPose";
 import {
-  chooseStableSelection,
   formatTransformValue,
   roundTimelineNumber,
   roundTransformValue,
@@ -213,6 +212,12 @@ import {
   type PendingPrefabClipboard,
   type PrefabClipboardMode,
 } from "./controllers/prefabAssemblyController";
+import {
+  reconcileAssetSelection,
+  reconcilePrefabSelection,
+  reconcileProjectSelection,
+  reconcileSceneSelection,
+} from "./controllers/projectDataController";
 import {
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
   createSourcePathEditSession,
@@ -740,16 +745,13 @@ function scheduleCameraInspectorRender(): void {
 async function refreshProjects(): Promise<void> {
   try {
     projects = await listProjects();
-    const nextProjectId = chooseStableSelection(
-      selectedProjectId,
-      projects.map((project) => project.id),
-    );
+    const nextProject = reconcileProjectSelection(selectedProjectId, projects);
 
-    if (selectedProjectId !== nextProjectId) {
+    if (nextProject.shouldClearWorkspace) {
       clearProjectWorkspace();
     }
 
-    selectedProjectId = nextProjectId;
+    selectedProjectId = nextProject.nextSelectedProjectId;
     await refreshAssets();
     await refreshPrefabs();
     await refreshScenes();
@@ -770,23 +772,22 @@ async function refreshAssets(): Promise<void> {
   }
 
   assets = await listAssets(selectedProjectId);
-  selectedAssetId = chooseStableSelection(
+  const nextAsset = reconcileAssetSelection(
     selectedAssetId,
-    assets.map((asset) => asset.id),
+    assets,
+    pathEditSession?.assetId ?? null,
+    pathEdit3DSession?.assetId ?? null,
   );
-  if (
-    pathEditSession &&
-    !assets.some((asset) => asset.id === pathEditSession?.assetId)
-  ) {
+
+  selectedAssetId = nextAsset.nextSelectedAssetId;
+
+  if (nextAsset.missingPathEditAssetId) {
     pathEditSession = null;
     pathEditDragState = null;
     setImportError(new Error("Path edit asset no longer exists."));
     return;
   }
-  if (
-    pathEdit3DSession &&
-    !assets.some((asset) => asset.id === pathEdit3DSession?.assetId)
-  ) {
+  if (nextAsset.missingPathEdit3DAssetId) {
     pathEdit3DSession = null;
     threeViewport.clearCurve3DControls();
     setImportError(new Error("3D curve edit asset no longer exists."));
@@ -825,12 +826,14 @@ async function refreshPrefabs(): Promise<void> {
   );
 
   prefabDocuments = nextDocuments;
-  selectedPrefabId = chooseStableSelection(
+  const nextPrefab = reconcilePrefabSelection(
     selectedPrefabId,
-    prefabs.map((prefab) => prefab.id),
+    loadedPrefabId,
+    prefabs,
   );
+  selectedPrefabId = nextPrefab.nextSelectedPrefabId;
 
-  if (loadedPrefabId && !prefabs.some((prefab) => prefab.id === loadedPrefabId)) {
+  if (nextPrefab.missingLoadedPrefabId) {
     loadedPrefabId = null;
     prefabNodes = [];
     selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
@@ -857,12 +860,14 @@ async function refreshScenes(): Promise<void> {
   }
 
   scenes = await listScenes(selectedProjectId);
-  selectedSceneId = chooseStableSelection(
+  const nextScene = reconcileSceneSelection(
     selectedSceneId,
-    scenes.map((scene) => scene.id),
+    loadedSceneId,
+    scenes,
   );
+  selectedSceneId = nextScene.nextSelectedSceneId;
 
-  if (loadedSceneId && !scenes.some((scene) => scene.id === loadedSceneId)) {
+  if (nextScene.missingLoadedSceneId) {
     loadedSceneId = null;
   }
 
