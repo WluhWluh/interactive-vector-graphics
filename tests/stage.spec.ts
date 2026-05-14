@@ -1287,6 +1287,55 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     80,
     18,
   ]);
+  await page.evaluate(async () => {
+    const debug = window.__vectorEditorDebug;
+    const projectId = debug?.getSelectedProjectId();
+    const asset = debug
+      ?.getAssets()
+      .find((candidate) => candidate.id === "leg-stroke-3d-curve");
+
+    if (!projectId || !asset?.bezierPath3d) {
+      throw new Error("Missing 3D curve asset for depth sorting setup.");
+    }
+
+    const draft = structuredClone(asset.bezierPath3d);
+    const firstSegment = draft.segments[0];
+    const secondSegment = draft.segments[1];
+
+    if (!firstSegment || !secondSegment) {
+      throw new Error("Depth sorting setup requires a two-segment 3D curve.");
+    }
+
+    firstSegment.anchor[2] = -90;
+    firstSegment.handleOut[2] = 190;
+    secondSegment.handleIn[2] = 190;
+    secondSegment.anchor[2] = -90;
+
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/leg-stroke-3d-curve/curve3d`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bezierPath3d: draft }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+  });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "3D Curve: leg-stroke 3D Curve" })).toBeVisible();
+  await page.getByRole("button", { name: "3D Curve: leg-stroke 3D Curve" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () => window.__vectorEditorDebug?.getPathEditState().hasDraft ?? true,
+      ),
+    )
+    .toBe(false);
 
   await page.getByRole("button", { name: "Asset Assembly" }).click();
   await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
@@ -1294,6 +1343,37 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     page.getByRole("button", { name: /Primitive: leg-stroke 3D Curve/ }),
   ).toBeVisible();
   await expect(await countTealPixels(page.locator("#vector-canvas"))).toBeGreaterThan(200);
+
+  const depthFillSvg = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">',
+    '<path fill="#ffcf4a" d="M -50 -50 L 50 -50 L 50 50 L -50 50 Z" />',
+    "</svg>",
+  ].join("");
+
+  await fileInput.setInputFiles({
+    name: "depth-card.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from(depthFillSvg),
+  });
+  await expect(page.getByRole("button", { name: "Fill: depth-card" })).toBeVisible();
+  await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
+  await expect(page.getByRole("button", { name: /Primitive: depth-card/ })).toBeVisible();
+  await page.getByRole("button", { name: /Primitive: leg-stroke 3D Curve/ }).click();
+  await expect(page.locator("#inspector-fields")).toContainText("bezierCurve3d");
+  await page.getByLabel("Position Z").fill("0.25");
+  await page.getByLabel("Position Z").blur();
+
+  const curveDepthSortingState = await page.evaluate(
+    () => window.__vectorEditorDebug?.getCurveDepthSortingState() ?? null,
+  );
+
+  expect(curveDepthSortingState?.spans.length).toBeGreaterThan(0);
+  expect(curveDepthSortingState?.spans[0]?.curveId).toBe("prefab-node-1");
+  expect(curveDepthSortingState?.spans[0]?.occluderId).toBe("prefab-node-2");
+  expect(curveDepthSortingState?.spans[0]?.endT).toBeGreaterThan(
+    curveDepthSortingState?.spans[0]?.startT ?? 0,
+  );
+
   await page.getByRole("button", { name: "Source Path Edit" }).click();
   await page.getByRole("button", { name: "Stroke: leg-stroke" }).click();
   await page.locator("#edit-path-button").click();

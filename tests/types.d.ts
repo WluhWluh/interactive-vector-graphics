@@ -193,6 +193,27 @@ declare global {
           y: number;
         }>;
       };
+      getCurveDepthSortingState: () => {
+        spans: Array<{
+          curveId: string;
+          occluderId: string;
+          startT: number;
+          endT: number;
+          sampleCount: number;
+          medianCurveDepth: number;
+          occluderDepth: number;
+        }>;
+        candidates: Array<{
+          curveId: string;
+          occluderId: string;
+          sampleCount: number;
+          insideCount: number;
+          frontCount: number;
+          minCurveDepth: number;
+          maxCurveDepth: number;
+          occluderDepth: number;
+        }>;
+      };
       getExperimentScene: () => {
         camera: {
           projection: "perspective" | "orthographic";

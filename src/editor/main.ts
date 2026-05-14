@@ -16,6 +16,9 @@ import {
 import {
   drawProjectedCurveCommands,
   projectBezierPath3DToCommands,
+  projectBezierPath3DRangeToCommands,
+  projectBezierPath3DToDepthSamples,
+  type ProjectedCurveDepthSample,
   type ProjectedCurveCommand,
 } from "../core/assets/projectedBezier3d";
 import {
@@ -234,10 +237,62 @@ type DrawableBillboard = {
   pathOverride?: StructuredBezierPath;
 };
 
+type PreparedDrawableBillboard = DrawableBillboard & {
+  projected: { x: number; y: number; depth: number };
+  screenScale: number;
+};
+
 type RgbColor = {
   r: number;
   g: number;
   b: number;
+};
+
+type CurveDepthOccluder = {
+  id: string;
+  path: Path2D;
+  bounds: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  };
+  depth: number;
+};
+
+type CurveDepthOverlaySpan = {
+  curveId: string;
+  occluderId: string;
+  startT: number;
+  endT: number;
+  sampleCount: number;
+  medianCurveDepth: number;
+  occluderDepth: number;
+  commands: ProjectedCurveCommand[];
+  color: string;
+  strokeWidth: number;
+  opacity: number;
+};
+
+type CurveDepthDebugSpan = {
+  curveId: string;
+  occluderId: string;
+  startT: number;
+  endT: number;
+  sampleCount: number;
+  medianCurveDepth: number;
+  occluderDepth: number;
+};
+
+type CurveDepthDebugCandidate = {
+  curveId: string;
+  occluderId: string;
+  sampleCount: number;
+  insideCount: number;
+  frontCount: number;
+  minCurveDepth: number;
+  maxCurveDepth: number;
+  occluderDepth: number;
 };
 
 type PrefabNodeTreeEntry = {
@@ -283,6 +338,10 @@ const PREFAB_PROPERTY_TO_EDITOR_TOOL: Record<PrefabTrackProperty, EditorTool> = 
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
 const PATH_EDIT_HIT_RADIUS = 10;
+const CURVE_DEPTH_SAMPLE_SPACING_PX = 10;
+const CURVE_DEPTH_OVERLAY_EXTEND_PX = 8;
+const CURVE_DEPTH_EPSILON = 0.0005;
+const CURVE_DEPTH_MIN_FRONT_SPAN_PX = 12;
 
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
@@ -326,6 +385,8 @@ let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
 let nextPrefabNodeNumber = 1;
 let pendingCameraInspectorRender = false;
+let lastCurveDepthDebugSpans: CurveDepthDebugSpan[] = [];
+let lastCurveDepthDebugCandidates: CurveDepthDebugCandidate[] = [];
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
@@ -408,6 +469,10 @@ declare global {
         hoveredComponent: PathEditComponent | null;
         draftBezierPath: StructuredBezierPath | null;
         controls: PathEditScreenControl[];
+      };
+      getCurveDepthSortingState: () => {
+        spans: CurveDepthDebugSpan[];
+        candidates: CurveDepthDebugCandidate[];
       };
       getExperimentScene: () => {
         camera: {
@@ -4605,7 +4670,27 @@ function drawBillboards(
   context: CanvasRenderingContext2D,
   drawables: DrawableBillboard[],
 ): void {
-  const sortedDrawables = drawables
+  const sortedDrawables = prepareDrawableBillboards(drawables)
+    .sort((a, b) => {
+      const ghostOrder = Number(Boolean(a.ghost)) - Number(Boolean(b.ghost));
+
+      return ghostOrder === 0 ? b.projected.depth - a.projected.depth : ghostOrder;
+    });
+  const overlaySpans = buildCurveDepthOverlaySpans(sortedDrawables);
+
+  for (const drawable of sortedDrawables) {
+    drawBillboardNode(context, drawable);
+  }
+
+  for (const span of overlaySpans) {
+    drawCurveDepthOverlaySpan(context, span);
+  }
+}
+
+function prepareDrawableBillboards(
+  drawables: DrawableBillboard[],
+): PreparedDrawableBillboard[] {
+  return drawables
     .map((drawable) => {
       const worldPosition = tupleToVector(drawable.transform.position);
       const projected = threeViewport.projectWorldPosition(worldPosition, stage.size);
@@ -4620,16 +4705,7 @@ function drawBillboards(
         screenScale: threeViewport.getDistanceScale(worldPosition, 1),
       };
     })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .sort((a, b) => {
-      const ghostOrder = Number(Boolean(a.ghost)) - Number(Boolean(b.ghost));
-
-      return ghostOrder === 0 ? b.projected.depth - a.projected.depth : ghostOrder;
-    });
-
-  for (const drawable of sortedDrawables) {
-    drawBillboardNode(context, drawable);
-  }
+    .filter((entry): entry is PreparedDrawableBillboard => entry !== null);
 }
 
 function getBillboardWorldMatrix(drawable: DrawableBillboard): Matrix4 {
@@ -4727,6 +4803,530 @@ function drawBezierCurve3DBillboard(
     strokeProjectedCommandBounds(context, commands);
     context.restore();
   }
+}
+
+function buildCurveDepthOverlaySpans(
+  drawables: PreparedDrawableBillboard[],
+): CurveDepthOverlaySpan[] {
+  /**
+   * Experimental depth repair for 3D curves: draw the normal billboard stack
+   * first, then redraw only the visually front-facing curve spans above 2D
+   * occluders. This keeps the authored curve intact while avoiding a full
+   * per-fragment or geometry-splitting renderer.
+   */
+  const occluders = drawables.flatMap((drawable) =>
+    createCurveDepthOccluder(drawable),
+  );
+  const overlaySpans: CurveDepthOverlaySpan[] = [];
+  const debugSpans: CurveDepthDebugSpan[] = [];
+  const debugCandidates: CurveDepthDebugCandidate[] = [];
+
+  for (const drawable of drawables) {
+    if (!isPrepared3DCurveDrawable(drawable) || drawable.ghost || drawable.opacity === 0) {
+      continue;
+    }
+
+    const worldMatrix = getBillboardWorldMatrix(drawable);
+    const samples = projectBezierPath3DToDepthSamples(drawable.asset.bezierPath3d, {
+      camera: threeViewport.activeCamera,
+      viewport: stage.size,
+      worldMatrix,
+      sampleSpacingPx: CURVE_DEPTH_SAMPLE_SPACING_PX,
+    });
+
+    if (samples.length < 2) {
+      continue;
+    }
+
+    for (const occluder of occluders) {
+      if (occluder.id === drawable.id || !curveSamplesMayHitOccluder(samples, occluder)) {
+        continue;
+      }
+
+      debugCandidates.push(createCurveDepthDebugCandidate(drawable, samples, occluder));
+
+      for (const span of classifyCurveDepthOverlaySpans(
+        drawable,
+        samples,
+        occluder,
+        worldMatrix,
+      )) {
+        overlaySpans.push(span);
+        debugSpans.push({
+          curveId: span.curveId,
+          occluderId: span.occluderId,
+          startT: span.startT,
+          endT: span.endT,
+          sampleCount: span.sampleCount,
+          medianCurveDepth: span.medianCurveDepth,
+          occluderDepth: span.occluderDepth,
+        });
+      }
+    }
+  }
+
+  lastCurveDepthDebugSpans = debugSpans;
+  lastCurveDepthDebugCandidates = debugCandidates;
+  return overlaySpans;
+}
+
+function isPrepared3DCurveDrawable(
+  drawable: PreparedDrawableBillboard,
+): drawable is PreparedDrawableBillboard & {
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>;
+} {
+  return drawable.asset.assetKind === "bezierCurve3d";
+}
+
+function createCurveDepthOccluder(
+  drawable: PreparedDrawableBillboard,
+): CurveDepthOccluder[] {
+  if (drawable.ghost || drawable.opacity === 0 || drawable.asset.assetKind === "bezierCurve3d") {
+    return [];
+  }
+
+  const path = new Path2D();
+
+  if (!appendDrawableScreenPath(path, drawable)) {
+    return [];
+  }
+
+  const bounds = getDrawableScreenBounds(drawable);
+
+  if (!bounds) {
+    return [];
+  }
+
+  return [
+    {
+      id: drawable.id,
+      path,
+      bounds,
+      depth: drawable.projected.depth,
+    },
+  ];
+}
+
+function appendDrawableScreenPath(
+  path: Path2D,
+  drawable: PreparedDrawableBillboard,
+): boolean {
+  const asset = drawable.asset;
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
+  const assetScale = drawable.screenScale / largestDimension;
+  const matrix = new DOMMatrix()
+    .translate(drawable.projected.x, drawable.projected.y)
+    .rotate((drawable.transform.rotation[2] * 180) / Math.PI)
+    .scale(
+      assetScale * drawable.transform.scale[0],
+      assetScale * drawable.transform.scale[1],
+    )
+    .translate(-(viewBoxX + viewBoxWidth / 2), -(viewBoxY + viewBoxHeight / 2));
+
+  path.addPath(asset.path, matrix);
+  return true;
+}
+
+function getDrawableScreenBounds(
+  drawable: PreparedDrawableBillboard,
+): CurveDepthOccluder["bounds"] | null {
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = drawable.asset.viewBox;
+  const corners: BezierPoint[] = [
+    [viewBoxX, viewBoxY],
+    [viewBoxX + viewBoxWidth, viewBoxY],
+    [viewBoxX + viewBoxWidth, viewBoxY + viewBoxHeight],
+    [viewBoxX, viewBoxY + viewBoxHeight],
+  ];
+  const billboard = getBillboardScreenTransform(drawable.asset, drawable.transform);
+
+  if (!billboard) {
+    return null;
+  }
+
+  const points = corners.map((corner) => pathPointToBillboardScreen(corner, billboard));
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
+  };
+}
+
+function curveSamplesMayHitOccluder(
+  samples: ProjectedCurveDepthSample[],
+  occluder: CurveDepthOccluder,
+): boolean {
+  const bounds = samples.reduce(
+    (accumulator, sample) => ({
+      minX: Math.min(accumulator.minX, sample.point[0]),
+      minY: Math.min(accumulator.minY, sample.point[1]),
+      maxX: Math.max(accumulator.maxX, sample.point[0]),
+      maxY: Math.max(accumulator.maxY, sample.point[1]),
+    }),
+    {
+      minX: samples[0]?.point[0] ?? 0,
+      minY: samples[0]?.point[1] ?? 0,
+      maxX: samples[0]?.point[0] ?? 0,
+      maxY: samples[0]?.point[1] ?? 0,
+    },
+  );
+
+  return !(
+    bounds.maxX < occluder.bounds.minX ||
+    bounds.minX > occluder.bounds.maxX ||
+    bounds.maxY < occluder.bounds.minY ||
+    bounds.minY > occluder.bounds.maxY
+  );
+}
+
+function createCurveDepthDebugCandidate(
+  drawable: PreparedDrawableBillboard,
+  samples: ProjectedCurveDepthSample[],
+  occluder: CurveDepthOccluder,
+): CurveDepthDebugCandidate {
+  let insideCount = 0;
+  let frontCount = 0;
+  let minCurveDepth = Number.POSITIVE_INFINITY;
+  let maxCurveDepth = Number.NEGATIVE_INFINITY;
+
+  for (const sample of samples) {
+    minCurveDepth = Math.min(minCurveDepth, sample.depth);
+    maxCurveDepth = Math.max(maxCurveDepth, sample.depth);
+
+    if (pointIsInsideOccluder(sample.point, occluder)) {
+      insideCount += 1;
+    }
+
+    if (curveSampleIsVisibleInFrontOfOccluder(sample, occluder)) {
+      frontCount += 1;
+    }
+  }
+
+  return {
+    curveId: drawable.id,
+    occluderId: occluder.id,
+    sampleCount: samples.length,
+    insideCount,
+    frontCount,
+    minCurveDepth,
+    maxCurveDepth,
+    occluderDepth: occluder.depth,
+  };
+}
+
+function classifyCurveDepthOverlaySpans(
+  drawable: PreparedDrawableBillboard & {
+    asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>;
+  },
+  samples: ProjectedCurveDepthSample[],
+  occluder: CurveDepthOccluder,
+  worldMatrix: Matrix4,
+): CurveDepthOverlaySpan[] {
+  const rawSpans: Array<{ startT: number; endT: number; samples: ProjectedCurveDepthSample[] }> = [];
+  let activeSamples: ProjectedCurveDepthSample[] = [];
+  let activeStartT: number | null = null;
+
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = samples[index];
+
+    if (!sample) {
+      continue;
+    }
+
+    const visibleInFront = curveSampleIsVisibleInFrontOfOccluder(
+      sample,
+      occluder,
+    );
+
+    if (visibleInFront && activeSamples.length === 0) {
+      const previous = samples[index - 1] ?? sample;
+      activeStartT = refineCurveVisibilityBoundaryT(previous, sample, occluder);
+    }
+
+    if (visibleInFront) {
+      activeSamples.push(sample);
+      continue;
+    }
+
+    if (activeSamples.length > 0) {
+      const previous = samples[index - 1] ?? sample;
+      rawSpans.push({
+        startT: activeStartT ?? activeSamples[0]!.t,
+        endT: refineCurveVisibilityBoundaryT(previous, sample, occluder),
+        samples: activeSamples,
+      });
+      activeSamples = [];
+      activeStartT = null;
+    }
+  }
+
+  if (activeSamples.length > 0) {
+    rawSpans.push({
+      startT: activeStartT ?? activeSamples[0]!.t,
+      endT: activeSamples[activeSamples.length - 1]!.t,
+      samples: activeSamples,
+    });
+  }
+
+  const mergedSpans = mergeNearbyCurveDepthSpans(rawSpans);
+  const overlaySpans: CurveDepthOverlaySpan[] = [];
+
+  for (const span of mergedSpans) {
+    const medianCurveDepth = median(span.samples.map((sample) => sample.depth));
+    const approximateLength = estimateSampleSpanLength(span.samples);
+
+    if (
+      approximateLength < CURVE_DEPTH_MIN_FRONT_SPAN_PX
+    ) {
+      continue;
+    }
+
+    const expanded = expandCurveSpanByScreenPixels(
+      span.startT,
+      span.endT,
+      samples,
+      CURVE_DEPTH_OVERLAY_EXTEND_PX,
+    );
+    const commands = projectBezierPath3DRangeToCommands(
+      drawable.asset.bezierPath3d,
+      expanded.startT,
+      expanded.endT,
+      {
+        camera: threeViewport.activeCamera,
+        viewport: stage.size,
+        worldMatrix,
+      },
+    );
+
+    if (commands.length === 0) {
+      continue;
+    }
+
+    overlaySpans.push({
+      curveId: drawable.id,
+      occluderId: occluder.id,
+      startT: expanded.startT,
+      endT: expanded.endT,
+      sampleCount: span.samples.length,
+      medianCurveDepth,
+      occluderDepth: occluder.depth,
+      commands,
+      color: drawable.asset.stroke,
+      strokeWidth: drawable.asset.strokeWidth,
+      opacity: drawable.opacity ?? 1,
+    });
+  }
+
+  return overlaySpans;
+}
+
+function curveSampleIsVisibleInFrontOfOccluder(
+  sample: ProjectedCurveDepthSample,
+  occluder: CurveDepthOccluder,
+): boolean {
+  return (
+    sample.depth < occluder.depth - CURVE_DEPTH_EPSILON &&
+    pointIsInsideOccluder(sample.point, occluder)
+  );
+}
+
+function pointIsInsideOccluder(
+  point: BezierPoint,
+  occluder: CurveDepthOccluder,
+): boolean {
+  if (
+    point[0] < occluder.bounds.minX ||
+    point[0] > occluder.bounds.maxX ||
+    point[1] < occluder.bounds.minY ||
+    point[1] > occluder.bounds.maxY
+  ) {
+    return false;
+  }
+
+  return screenPathContainsPoint(occluder.path, point);
+}
+
+function refineCurveVisibilityBoundaryT(
+  outsideSample: ProjectedCurveDepthSample,
+  insideSample: ProjectedCurveDepthSample,
+  occluder: CurveDepthOccluder,
+): number {
+  let low = outsideSample;
+  let high = insideSample;
+  const visibleAtHigh = curveSampleIsVisibleInFrontOfOccluder(high, occluder);
+
+  if (!visibleAtHigh) {
+    low = insideSample;
+    high = outsideSample;
+  }
+
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    const mid = interpolateDepthSample(low, high, 0.5);
+
+    if (
+      curveSampleIsVisibleInFrontOfOccluder(mid, occluder) === visibleAtHigh
+    ) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+
+  return high.t;
+}
+
+function interpolateDepthSample(
+  start: ProjectedCurveDepthSample,
+  end: ProjectedCurveDepthSample,
+  progress: number,
+): ProjectedCurveDepthSample {
+  return {
+    t: roundTimelineNumber(start.t + (end.t - start.t) * progress),
+    point: [
+      roundTransformValue(start.point[0] + (end.point[0] - start.point[0]) * progress),
+      roundTransformValue(start.point[1] + (end.point[1] - start.point[1]) * progress),
+    ],
+    depth: roundTransformValue(start.depth + (end.depth - start.depth) * progress),
+  };
+}
+
+function mergeNearbyCurveDepthSpans(
+  spans: Array<{ startT: number; endT: number; samples: ProjectedCurveDepthSample[] }>,
+): Array<{ startT: number; endT: number; samples: ProjectedCurveDepthSample[] }> {
+  const merged: Array<{ startT: number; endT: number; samples: ProjectedCurveDepthSample[] }> = [];
+
+  for (const span of spans) {
+    const previous = merged[merged.length - 1];
+
+    if (!previous) {
+      merged.push(span);
+      continue;
+    }
+
+    const gap = span.startT - previous.endT;
+
+    if (gap <= 0.012) {
+      previous.endT = Math.max(previous.endT, span.endT);
+      previous.samples.push(...span.samples);
+    } else {
+      merged.push(span);
+    }
+  }
+
+  return merged;
+}
+
+function expandCurveSpanByScreenPixels(
+  startT: number,
+  endT: number,
+  samples: ProjectedCurveDepthSample[],
+  pixels: number,
+): { startT: number; endT: number } {
+  const startIndex = findNearestSampleIndex(samples, startT);
+  const endIndex = findNearestSampleIndex(samples, endT);
+  let expandedStartIndex = startIndex;
+  let expandedEndIndex = endIndex;
+  let backwardLength = 0;
+  let forwardLength = 0;
+
+  while (expandedStartIndex > 0 && backwardLength < pixels) {
+    backwardLength += distanceBetweenSamples(
+      samples[expandedStartIndex]!,
+      samples[expandedStartIndex - 1]!,
+    );
+    expandedStartIndex -= 1;
+  }
+
+  while (expandedEndIndex < samples.length - 1 && forwardLength < pixels) {
+    forwardLength += distanceBetweenSamples(
+      samples[expandedEndIndex]!,
+      samples[expandedEndIndex + 1]!,
+    );
+    expandedEndIndex += 1;
+  }
+
+  return {
+    startT: Math.max(0, Math.min(startT, samples[expandedStartIndex]?.t ?? startT)),
+    endT: Math.min(1, Math.max(endT, samples[expandedEndIndex]?.t ?? endT)),
+  };
+}
+
+function findNearestSampleIndex(
+  samples: ProjectedCurveDepthSample[],
+  targetT: number,
+): number {
+  let nearestIndex = 0;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  samples.forEach((sample, index) => {
+    const distance = Math.abs(sample.t - targetT);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  });
+
+  return nearestIndex;
+}
+
+function estimateSampleSpanLength(samples: ProjectedCurveDepthSample[]): number {
+  let length = 0;
+
+  for (let index = 1; index < samples.length; index += 1) {
+    length += distanceBetweenSamples(samples[index - 1]!, samples[index]!);
+  }
+
+  return length;
+}
+
+function distanceBetweenSamples(
+  left: ProjectedCurveDepthSample,
+  right: ProjectedCurveDepthSample,
+): number {
+  return Math.hypot(right.point[0] - left.point[0], right.point[1] - left.point[1]);
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length === 0) {
+    return 0;
+  }
+
+  if (sorted.length % 2 === 1) {
+    return sorted[middle] ?? 0;
+  }
+
+  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
+}
+
+function drawCurveDepthOverlaySpan(
+  context: CanvasRenderingContext2D,
+  span: CurveDepthOverlaySpan,
+): void {
+  context.save();
+  context.globalAlpha *= span.opacity;
+  context.strokeStyle = span.color;
+  context.lineWidth = span.strokeWidth;
+  context.lineCap = "butt";
+  context.lineJoin = "round";
+  context.setLineDash([]);
+  context.beginPath();
+  drawProjectedCurveCommands(context, span.commands);
+  context.stroke();
+  context.restore();
+}
+
+function screenPathContainsPoint(path: Path2D, point: BezierPoint): boolean {
+  const context = stage.getLayer("paper-canvas").context;
+
+  return context.isPointInPath(path, point[0], point[1]);
 }
 
 function createPrimitiveAssetPathPreview(
@@ -6781,6 +7381,10 @@ function exposeEditorDebugHooks(): void {
         ? cloneStructuredBezierPath(inPlacePathEditSession.draft)
         : null,
       controls: getInPlacePathEditScreenControls(),
+    }),
+    getCurveDepthSortingState: () => ({
+      spans: lastCurveDepthDebugSpans.map((span) => ({ ...span })),
+      candidates: lastCurveDepthDebugCandidates.map((candidate) => ({ ...candidate })),
     }),
     getExperimentScene: () => {
       const camera = threeViewport.getCameraSnapshot();
