@@ -1,5 +1,6 @@
 import {
   AmbientLight,
+  BoxGeometry,
   AxesHelper,
   BufferGeometry,
   Color,
@@ -16,6 +17,7 @@ import {
   PlaneGeometry,
   Raycaster,
   Scene,
+  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -65,12 +67,36 @@ type NodeProxy = {
   edgeLines: LineSegments;
 };
 
+export type Curve3DControlComponent = "anchor" | "handleIn" | "handleOut";
+
+export type Curve3DControlDescriptor = {
+  id: string;
+  segmentId: string;
+  component: Curve3DControlComponent;
+  position: Vector3Tuple;
+  selected: boolean;
+};
+
+export type Curve3DHandleLineDescriptor = {
+  start: Vector3Tuple;
+  end: Vector3Tuple;
+};
+
+type Curve3DControlProxy = {
+  id: string;
+  segmentId: string;
+  component: Curve3DControlComponent;
+  mesh: Mesh;
+};
+
 const DEFAULT_CAMERA_POSITION = new Vector3(4.5, 3.2, 5.2);
 const DEFAULT_CAMERA_TARGET = new Vector3(0, 0.8, 0);
 const PERSPECTIVE_FOV = 45;
 const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 120;
 const ORTHOGRAPHIC_HALF_HEIGHT = 3.5;
+const CURVE_3D_ANCHOR_GEOMETRY = new SphereGeometry(0.035, 16, 10);
+const CURVE_3D_HANDLE_GEOMETRY = new BoxGeometry(0.07, 0.07, 0.07);
 
 export class ThreeEditorViewport {
   private readonly backgroundCanvas: HTMLCanvasElement;
@@ -98,8 +124,10 @@ export class ThreeEditorViewport {
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly proxies = new Map<string, NodeProxy>();
+  private readonly curve3DControls = new Map<string, Curve3DControlProxy>();
   private readonly pointerDownPosition = new Vector2();
   private readonly scaleDragStart = new Vector3(1, 1, 1);
+  private curve3DHandleLines: LineSegments | null = null;
   private shiftKeyPressed = false;
   private transformControlsVisible = true;
   private orbitDisabledForTransformPointer = false;
@@ -107,8 +135,15 @@ export class ThreeEditorViewport {
   private projection: CameraProjection = "perspective";
   private transformMode: TransformMode = "translate";
   private selectedNodeId: string | null = null;
+  private selectedCurve3DControlId: string | null = null;
   private onSelectionChange: ((nodeId: string | null) => void) | null = null;
   private onObjectTransform: ((nodeId: string) => void) | null = null;
+  private onCurve3DControlSelection:
+    | ((controlId: string | null) => void)
+    | null = null;
+  private onCurve3DControlTransform:
+    | ((controlId: string, position: Vector3Tuple) => void)
+    | null = null;
   private onCameraChange: (() => void) | null = null;
 
   constructor() {
@@ -164,6 +199,19 @@ export class ThreeEditorViewport {
       }
     });
     this.transformControls.addEventListener("objectChange", () => {
+      if (this.selectedCurve3DControlId) {
+        const proxy = this.curve3DControls.get(this.selectedCurve3DControlId);
+
+        if (proxy) {
+          proxy.mesh.updateMatrixWorld();
+          this.onCurve3DControlTransform?.(
+            this.selectedCurve3DControlId,
+            vectorToTuple(proxy.mesh.position),
+          );
+        }
+        return;
+      }
+
       if (this.selectedNodeId) {
         this.applyShiftUniformScale();
         this.onObjectTransform?.(this.selectedNodeId);
@@ -235,10 +283,16 @@ export class ThreeEditorViewport {
   setCallbacks(callbacks: {
     onSelectionChange: (nodeId: string | null) => void;
     onObjectTransform: (nodeId: string) => void;
+    onCurve3DControlSelection?: (controlId: string | null) => void;
+    onCurve3DControlTransform?: (controlId: string, position: Vector3Tuple) => void;
     onCameraChange?: () => void;
   }): void {
     this.onSelectionChange = callbacks.onSelectionChange;
     this.onObjectTransform = callbacks.onObjectTransform;
+    this.onCurve3DControlSelection =
+      callbacks.onCurve3DControlSelection ?? null;
+    this.onCurve3DControlTransform =
+      callbacks.onCurve3DControlTransform ?? null;
     this.onCameraChange = callbacks.onCameraChange ?? null;
   }
 
@@ -311,6 +365,89 @@ export class ThreeEditorViewport {
     this.setSelectedNode(null);
   }
 
+  setCurve3DControls(
+    controls: Curve3DControlDescriptor[],
+    handleLines: Curve3DHandleLineDescriptor[],
+  ): void {
+    const nextIds = new Set(controls.map((control) => control.id));
+
+    for (const [controlId, proxy] of [...this.curve3DControls]) {
+      if (nextIds.has(controlId)) {
+        continue;
+      }
+
+      this.overlayScene.remove(proxy.mesh);
+      disposeObject(proxy.mesh);
+      this.curve3DControls.delete(controlId);
+
+      if (this.selectedCurve3DControlId === controlId) {
+        this.selectedCurve3DControlId = null;
+        this.transformControls.detach();
+      }
+    }
+
+    for (const control of controls) {
+      const existing = this.curve3DControls.get(control.id);
+      const proxy = existing ?? createCurve3DControlProxy(control);
+
+      proxy.segmentId = control.segmentId;
+      proxy.component = control.component;
+      proxy.mesh.position.fromArray(control.position);
+      proxy.mesh.userData.curveControlId = control.id;
+      proxy.mesh.userData.segmentId = control.segmentId;
+      proxy.mesh.userData.component = control.component;
+      updateCurve3DControlMaterial(proxy, control.selected);
+
+      if (!existing) {
+        this.curve3DControls.set(control.id, proxy);
+        this.overlayScene.add(proxy.mesh);
+      }
+    }
+
+    this.setCurve3DHandleLines(handleLines);
+
+    if (
+      this.selectedCurve3DControlId &&
+      !this.curve3DControls.has(this.selectedCurve3DControlId)
+    ) {
+      this.setSelectedCurve3DControl(null);
+    } else if (this.selectedCurve3DControlId && this.transformControlsVisible) {
+      const proxy = this.curve3DControls.get(this.selectedCurve3DControlId);
+
+      if (proxy) {
+        this.transformControls.attach(proxy.mesh);
+      }
+    }
+  }
+
+  clearCurve3DControls(): void {
+    this.setSelectedCurve3DControl(null);
+
+    for (const proxy of this.curve3DControls.values()) {
+      this.overlayScene.remove(proxy.mesh);
+      disposeObject(proxy.mesh);
+    }
+
+    this.curve3DControls.clear();
+    this.setCurve3DHandleLines([]);
+  }
+
+  setSelectedCurve3DControl(controlId: string | null): void {
+    this.selectedCurve3DControlId = controlId;
+
+    if (controlId) {
+      this.selectedNodeId = null;
+    }
+
+    const proxy = controlId ? this.curve3DControls.get(controlId) : null;
+
+    if (proxy && this.transformControlsVisible) {
+      this.transformControls.attach(proxy.mesh);
+    } else {
+      this.transformControls.detach();
+    }
+  }
+
   syncNodeFromProxy(node: EditorTransformNode): void {
     const proxy = this.proxies.get(node.id);
 
@@ -336,10 +473,21 @@ export class ThreeEditorViewport {
 
   setSelectedNode(nodeId: string | null): void {
     this.selectedNodeId = nodeId;
+    if (nodeId) {
+      this.selectedCurve3DControlId = null;
+    }
     const proxy = nodeId ? this.proxies.get(nodeId) : null;
 
     if (proxy && this.transformControlsVisible) {
       this.transformControls.attach(proxy.root);
+    } else if (
+      this.selectedCurve3DControlId &&
+      this.transformControlsVisible &&
+      this.curve3DControls.has(this.selectedCurve3DControlId)
+    ) {
+      this.transformControls.attach(
+        this.curve3DControls.get(this.selectedCurve3DControlId)!.mesh,
+      );
     } else {
       this.transformControls.detach();
     }
@@ -386,9 +534,14 @@ export class ThreeEditorViewport {
     this.transformControls.enabled = visible;
 
     if (visible) {
+      const curveProxy = this.selectedCurve3DControlId
+        ? this.curve3DControls.get(this.selectedCurve3DControlId)
+        : null;
       const proxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
 
-      if (proxy) {
+      if (curveProxy) {
+        this.transformControls.attach(curveProxy.mesh);
+      } else if (proxy) {
         this.transformControls.attach(proxy.root);
       }
     } else {
@@ -532,6 +685,26 @@ export class ThreeEditorViewport {
     );
     this.raycaster.setFromCamera(this.pointer, this.activeCamera);
 
+    const curveIntersection = this.raycaster.intersectObjects(
+      [...this.curve3DControls.values()].map((proxy) => proxy.mesh),
+      false,
+    )[0];
+    const curveControlId = curveIntersection?.object.userData.curveControlId as
+      | string
+      | undefined;
+
+    if (curveControlId) {
+      this.setSelectedCurve3DControl(curveControlId);
+      this.onCurve3DControlSelection?.(curveControlId);
+      return;
+    }
+
+    if (this.curve3DControls.size > 0) {
+      this.setSelectedCurve3DControl(null);
+      this.onCurve3DControlSelection?.(null);
+      return;
+    }
+
     const hitMeshes = [...this.proxies.values()].map((proxy) => proxy.hitMesh);
     const intersection = this.raycaster.intersectObjects(hitMeshes, false)[0];
     const nodeId = intersection?.object.userData.nodeId as string | undefined;
@@ -606,6 +779,34 @@ export class ThreeEditorViewport {
       y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
       button: event.button,
     } as unknown as PointerEvent;
+  }
+
+  private setCurve3DHandleLines(lines: Curve3DHandleLineDescriptor[]): void {
+    if (this.curve3DHandleLines) {
+      this.overlayScene.remove(this.curve3DHandleLines);
+      disposeObject(this.curve3DHandleLines);
+      this.curve3DHandleLines = null;
+    }
+
+    if (lines.length === 0) {
+      return;
+    }
+
+    const points = lines.flatMap((line) => [
+      tupleToVector(line.start),
+      tupleToVector(line.end),
+    ]);
+    const geometry = new BufferGeometry().setFromPoints(points);
+    const material = new LineBasicMaterial({
+      color: 0xeef4ff,
+      transparent: true,
+      opacity: 0.58,
+      depthTest: false,
+    });
+
+    this.curve3DHandleLines = new LineSegments(geometry, material);
+    this.curve3DHandleLines.renderOrder = 14;
+    this.overlayScene.add(this.curve3DHandleLines);
   }
 }
 
@@ -689,6 +890,41 @@ function createNodeProxy(
     hitMesh: root,
     edgeLines,
   };
+}
+
+function createCurve3DControlProxy(
+  control: Curve3DControlDescriptor,
+): Curve3DControlProxy {
+  const mesh = new Mesh(
+    control.component === "anchor"
+      ? CURVE_3D_ANCHOR_GEOMETRY.clone()
+      : CURVE_3D_HANDLE_GEOMETRY.clone(),
+    new MeshBasicMaterial({
+      color: control.selected ? 0xffcf4a : 0x5bc4bf,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+
+  mesh.renderOrder = 15;
+  mesh.userData.curveControlId = control.id;
+  mesh.userData.segmentId = control.segmentId;
+  mesh.userData.component = control.component;
+
+  return {
+    id: control.id,
+    segmentId: control.segmentId,
+    component: control.component,
+    mesh,
+  };
+}
+
+function updateCurve3DControlMaterial(
+  proxy: Curve3DControlProxy,
+  selected: boolean,
+): void {
+  const material = proxy.mesh.material as MeshBasicMaterial;
+  material.color.set(selected ? 0xffcf4a : 0x5bc4bf);
 }
 
 function applyNodeTransform(root: Object3D, node: EditorTransformNode): void {

@@ -2,9 +2,10 @@ import {
   parsePathDToStructuredBezier,
   type StructuredBezierPath,
 } from "./structuredBezierPath";
+import type { StructuredBezierPath3D } from "./structuredBezierPath3d";
 
 export type PrimitiveFillRule = "nonzero" | "evenodd";
-export type PrimitiveAssetKind = "filledPath" | "strokePath";
+export type PrimitiveAssetKind = "filledPath" | "strokePath" | "bezierCurve3d";
 
 export type PrimitiveAssetManifestEntry = {
   id: string;
@@ -39,9 +40,17 @@ export type StrokePrimitiveSvgAsset = PrimitiveSvgAssetBase & {
   strokeWidth: number;
 };
 
+export type BezierCurve3DPrimitiveSvgAsset = PrimitiveSvgAssetBase & {
+  assetKind: "bezierCurve3d";
+  stroke: string;
+  strokeWidth: number;
+  bezierPath3d: StructuredBezierPath3D;
+};
+
 export type PrimitiveSvgAsset =
   | FilledPrimitiveSvgAsset
-  | StrokePrimitiveSvgAsset;
+  | StrokePrimitiveSvgAsset
+  | BezierCurve3DPrimitiveSvgAsset;
 
 export type SvgImportContext = {
   id: string;

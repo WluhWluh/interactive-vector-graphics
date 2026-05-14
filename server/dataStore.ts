@@ -16,6 +16,12 @@ import {
   validateStructuredBezierPath,
   type StructuredBezierPath,
 } from "../src/core/assets/structuredBezierPath";
+import {
+  convertStructuredBezierPathTo3D,
+  projectStructuredBezierPath3DTo2D,
+  validateStructuredBezierPath3D,
+  type StructuredBezierPath3D,
+} from "../src/core/assets/structuredBezierPath3d";
 import { validatePrefabDocument } from "./prefabDocument";
 import { validateSceneDocument } from "./sceneDocument";
 
@@ -24,9 +30,10 @@ const DATABASE_FILE_NAME = "ivg.sqlite";
 const SCENES_DIR_NAME = "scenes";
 const PREFABS_DIR_NAME = "prefabs";
 
-type StoredPrimitiveAssetRow = Omit<StoredPrimitiveAsset, "viewBox" | "bezierPath"> & {
+type StoredPrimitiveAssetRow = Omit<StoredPrimitiveAsset, "viewBox" | "bezierPath" | "bezierPath3d"> & {
   viewBox: string;
   bezierPath: string | null;
+  bezierPath3d: string | null;
 };
 
 export type CreatePrimitiveAssetInput = {
@@ -72,6 +79,15 @@ export type DataStore = {
     projectId: string,
     assetId: string,
     bezierPath: StructuredBezierPath,
+  ) => Promise<StoredPrimitiveAsset>;
+  convertPrimitiveAssetTo3DCurve: (
+    projectId: string,
+    assetId: string,
+  ) => Promise<StoredPrimitiveAsset>;
+  updatePrimitiveAssetCurve3D: (
+    projectId: string,
+    assetId: string,
+    bezierPath3d: StructuredBezierPath3D,
   ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
   listPrefabs: (projectId: string) => PrefabRecord[];
@@ -138,6 +154,7 @@ export function createDataStore(dataDir: string): DataStore {
         stroke TEXT,
         strokeWidth REAL,
         bezierPath TEXT,
+        bezierPath3d TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
         PRIMARY KEY (projectId, id),
@@ -173,6 +190,7 @@ export function createDataStore(dataDir: string): DataStore {
     ensurePrimitiveAssetColumn("stroke", "TEXT");
     ensurePrimitiveAssetColumn("strokeWidth", "REAL");
     ensurePrimitiveAssetColumn("bezierPath", "TEXT");
+    ensurePrimitiveAssetColumn("bezierPath3d", "TEXT");
   }
 
   function close(): void {
@@ -238,7 +256,7 @@ export function createDataStore(dataDir: string): DataStore {
       .prepare(
         `
         SELECT id, projectId, name, sourceFilename, sourcePath, assetKind,
-          viewBox, pathD, fill, fillRule, stroke, strokeWidth, bezierPath,
+          viewBox, pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d,
           createdAt, updatedAt
         FROM primitive_assets
         WHERE projectId = ?
@@ -267,6 +285,7 @@ export function createDataStore(dataDir: string): DataStore {
       assetKind: input.assetKind,
       viewBox: input.viewBox,
       bezierPath: input.bezierPath,
+      bezierPath3d: null,
       fill: input.fill,
       fillRule: input.fillRule,
       stroke: input.stroke,
@@ -286,6 +305,7 @@ export function createDataStore(dataDir: string): DataStore {
       stroke: input.stroke,
       strokeWidth: input.strokeWidth,
       bezierPath: input.bezierPath,
+      bezierPath3d: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -297,10 +317,10 @@ export function createDataStore(dataDir: string): DataStore {
         `
         INSERT INTO primitive_assets (
           id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
-          pathD, fill, fillRule, stroke, strokeWidth, bezierPath, createdAt,
+          pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d, createdAt,
           updatedAt
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -317,6 +337,7 @@ export function createDataStore(dataDir: string): DataStore {
         asset.stroke,
         asset.strokeWidth,
         JSON.stringify(asset.bezierPath),
+        null,
         asset.createdAt,
         asset.updatedAt,
       );
@@ -330,6 +351,9 @@ export function createDataStore(dataDir: string): DataStore {
     bezierPath: StructuredBezierPath,
   ): Promise<StoredPrimitiveAsset> {
     const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
+    if (existingAsset.assetKind === "bezierCurve3d") {
+      throw new Error("3D curve assets must be updated through the curve3d API.");
+    }
     const expectedClosed = existingAsset.assetKind === "filledPath";
     const validatedBezierPath = validateStructuredBezierPath(bezierPath, {
       expectedClosed,
@@ -338,6 +362,7 @@ export function createDataStore(dataDir: string): DataStore {
       assetKind: existingAsset.assetKind,
       viewBox: existingAsset.viewBox,
       bezierPath: validatedBezierPath,
+      bezierPath3d: null,
       fill: existingAsset.fill,
       fillRule: existingAsset.fillRule,
       stroke: existingAsset.stroke,
@@ -367,6 +392,141 @@ export function createDataStore(dataDir: string): DataStore {
       .run(
         updatedAsset.pathD,
         JSON.stringify(updatedAsset.bezierPath),
+        updatedAsset.updatedAt,
+        projectId,
+        assetId,
+      );
+
+    return updatedAsset;
+  }
+
+  async function convertPrimitiveAssetTo3DCurve(
+    projectId: string,
+    assetId: string,
+  ): Promise<StoredPrimitiveAsset> {
+    const sourceAsset = getPrimitiveAssetRecord(projectId, assetId);
+
+    if (sourceAsset.assetKind !== "strokePath") {
+      throw new Error("Only strokePath assets can be converted to 3D curves.");
+    }
+
+    const bezierPath3d = convertStructuredBezierPathTo3D(sourceAsset.bezierPath);
+    const projectedBezierPath = projectStructuredBezierPath3DTo2D(bezierPath3d);
+    const name = `${sourceAsset.name} 3D Curve`;
+    const newAssetId = createUniqueAssetId(projectId, name);
+    const timestamp = new Date().toISOString();
+    const sourcePath = join(getProjectDir(projectId), "primitives", `${newAssetId}.svg`);
+    const relativeSourcePath = toDataRelativePath(sourcePath);
+    const normalized = createNormalizedPrimitiveSvg({
+      assetKind: "bezierCurve3d",
+      viewBox: sourceAsset.viewBox,
+      bezierPath: projectedBezierPath,
+      bezierPath3d,
+      fill: "none",
+      fillRule: "nonzero",
+      stroke: sourceAsset.stroke,
+      strokeWidth: sourceAsset.strokeWidth,
+    });
+    const asset: StoredPrimitiveAsset = {
+      ...sourceAsset,
+      id: newAssetId,
+      name,
+      sourceFilename: `${newAssetId}.svg`,
+      sourcePath: relativeSourcePath,
+      assetKind: "bezierCurve3d",
+      pathD: normalized.pathD,
+      fill: "none",
+      fillRule: "nonzero",
+      bezierPath: projectedBezierPath,
+      bezierPath3d,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+
+    await mkdir(dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, normalized.svgText, "utf8");
+    database
+      .prepare(
+        `
+        INSERT INTO primitive_assets (
+          id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
+          pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d, createdAt,
+          updatedAt
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      )
+      .run(
+        asset.id,
+        asset.projectId,
+        asset.name,
+        asset.sourceFilename,
+        asset.sourcePath,
+        asset.assetKind,
+        JSON.stringify(asset.viewBox),
+        asset.pathD,
+        asset.fill,
+        asset.fillRule,
+        asset.stroke,
+        asset.strokeWidth,
+        JSON.stringify(asset.bezierPath),
+        JSON.stringify(asset.bezierPath3d),
+        asset.createdAt,
+        asset.updatedAt,
+      );
+
+    return asset;
+  }
+
+  async function updatePrimitiveAssetCurve3D(
+    projectId: string,
+    assetId: string,
+    bezierPath3d: StructuredBezierPath3D,
+  ): Promise<StoredPrimitiveAsset> {
+    const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
+
+    if (existingAsset.assetKind !== "bezierCurve3d") {
+      throw new Error("Only 3D curve assets can be updated through the curve3d API.");
+    }
+
+    const validatedBezierPath3d = validateStructuredBezierPath3D(bezierPath3d);
+    const projectedBezierPath = projectStructuredBezierPath3DTo2D(validatedBezierPath3d);
+    const normalized = createNormalizedPrimitiveSvg({
+      assetKind: "bezierCurve3d",
+      viewBox: existingAsset.viewBox,
+      bezierPath: projectedBezierPath,
+      bezierPath3d: validatedBezierPath3d,
+      fill: "none",
+      fillRule: "nonzero",
+      stroke: existingAsset.stroke,
+      strokeWidth: existingAsset.strokeWidth,
+    });
+    const timestamp = new Date().toISOString();
+    const updatedAsset: StoredPrimitiveAsset = {
+      ...existingAsset,
+      pathD: normalized.pathD,
+      bezierPath: projectedBezierPath,
+      bezierPath3d: validatedBezierPath3d,
+      updatedAt: timestamp,
+    };
+
+    await writeFile(
+      join(resolvedDataDir, existingAsset.sourcePath),
+      normalized.svgText,
+      "utf8",
+    );
+    database
+      .prepare(
+        `
+        UPDATE primitive_assets
+        SET pathD = ?, bezierPath = ?, bezierPath3d = ?, updatedAt = ?
+        WHERE projectId = ? AND id = ?
+      `,
+      )
+      .run(
+        updatedAsset.pathD,
+        JSON.stringify(updatedAsset.bezierPath),
+        JSON.stringify(updatedAsset.bezierPath3d),
         updatedAsset.updatedAt,
         projectId,
         assetId,
@@ -668,7 +828,7 @@ export function createDataStore(dataDir: string): DataStore {
       .prepare(
         `
         SELECT id, projectId, name, sourceFilename, sourcePath, assetKind,
-          viewBox, pathD, fill, fillRule, stroke, strokeWidth, bezierPath,
+          viewBox, pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d,
           createdAt, updatedAt
         FROM primitive_assets
         WHERE projectId = ? AND id = ?
@@ -748,6 +908,8 @@ export function createDataStore(dataDir: string): DataStore {
     listPrimitiveAssets,
     createPrimitiveAsset,
     updatePrimitiveAssetPath,
+    convertPrimitiveAssetTo3DCurve,
+    updatePrimitiveAssetCurve3D,
     deletePrimitiveAsset,
     listPrefabs,
     createPrefab,
@@ -785,20 +947,31 @@ export function getServerPort(): number {
 function hydratePrimitiveAssetRow(
   row: StoredPrimitiveAssetRow,
 ): StoredPrimitiveAsset {
-  const assetKind = row.assetKind === "strokePath" ? "strokePath" : "filledPath";
+  const assetKind =
+    row.assetKind === "bezierCurve3d"
+      ? "bezierCurve3d"
+      : row.assetKind === "strokePath"
+        ? "strokePath"
+        : "filledPath";
   const expectedClosed = assetKind === "filledPath";
+  const bezierPath3d =
+    assetKind === "bezierCurve3d"
+      ? readStoredBezierPath3D(row.bezierPath3d)
+      : null;
 
   return {
     ...row,
     assetKind,
     viewBox: JSON.parse(row.viewBox) as [number, number, number, number],
     fillRule: row.fillRule === "evenodd" ? "evenodd" : "nonzero",
-    stroke: assetKind === "strokePath" ? row.stroke : null,
+    stroke: assetKind === "strokePath" || assetKind === "bezierCurve3d" ? row.stroke : null,
     strokeWidth:
-      assetKind === "strokePath" && typeof row.strokeWidth === "number"
+      (assetKind === "strokePath" || assetKind === "bezierCurve3d") &&
+      typeof row.strokeWidth === "number"
         ? row.strokeWidth
         : null,
     bezierPath: readStoredBezierPath(row.bezierPath, row.pathD, expectedClosed),
+    bezierPath3d,
   };
 }
 
@@ -814,6 +987,14 @@ function readStoredBezierPath(
   }
 
   return parsePathDToStructuredBezier(pathD, { expectedClosed });
+}
+
+function readStoredBezierPath3D(value: string | null): StructuredBezierPath3D {
+  if (!value) {
+    throw new Error("3D curve asset is missing structured 3D Bezier data.");
+  }
+
+  return validateStructuredBezierPath3D(JSON.parse(value) as StructuredBezierPath3D);
 }
 
 function createUniqueId(baseId: string, existingIds: Set<string>): string {

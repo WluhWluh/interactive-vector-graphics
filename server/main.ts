@@ -5,8 +5,10 @@ import { validatePrefabDocument } from "./prefabDocument";
 import { importPrimitiveSvgOnServer } from "./primitiveSvgImport";
 import { validateSceneDocument } from "./sceneDocument";
 import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
+import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 import type {
   AssetsResponse,
+  ConvertAssetTo3DCurveResponse,
   CreateAssetResponse,
   CreatePrefabResponse,
   CreateProjectResponse,
@@ -17,6 +19,7 @@ import type {
   ProjectsResponse,
   SceneDetailResponse,
   ScenesResponse,
+  UpdateAssetCurve3DResponse,
   UpdateAssetPathResponse,
 } from "./types";
 
@@ -181,6 +184,57 @@ server.put<{
     reply.code(400);
     return {
       error: error instanceof Error ? error.message : "Asset path update failed.",
+    };
+  }
+});
+
+server.post<{
+  Params: { projectId: string; assetId: string };
+  Reply: ConvertAssetTo3DCurveResponse | { error: string };
+}>(
+  "/api/projects/:projectId/assets/:assetId/convert-to-3d-curve",
+  async (request, reply) => {
+    await dataStore.ensureReady();
+
+    try {
+      const asset = await dataStore.convertPrimitiveAssetTo3DCurve(
+        request.params.projectId,
+        request.params.assetId,
+      );
+
+      return { asset };
+    } catch (error) {
+      reply.code(400);
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "3D curve conversion failed.",
+      };
+    }
+  },
+);
+
+server.put<{
+  Params: { projectId: string; assetId: string };
+  Body: { bezierPath3d?: unknown };
+  Reply: UpdateAssetCurve3DResponse | { error: string };
+}>("/api/projects/:projectId/assets/:assetId/curve3d", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const asset = await dataStore.updatePrimitiveAssetCurve3D(
+      request.params.projectId,
+      request.params.assetId,
+      request.body?.bezierPath3d as StructuredBezierPath3D,
+    );
+
+    return { asset };
+  } catch (error) {
+    reply.code(400);
+    return {
+      error:
+        error instanceof Error ? error.message : "3D curve update failed.",
     };
   }
 });

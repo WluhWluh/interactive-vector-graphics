@@ -1,4 +1,5 @@
 import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
+import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 
 export type ProjectRecord = {
   id: string;
@@ -10,7 +11,7 @@ export type ProjectRecord = {
 export type StoredPrimitiveAsset = {
   id: string;
   projectId: string;
-  assetKind: "filledPath" | "strokePath";
+  assetKind: "filledPath" | "strokePath" | "bezierCurve3d";
   name: string;
   sourceFilename: string;
   sourcePath: string;
@@ -21,6 +22,7 @@ export type StoredPrimitiveAsset = {
   stroke: string | null;
   strokeWidth: number | null;
   bezierPath: StructuredBezierPath;
+  bezierPath3d: StructuredBezierPath3D | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -194,6 +196,14 @@ export type CreateAssetResponse = {
 };
 
 export type UpdateAssetPathResponse = {
+  asset: StoredPrimitiveAsset;
+};
+
+export type ConvertAssetTo3DCurveResponse = {
+  asset: StoredPrimitiveAsset;
+};
+
+export type UpdateAssetCurve3DResponse = {
   asset: StoredPrimitiveAsset;
 };
 

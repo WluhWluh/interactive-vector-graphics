@@ -14,7 +14,19 @@ import {
   drawPrimitivePreview,
 } from "../core/stage/primitivePreview";
 import {
+  drawProjectedCurveCommands,
+  projectBezierPath3DToCommands,
+  type ProjectedCurveCommand,
+} from "../core/assets/projectedBezier3d";
+import {
+  cloneStructuredBezierPath3D,
+  type BezierPoint3D,
+  type BezierSegment3D,
+  type StructuredBezierPath3D,
+} from "../core/assets/structuredBezierPath3d";
+import {
   createPrefab,
+  convertAssetTo3DCurve,
   createProject,
   createScene,
   deleteAsset,
@@ -30,6 +42,7 @@ import {
   savePrefab,
   saveScene,
   updateAssetPath,
+  updateAssetCurve3D,
   uploadAsset,
   type PrefabAnimation,
   type PrefabAnimationClip,
@@ -75,6 +88,9 @@ import {
   ThreeEditorViewport,
   tupleToVector,
   type CameraProjection,
+  type Curve3DControlComponent,
+  type Curve3DControlDescriptor,
+  type Curve3DHandleLineDescriptor,
   type EditorTransformNode,
   type TransformMode,
   type Vector3Tuple,
@@ -103,6 +119,15 @@ type PendingPrefabClipboard = {
 };
 type SourcePathEditSession = PathEditSession & {
   assetId: string;
+};
+type SourcePathEdit3DSelection = {
+  segmentId: string;
+  component: PathEditComponent;
+};
+type SourcePathEdit3DSession = {
+  assetId: string;
+  draft: StructuredBezierPath3D;
+  selected: SourcePathEdit3DSelection | null;
 };
 type InPlacePathEditSession = PathEditSession & {
   nodeId: string;
@@ -174,6 +199,7 @@ type EditorElements = {
   assetList: HTMLUListElement;
   pathAssetList: HTMLUListElement;
   editPathButton: HTMLButtonElement;
+  create3DCurveButton: HTMLButtonElement;
   savePathButton: HTMLButtonElement;
   cancelPathButton: HTMLButtonElement;
   pathEditFields: HTMLDivElement;
@@ -288,6 +314,7 @@ let loadedSceneId: string | null = null;
 let selectedSceneNodeId: string | null = null;
 let pendingPrefabClipboard: PendingPrefabClipboard | null = null;
 let pathEditSession: SourcePathEditSession | null = null;
+let pathEdit3DSession: SourcePathEdit3DSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
 let pathEditHoveredControl: PathEditDragState | null = null;
 let inPlacePathEditSession: InPlacePathEditSession | null = null;
@@ -322,6 +349,7 @@ declare global {
         stroke: string | null;
         strokeWidth: number | null;
         bezierPath: StructuredBezierPath;
+        bezierPath3d: StructuredBezierPath3D | null;
         pathD: string;
       }>;
       getPrefabs: () => PrefabRecord[];
@@ -356,6 +384,7 @@ declare global {
         } | null;
       };
       getPathEditState: () => {
+        is3d: boolean;
         assetId: string | null;
         selectedSegmentId: string | null;
         selectedComponent: PathEditComponent | null;
@@ -363,7 +392,10 @@ declare global {
         hoveredComponent: PathEditComponent | null;
         hasDraft: boolean;
         draftBezierPath: StructuredBezierPath | null;
+        draftBezierPath3d: StructuredBezierPath3D | null;
         controls: PathEditScreenControl[];
+        controls3d: Curve3DControlDescriptor[];
+        projectedCommandCount: number;
       };
       getInPlacePathEditState: () => {
         nodeId: string | null;
@@ -629,6 +661,9 @@ function bindEditorEvents(): void {
   elements.cancelPathButton.addEventListener("click", () => {
     cancelPathEditSession();
   });
+  elements.create3DCurveButton.addEventListener("click", () => {
+    void create3DCurveCopyFromSelectedAsset();
+  });
   elements.fileInput.addEventListener("change", () => {
     void importSelectedFile();
   });
@@ -688,6 +723,12 @@ function bindEditorEvents(): void {
       syncNodeFromViewport(nodeId);
       renderEditorShell();
       exposeEditorDebugHooks();
+    },
+    onCurve3DControlSelection: (controlId) => {
+      selectSourcePathEdit3DControlById(controlId);
+    },
+    onCurve3DControlTransform: (controlId, position) => {
+      updateSourcePathEdit3DControlPosition(controlId, position);
     },
     onCameraChange: () => {
       if (editorMode === "scene") {
@@ -765,6 +806,15 @@ async function refreshAssets(): Promise<void> {
     pathEditSession = null;
     pathEditDragState = null;
     setImportError(new Error("Path edit asset no longer exists."));
+    return;
+  }
+  if (
+    pathEdit3DSession &&
+    !assets.some((asset) => asset.id === pathEdit3DSession?.assetId)
+  ) {
+    pathEdit3DSession = null;
+    threeViewport.clearCurve3DControls();
+    setImportError(new Error("3D curve edit asset no longer exists."));
     return;
   }
   renderEditorShell();
@@ -884,22 +934,30 @@ async function deleteSelectedProject(): Promise<void> {
 }
 
 async function savePathEditSession(): Promise<void> {
-  if (!selectedProjectId || !pathEditSession) {
+  if (!selectedProjectId || (!pathEditSession && !pathEdit3DSession)) {
     return;
   }
 
   try {
-    const updatedAsset = await updateAssetPath(
-      selectedProjectId,
-      pathEditSession.assetId,
-      pathEditSession.draft,
-    );
+    const updatedAsset = pathEdit3DSession
+      ? await updateAssetCurve3D(
+          selectedProjectId,
+          pathEdit3DSession.assetId,
+          pathEdit3DSession.draft,
+        )
+      : await updateAssetPath(
+          selectedProjectId,
+          pathEditSession!.assetId,
+          pathEditSession!.draft,
+        );
     assets = assets.map((asset) =>
       asset.id === updatedAsset.id ? updatedAsset : asset,
     );
     selectedAssetId = updatedAsset.id;
     pathEditSession = null;
+    pathEdit3DSession = null;
     pathEditDragState = null;
+    threeViewport.clearCurve3DControls();
     lastImportError = null;
     hideError();
     rebuildViewportProxies();
@@ -913,10 +971,28 @@ async function savePathEditSession(): Promise<void> {
 function startPathEditSession(asset: PrimitiveSvgAsset): void {
   selectedAssetId = asset.id;
   editorMode = "path";
-  pathEditSession = {
-    ...createPathEditSession(asset.bezierPath),
-    assetId: asset.id,
-  };
+  pathEditSession = null;
+  pathEdit3DSession = null;
+  threeViewport.clearCurve3DControls();
+
+  if (asset.assetKind === "bezierCurve3d") {
+    pathEdit3DSession = {
+      assetId: asset.id,
+      draft: cloneStructuredBezierPath3D(asset.bezierPath3d),
+      selected: {
+        segmentId: asset.bezierPath3d.segments[0]?.id ?? "",
+        component: "anchor",
+      },
+    };
+    threeViewport.setTransformMode("translate");
+    threeViewport.setTransformControlsVisible(true);
+    threeViewport.setOrbitControlsEnabled(true);
+  } else {
+    pathEditSession = {
+      ...createPathEditSession(asset.bezierPath),
+      assetId: asset.id,
+    };
+  }
   pathEditDragState = null;
   exitPathTool();
   lastImportError = null;
@@ -927,9 +1003,41 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
 
 function cancelPathEditSession(): void {
   pathEditSession = null;
+  pathEdit3DSession = null;
   pathEditDragState = null;
+  threeViewport.clearCurve3DControls();
   renderEditorShell();
   exposeEditorDebugHooks();
+}
+
+async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
+  if (!selectedProjectId || !selectedAssetId) {
+    return;
+  }
+
+  const asset = getSelectedAsset();
+
+  if (asset?.assetKind !== "strokePath") {
+    setImportError(new Error("Only strokePath assets can be converted to 3D curves."));
+    return;
+  }
+
+  try {
+    const convertedAsset = await convertAssetTo3DCurve(
+      selectedProjectId,
+      selectedAssetId,
+    );
+    assets = [...assets, convertedAsset];
+    selectedAssetId = convertedAsset.id;
+    lastImportError = null;
+    hideError();
+    startPathEditSession(convertedAsset);
+    await refreshAssets();
+    selectedAssetId = convertedAsset.id;
+    startPathEditSession(convertedAsset);
+  } catch (error) {
+    setImportError(error);
+  }
 }
 
 async function importSelectedFile(): Promise<void> {
@@ -972,6 +1080,10 @@ async function deleteSelectedAsset(): Promise<void> {
     if (pathEditSession?.assetId === deletedAssetId) {
       pathEditSession = null;
       pathEditDragState = null;
+    }
+    if (pathEdit3DSession?.assetId === deletedAssetId) {
+      pathEdit3DSession = null;
+      threeViewport.clearCurve3DControls();
     }
     if (inPlacePathEditSession?.assetId === deletedAssetId) {
       exitPathTool();
@@ -1368,6 +1480,14 @@ function startInPlacePathEditSession(): boolean {
     return false;
   }
 
+  if (asset.assetKind === "bezierCurve3d") {
+    setImportError(new Error("3D curve path keyframes are not supported yet."));
+    exitPathTool();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+    return false;
+  }
+
   const stagingPose = getOrCreateTimelineStagingPose(selectedNode, activeClip, asset);
 
   pauseTimeline();
@@ -1415,6 +1535,13 @@ function setEditorMode(mode: EditorMode): void {
   if (mode !== "asset" || editorMode !== "asset") {
     exitPathTool();
   }
+  if (mode !== "path") {
+    pathEditSession = null;
+    pathEdit3DSession = null;
+    pathEditDragState = null;
+    pathEditHoveredControl = null;
+    threeViewport.clearCurve3DControls();
+  }
   editorMode = mode;
   rebuildViewportProxies();
   renderEditorShell();
@@ -1439,7 +1566,9 @@ function clearProjectWorkspace(): void {
   loadedSceneId = null;
   selectedSceneNodeId = null;
   pathEditSession = null;
+  pathEdit3DSession = null;
   pathEditDragState = null;
+  threeViewport.clearCurve3DControls();
   nextPrefabNodeNumber = 1;
   nextSceneNodeNumber = 1;
   threeViewport.clearNodes();
@@ -1450,6 +1579,9 @@ function clearSceneLayout(): void {
   selectedSceneNodeId = null;
   loadedSceneId = null;
   pathEditDragState = null;
+  if (editorMode !== "path") {
+    threeViewport.clearCurve3DControls();
+  }
   nextSceneNodeNumber = 1;
 
   if (editorMode === "scene") {
@@ -1527,6 +1659,10 @@ function rebuildViewportProxies(): void {
   threeViewport.clearNodes();
 
   if (!selectedProjectId) {
+    return;
+  }
+
+  if (editorMode === "path") {
     return;
   }
 
@@ -2967,6 +3103,10 @@ function getEditorElements(): EditorElements {
     assetList: getRequiredElement("asset-list", HTMLUListElement),
     pathAssetList: getRequiredElement("path-asset-list", HTMLUListElement),
     editPathButton: getRequiredElement("edit-path-button", HTMLButtonElement),
+    create3DCurveButton: getRequiredElement(
+      "create-3d-curve-button",
+      HTMLButtonElement,
+    ),
     savePathButton: getRequiredElement("save-path-button", HTMLButtonElement),
     cancelPathButton: getRequiredElement("cancel-path-button", HTMLButtonElement),
     pathEditFields: getRequiredElement("path-edit-fields", HTMLDivElement),
@@ -3041,6 +3181,9 @@ function renderEditorShell(): void {
   document.body.dataset.pathEditActive = String(
     editorMode === "path" && Boolean(pathEditSession),
   );
+  document.body.dataset.pathEdit3dActive = String(
+    editorMode === "path" && Boolean(pathEdit3DSession),
+  );
   const validInPlacePathEditSession =
     editorMode === "asset" &&
     activeEditorTool === "path" &&
@@ -3102,8 +3245,10 @@ function renderEditorShell(): void {
   elements.deleteAssetButton.disabled = !selectedProjectId || !selectedAssetId;
   elements.deleteSceneNodeButton.disabled = !selectedSceneNodeId;
   elements.editPathButton.disabled = !selectedProjectId || !selectedAssetId;
-  elements.savePathButton.disabled = !pathEditSession;
-  elements.cancelPathButton.disabled = !pathEditSession;
+  elements.create3DCurveButton.disabled =
+    !selectedProjectId || getSelectedAsset()?.assetKind !== "strokePath";
+  elements.savePathButton.disabled = !pathEditSession && !pathEdit3DSession;
+  elements.cancelPathButton.disabled = !pathEditSession && !pathEdit3DSession;
   elements.projectionToggleButton.textContent =
     threeViewport.currentProjection === "perspective"
       ? "Perspective"
@@ -3162,7 +3307,7 @@ function renderAssetList(): void {
       button.className = "asset-list-item";
       button.dataset.assetId = asset.id;
       button.dataset.selected = String(asset.id === selectedAssetId);
-      button.textContent = `${asset.assetKind === "strokePath" ? "Stroke" : "Fill"}: ${asset.name}`;
+      button.textContent = `${getAssetKindListLabel(asset)}: ${asset.name}`;
       button.addEventListener("click", () => {
         selectedAssetId = asset.id;
         renderEditorShell();
@@ -3184,12 +3329,16 @@ function renderPathAssetList(): void {
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.selected = String(asset.id === selectedAssetId);
-      button.textContent = `${asset.assetKind === "strokePath" ? "Stroke" : "Fill"}: ${asset.name}`;
+      button.textContent = `${getAssetKindListLabel(asset)}: ${asset.name}`;
       button.addEventListener("click", () => {
         selectedAssetId = asset.id;
         if (pathEditSession && pathEditSession.assetId !== asset.id) {
           pathEditSession = null;
           pathEditDragState = null;
+        }
+        if (pathEdit3DSession && pathEdit3DSession.assetId !== asset.id) {
+          pathEdit3DSession = null;
+          threeViewport.clearCurve3DControls();
         }
         renderEditorShell();
         exposeEditorDebugHooks();
@@ -3571,8 +3720,29 @@ function renderSourcePathEditPanel(): void {
     return;
   }
 
+  if (pathEdit3DSession && pathEdit3DSession.assetId === selectedAsset.id) {
+    const selectedSegment = getSelectedPathEdit3DSegment(pathEdit3DSession);
+    status.textContent = pathEdit3DSession.selected
+      ? `${pathEdit3DSession.selected.segmentId} / ${pathEdit3DSession.selected.component} / 3D`
+      : "Select a 3D anchor or handle";
+    elements.pathEditFields.append(status);
+
+    if (selectedSegment && pathEdit3DSession.selected) {
+      elements.pathEditFields.append(
+        createPathEdit3DPointInputRow(
+          selectedSegment,
+          pathEdit3DSession.selected.component,
+        ),
+      );
+    }
+    return;
+  }
+
   if (!pathEditSession || pathEditSession.assetId !== selectedAsset.id) {
-    status.textContent = "Click Edit Path to edit the selected asset source.";
+    status.textContent =
+      selectedAsset.assetKind === "bezierCurve3d"
+        ? "Click Edit Path to edit this 3D source curve."
+        : "Click Edit Path to edit the selected asset source.";
     elements.pathEditFields.append(status);
     return;
   }
@@ -3720,11 +3890,18 @@ function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
   appendInspectorRow("Bezier Segments", String(asset.bezierPath.segments.length));
   appendInspectorRow("Closed Path", asset.bezierPath.closed ? "true" : "false");
 
-  if (asset.assetKind === "strokePath") {
+  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
     appendInspectorRow("Stroke", asset.stroke);
     appendInspectorRow("Stroke Width", String(asset.strokeWidth));
     appendInspectorRow("Line Cap", "round");
     appendInspectorRow("Line Join", "round");
+    if (asset.assetKind === "bezierCurve3d") {
+      appendInspectorRow(
+        "3D Bezier Segments",
+        String(asset.bezierPath3d.segments.length),
+      );
+      appendInspectorRow("3D Source", "true");
+    }
   } else {
     appendInspectorRow("Fill", asset.fill);
     appendInspectorRow("Fill Rule", asset.fillRule);
@@ -3886,6 +4063,88 @@ function createPathEditPointInputRow(
   });
 
   return row;
+}
+
+function createPathEdit3DPointInputRow(
+  segment: BezierSegment3D,
+  component: PathEditComponent,
+): HTMLDivElement {
+  const row = document.createElement("div");
+  const point = getPathEdit3DComponentPoint(segment, component);
+
+  row.className = "path-edit-point-row";
+
+  point.forEach((value, axisIndex) => {
+    const input = document.createElement("input");
+    const axisName = ["X", "Y", "Z"][axisIndex] ?? "?";
+
+    input.className = "transform-number-input";
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.ariaLabel = `3D path ${component} ${axisName}`;
+    input.value = formatTransformValue(value);
+    input.addEventListener("focus", () => {
+      input.dataset.previousValue = input.value;
+    });
+    input.addEventListener("blur", () => {
+      applyPathEdit3DPointInput(input, segment.id, component, axisIndex);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        input.blur();
+      }
+
+      if (event.key === "Escape") {
+        input.value = input.dataset.previousValue ?? formatTransformValue(value);
+        input.blur();
+      }
+    });
+
+    row.append(input);
+  });
+
+  return row;
+}
+
+function applyPathEdit3DPointInput(
+  input: HTMLInputElement,
+  segmentId: string,
+  component: PathEditComponent,
+  axisIndex: number,
+): void {
+  const segment = getPathEdit3DSegment(pathEdit3DSession, segmentId);
+  const parsedValue = Number(input.value.trim());
+
+  if (!pathEdit3DSession || !segment || !Number.isFinite(parsedValue)) {
+    restorePathEdit3DPointInput(input, segment, component, axisIndex);
+    return;
+  }
+
+  const point = getPathEdit3DComponentPoint(segment, component);
+  point[axisIndex] = roundBezierValue(parsedValue);
+
+  if (component === "anchor") {
+    segment.anchor = point;
+  } else {
+    segment[component] = point;
+  }
+
+  pathEdit3DSession.selected = { segmentId, component };
+  syncSourcePathEdit3DControls();
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
+function restorePathEdit3DPointInput(
+  input: HTMLInputElement,
+  segment: BezierSegment3D | null,
+  component: PathEditComponent,
+  axisIndex: number,
+): void {
+  const point = segment ? getPathEdit3DComponentPoint(segment, component) : null;
+  input.value = point
+    ? formatTransformValue(point[axisIndex] ?? 0)
+    : (input.dataset.previousValue ?? "");
 }
 
 function applyPathEditPointInput(
@@ -4055,6 +4314,7 @@ function renderPreviewFrame(): void {
     return;
   }
 
+  threeViewport.clearCurve3DControls();
   threeViewport.render(stage.size);
 
   const context = stage.getLayer("vector-canvas").context;
@@ -4075,7 +4335,15 @@ function renderPreviewFrame(): void {
 
     const selectedAsset = getSelectedAsset();
     if (selectedAsset) {
-      drawPrimitivePreview(context, stage.size, selectedAsset);
+      if (selectedAsset.assetKind === "bezierCurve3d") {
+        drawSourcePathEdit3DPreview(
+          context,
+          selectedAsset,
+          selectedAsset.bezierPath3d,
+        );
+      } else {
+        drawPrimitivePreview(context, stage.size, selectedAsset);
+      }
       return;
     }
 
@@ -4097,17 +4365,45 @@ function renderPathEditFrame(): void {
   const vectorContext = stage.getLayer("vector-canvas").context;
   const paperContext = stage.getLayer("paper-canvas").context;
   const asset = pathEditSession ? getAssetById(pathEditSession.assetId) : null;
+  const asset3d = pathEdit3DSession
+    ? getAssetById(pathEdit3DSession.assetId)
+    : null;
 
   if (!selectedProjectId) {
     drawCenteredStatus(vectorContext, stage.size, "Create or select a project");
     return;
   }
 
+  if (pathEdit3DSession) {
+    threeViewport.render(stage.size);
+
+    if (!asset3d || asset3d.assetKind !== "bezierCurve3d") {
+      drawCenteredStatus(vectorContext, stage.size, "3D curve asset is missing");
+      threeViewport.clearCurve3DControls();
+      return;
+    }
+
+    drawSourcePathEdit3DPreview(vectorContext, asset3d, pathEdit3DSession.draft);
+    syncSourcePathEdit3DControls();
+    return;
+  }
+
+  threeViewport.clearCurve3DControls();
+
   if (!pathEditSession) {
     const selectedAsset = getSelectedAsset();
 
     if (selectedAsset) {
-      drawPrimitivePreview(vectorContext, stage.size, selectedAsset);
+      if (selectedAsset.assetKind === "bezierCurve3d") {
+        threeViewport.render(stage.size);
+        drawSourcePathEdit3DPreview(
+          vectorContext,
+          selectedAsset,
+          selectedAsset.bezierPath3d,
+        );
+      } else {
+        drawPrimitivePreview(vectorContext, stage.size, selectedAsset);
+      }
       drawCenteredStatus(paperContext, stage.size, "Click Edit Path to edit source curves");
       return;
     }
@@ -4336,6 +4632,12 @@ function drawBillboards(
   }
 }
 
+function getBillboardWorldMatrix(drawable: DrawableBillboard): Matrix4 {
+  return transformToMatrix(drawable.transform).multiply(
+    getAsset3DLocalToWorldUnitMatrix(drawable.asset),
+  );
+}
+
 function drawBillboardNode(
   context: CanvasRenderingContext2D,
   drawable: DrawableBillboard & {
@@ -4360,6 +4662,11 @@ function drawBillboardNode(
     : asset;
   const ghostColor = ghost ? getPrimitiveGhostColor(asset) : null;
 
+  if (asset.assetKind === "bezierCurve3d") {
+    drawBezierCurve3DBillboard(context, drawable, asset, ghostColor ?? undefined);
+    return;
+  }
+
   context.save();
   context.globalAlpha *= opacity;
   context.translate(projected.x, projected.y);
@@ -4381,6 +4688,47 @@ function drawBillboardNode(
   context.restore();
 }
 
+function drawBezierCurve3DBillboard(
+  context: CanvasRenderingContext2D,
+  drawable: DrawableBillboard & {
+    projected: { x: number; y: number };
+    screenScale: number;
+  },
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>,
+  colorOverride?: string,
+): void {
+  const commands = projectBezierPath3DToCommands(asset.bezierPath3d, {
+    camera: threeViewport.activeCamera,
+    viewport: stage.size,
+    worldMatrix: getBillboardWorldMatrix(drawable),
+  });
+
+  if (commands.length === 0) {
+    return;
+  }
+
+  context.save();
+  context.globalAlpha *= drawable.opacity ?? 1;
+  context.strokeStyle = colorOverride ?? asset.stroke;
+  context.lineWidth = asset.strokeWidth;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.setLineDash([]);
+  context.beginPath();
+  drawProjectedCurveCommands(context, commands);
+  context.stroke();
+  context.restore();
+
+  if (drawable.selected || drawable.ghost) {
+    context.save();
+    context.strokeStyle = colorOverride ?? "#ffcf4a";
+    context.lineWidth = 2;
+    context.setLineDash(drawable.ghost ? [8] : []);
+    strokeProjectedCommandBounds(context, commands);
+    context.restore();
+  }
+}
+
 function createPrimitiveAssetPathPreview(
   asset: PrimitiveSvgAsset,
   bezierPath: StructuredBezierPath,
@@ -4400,7 +4748,7 @@ function drawPrimitiveAssetPath(
   asset: PrimitiveSvgAsset,
   colorOverride?: string,
 ): void {
-  if (asset.assetKind === "strokePath") {
+  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
     context.strokeStyle = colorOverride ?? asset.stroke;
     context.lineWidth = asset.strokeWidth;
     context.lineCap = "round";
@@ -4412,6 +4760,14 @@ function drawPrimitiveAssetPath(
 
   context.fillStyle = colorOverride ?? asset.fill;
   context.fill(asset.path, asset.fillRule);
+}
+
+function getAssetKindListLabel(asset: PrimitiveSvgAsset): string {
+  if (asset.assetKind === "bezierCurve3d") {
+    return "3D Curve";
+  }
+
+  return asset.assetKind === "strokePath" ? "Stroke" : "Fill";
 }
 
 const primitiveGhostColorCache = new Map<string, string>();
@@ -4426,7 +4782,10 @@ const GHOST_COLOR_CANDIDATES: RgbColor[] = [
 ];
 
 function getPrimitiveGhostColor(asset: PrimitiveSvgAsset): string {
-  const sourceColor = asset.assetKind === "strokePath" ? asset.stroke : asset.fill;
+  const sourceColor =
+    asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
+      ? asset.stroke
+      : asset.fill;
   const cachedColor = primitiveGhostColorCache.get(sourceColor);
 
   if (cachedColor) {
@@ -4588,6 +4947,111 @@ function drawPathEditPreview(
   context.scale(transform.scale, transform.scale);
   drawPrimitiveAssetPath(context, asset);
   context.restore();
+}
+
+function drawSourcePathEdit3DPreview(
+  context: CanvasRenderingContext2D,
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>,
+  bezierPath3d: StructuredBezierPath3D,
+): ProjectedCurveCommand[] {
+  const commands = projectBezierPath3DToCommands(bezierPath3d, {
+    camera: threeViewport.activeCamera,
+    viewport: stage.size,
+    worldMatrix: getAsset3DLocalToWorldUnitMatrix(asset),
+  });
+
+  context.save();
+  context.strokeStyle = asset.stroke;
+  context.lineWidth = asset.strokeWidth;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.setLineDash([]);
+  context.beginPath();
+  drawProjectedCurveCommands(context, commands);
+  context.stroke();
+  context.restore();
+
+  return commands;
+}
+
+function getAsset3DLocalToWorldUnitMatrix(asset: PrimitiveSvgAsset): Matrix4 {
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight, 1);
+  const scale = 1 / largestDimension;
+
+  return new Matrix4()
+    .makeTranslation(
+      -(viewBoxX + viewBoxWidth / 2),
+      -(viewBoxY + viewBoxHeight / 2),
+      0,
+    )
+    .premultiply(new Matrix4().makeScale(scale, -scale, scale));
+}
+
+function transformPoint3DToWorldUnit(
+  point: BezierPoint3D,
+  asset: PrimitiveSvgAsset,
+): Vector3Tuple {
+  return vectorToTuple(
+    new Vector3(point[0], point[1], point[2]).applyMatrix4(
+      getAsset3DLocalToWorldUnitMatrix(asset),
+    ),
+  );
+}
+
+function transformPoint3DFromWorldUnit(
+  point: Vector3Tuple,
+  asset: PrimitiveSvgAsset,
+): BezierPoint3D {
+  const inverse = getAsset3DLocalToWorldUnitMatrix(asset).invert();
+  const local = new Vector3(point[0], point[1], point[2]).applyMatrix4(inverse);
+
+  return [roundBezierValue(local.x), roundBezierValue(local.y), roundBezierValue(local.z)];
+}
+
+function strokeProjectedCommandBounds(
+  context: CanvasRenderingContext2D,
+  commands: ProjectedCurveCommand[],
+): void {
+  const points = getProjectedCommandPoints(commands);
+
+  if (points.length === 0) {
+    return;
+  }
+
+  const bounds = points.reduce(
+    (accumulator, point) => ({
+      minX: Math.min(accumulator.minX, point[0]),
+      minY: Math.min(accumulator.minY, point[1]),
+      maxX: Math.max(accumulator.maxX, point[0]),
+      maxY: Math.max(accumulator.maxY, point[1]),
+    }),
+    {
+      minX: points[0]?.[0] ?? 0,
+      minY: points[0]?.[1] ?? 0,
+      maxX: points[0]?.[0] ?? 0,
+      maxY: points[0]?.[1] ?? 0,
+    },
+  );
+
+  context.strokeRect(
+    bounds.minX - 8,
+    bounds.minY - 8,
+    bounds.maxX - bounds.minX + 16,
+    bounds.maxY - bounds.minY + 16,
+  );
+}
+
+function getProjectedCommandPoints(
+  commands: ProjectedCurveCommand[],
+): BezierPoint[] {
+  return commands.flatMap((command) => {
+    if (command.kind === "bezierCurveTo") {
+      return [command.cp1, command.cp2, command.point];
+    }
+
+    return [command.point];
+  });
 }
 
 function drawPathEditHandleLine(
@@ -4807,6 +5271,247 @@ function getPathEditScreenControls(): Array<{
     pathEditSession,
     getSourcePathEditAdapter(asset),
   );
+}
+
+function syncSourcePathEdit3DControls(): void {
+  if (!pathEdit3DSession) {
+    threeViewport.clearCurve3DControls();
+    return;
+  }
+
+  const controls = getSourcePathEdit3DControls(pathEdit3DSession);
+  const lines = getSourcePathEdit3DHandleLines(pathEdit3DSession);
+
+  threeViewport.setCurve3DControls(controls, lines);
+
+  const selectedId = pathEdit3DSession.selected
+    ? getSourcePathEdit3DControlId(
+        pathEdit3DSession.selected.segmentId,
+        pathEdit3DSession.selected.component,
+      )
+    : null;
+  threeViewport.setSelectedCurve3DControl(selectedId);
+}
+
+function getSourcePathEdit3DControls(
+  session: SourcePathEdit3DSession | null = pathEdit3DSession,
+): Curve3DControlDescriptor[] {
+  if (!session) {
+    return [];
+  }
+
+  const asset = getAssetById(session.assetId);
+
+  if (!asset) {
+    return [];
+  }
+
+  return session.draft.segments.flatMap((segment) => {
+    const anchorSelected = sourcePathEdit3DSelectionMatches(
+      session.selected,
+      segment.id,
+      "anchor",
+    );
+    const handleInSelected = sourcePathEdit3DSelectionMatches(
+      session.selected,
+      segment.id,
+      "handleIn",
+    );
+    const handleOutSelected = sourcePathEdit3DSelectionMatches(
+      session.selected,
+      segment.id,
+      "handleOut",
+    );
+
+    return [
+      {
+        id: getSourcePathEdit3DControlId(segment.id, "handleIn"),
+        segmentId: segment.id,
+        component: "handleIn" as Curve3DControlComponent,
+        position: transformPoint3DToWorldUnit(
+          addBezierPoints3D(segment.anchor, segment.handleIn),
+          asset,
+        ),
+        selected: handleInSelected,
+      },
+      {
+        id: getSourcePathEdit3DControlId(segment.id, "handleOut"),
+        segmentId: segment.id,
+        component: "handleOut" as Curve3DControlComponent,
+        position: transformPoint3DToWorldUnit(
+          addBezierPoints3D(segment.anchor, segment.handleOut),
+          asset,
+        ),
+        selected: handleOutSelected,
+      },
+      {
+        id: getSourcePathEdit3DControlId(segment.id, "anchor"),
+        segmentId: segment.id,
+        component: "anchor" as Curve3DControlComponent,
+        position: transformPoint3DToWorldUnit(segment.anchor, asset),
+        selected: anchorSelected,
+      },
+    ];
+  });
+}
+
+function getSourcePathEdit3DProjectedCommands(): ProjectedCurveCommand[] {
+  if (!pathEdit3DSession) {
+    const selectedAsset = getSelectedAsset();
+
+    return selectedAsset?.assetKind === "bezierCurve3d"
+      ? projectBezierPath3DToCommands(selectedAsset.bezierPath3d, {
+          camera: threeViewport.activeCamera,
+          viewport: stage.size,
+          worldMatrix: getAsset3DLocalToWorldUnitMatrix(selectedAsset),
+        })
+      : [];
+  }
+
+  const asset = getAssetById(pathEdit3DSession.assetId);
+
+  return projectBezierPath3DToCommands(pathEdit3DSession.draft, {
+    camera: threeViewport.activeCamera,
+    viewport: stage.size,
+    worldMatrix: asset ? getAsset3DLocalToWorldUnitMatrix(asset) : undefined,
+  });
+}
+
+function getSourcePathEdit3DHandleLines(
+  session: SourcePathEdit3DSession | null = pathEdit3DSession,
+): Curve3DHandleLineDescriptor[] {
+  if (!session) {
+    return [];
+  }
+
+  const asset = getAssetById(session.assetId);
+
+  if (!asset) {
+    return [];
+  }
+
+  return session.draft.segments.flatMap((segment) => [
+    {
+      start: transformPoint3DToWorldUnit(segment.anchor, asset),
+      end: transformPoint3DToWorldUnit(
+        addBezierPoints3D(segment.anchor, segment.handleIn),
+        asset,
+      ),
+    },
+    {
+      start: transformPoint3DToWorldUnit(segment.anchor, asset),
+      end: transformPoint3DToWorldUnit(
+        addBezierPoints3D(segment.anchor, segment.handleOut),
+        asset,
+      ),
+    },
+  ]);
+}
+
+function selectSourcePathEdit3DControlById(controlId: string | null): void {
+  if (editorMode !== "path" || !pathEdit3DSession) {
+    return;
+  }
+
+  const selection = controlId ? parseSourcePathEdit3DControlId(controlId) : null;
+  pathEdit3DSession.selected = selection;
+  syncSourcePathEdit3DControls();
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
+function updateSourcePathEdit3DControlPosition(
+  controlId: string,
+  position: Vector3Tuple,
+): void {
+  if (editorMode !== "path" || !pathEdit3DSession) {
+    return;
+  }
+
+  const selection = parseSourcePathEdit3DControlId(controlId);
+
+  if (!selection) {
+    return;
+  }
+
+  const segment = getPathEdit3DSegment(pathEdit3DSession, selection.segmentId);
+  const asset = getAssetById(pathEdit3DSession.assetId);
+
+  if (!segment || !asset) {
+    return;
+  }
+
+  const localPosition = transformPoint3DFromWorldUnit(position, asset);
+
+  if (selection.component === "anchor") {
+    segment.anchor = localPosition;
+  } else {
+    segment[selection.component] = subtractBezierPoints3D(
+      localPosition,
+      segment.anchor,
+    );
+  }
+
+  pathEdit3DSession.selected = selection;
+  syncSourcePathEdit3DControls();
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
+function getPathEdit3DSegment(
+  session: SourcePathEdit3DSession | null,
+  segmentId: string,
+): BezierSegment3D | null {
+  return session?.draft.segments.find((segment) => segment.id === segmentId) ?? null;
+}
+
+function getSelectedPathEdit3DSegment(
+  session: SourcePathEdit3DSession | null,
+): BezierSegment3D | null {
+  return session?.selected
+    ? getPathEdit3DSegment(session, session.selected.segmentId)
+    : null;
+}
+
+function getPathEdit3DComponentPoint(
+  segment: BezierSegment3D,
+  component: PathEditComponent,
+): BezierPoint3D {
+  if (component === "anchor") {
+    return [...segment.anchor];
+  }
+
+  return [...segment[component]];
+}
+
+function getSourcePathEdit3DControlId(
+  segmentId: string,
+  component: PathEditComponent,
+): string {
+  return `${segmentId}:${component}`;
+}
+
+function parseSourcePathEdit3DControlId(
+  controlId: string,
+): SourcePathEdit3DSelection | null {
+  const [segmentId, component] = controlId.split(":");
+
+  if (
+    !segmentId ||
+    (component !== "anchor" && component !== "handleIn" && component !== "handleOut")
+  ) {
+    return null;
+  }
+
+  return { segmentId, component };
+}
+
+function sourcePathEdit3DSelectionMatches(
+  selection: SourcePathEdit3DSelection | null,
+  segmentId: string,
+  component: PathEditComponent,
+): boolean {
+  return selection?.segmentId === segmentId && selection.component === component;
 }
 
 function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean {
@@ -5354,10 +6059,13 @@ function getSelectedPrefabNode(): PrefabNode | null {
 }
 
 function canUsePathTool(): boolean {
+  const selection = getSelectedInPlacePathNodeAndAsset();
+
   return Boolean(
     editorMode === "asset" &&
       getActiveTimelineClip() &&
-      getSelectedInPlacePathNodeAndAsset(),
+      selection &&
+      selection.asset.assetKind !== "bezierCurve3d",
   );
 }
 
@@ -5919,6 +6627,28 @@ function lerpBezierPoint(
   ];
 }
 
+function addBezierPoints3D(
+  left: BezierPoint3D,
+  right: BezierPoint3D,
+): Vector3Tuple {
+  return [
+    roundBezierValue(left[0] + right[0]),
+    roundBezierValue(left[1] + right[1]),
+    roundBezierValue(left[2] + right[2]),
+  ];
+}
+
+function subtractBezierPoints3D(
+  left: BezierPoint3D,
+  right: BezierPoint3D,
+): BezierPoint3D {
+  return [
+    roundBezierValue(left[0] - right[0]),
+    roundBezierValue(left[1] - right[1]),
+    roundBezierValue(left[2] - right[2]),
+  ];
+}
+
 function vectorToTuple(value: Vector3): Vector3Tuple {
   return [roundTransformValue(value.x), roundTransformValue(value.y), roundTransformValue(value.z)];
 }
@@ -5959,9 +6689,19 @@ function exposeEditorDebugHooks(): void {
         viewBox: asset.viewBox,
         fill: asset.assetKind === "filledPath" ? asset.fill : "none",
         fillRule: asset.assetKind === "filledPath" ? asset.fillRule : "nonzero",
-        stroke: asset.assetKind === "strokePath" ? asset.stroke : null,
-        strokeWidth: asset.assetKind === "strokePath" ? asset.strokeWidth : null,
+        stroke:
+          asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
+            ? asset.stroke
+            : null,
+        strokeWidth:
+          asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
+            ? asset.strokeWidth
+            : null,
         bezierPath: asset.bezierPath,
+        bezierPath3d:
+          asset.assetKind === "bezierCurve3d"
+            ? cloneStructuredBezierPath3D(asset.bezierPath3d)
+            : null,
         pathD: asset.pathD,
       })),
     getPrefabs: () => [...prefabs],
@@ -6004,17 +6744,29 @@ function exposeEditorDebugHooks(): void {
           : null,
       };
     },
-      getPathEditState: () => ({
-        assetId: pathEditSession?.assetId ?? null,
-        selectedSegmentId: pathEditSession?.selected?.segmentId ?? null,
-        selectedComponent: pathEditSession?.selected?.component ?? null,
-        hoveredSegmentId: pathEditHoveredControl?.segmentId ?? null,
-        hoveredComponent: pathEditHoveredControl?.component ?? null,
-        hasDraft: Boolean(pathEditSession),
-        draftBezierPath: pathEditSession
-          ? cloneStructuredBezierPath(pathEditSession.draft)
+    getPathEditState: () => ({
+      is3d: Boolean(pathEdit3DSession),
+      assetId: pathEdit3DSession?.assetId ?? pathEditSession?.assetId ?? null,
+      selectedSegmentId:
+        pathEdit3DSession?.selected?.segmentId ??
+        pathEditSession?.selected?.segmentId ??
+        null,
+      selectedComponent:
+        pathEdit3DSession?.selected?.component ??
+        pathEditSession?.selected?.component ??
+        null,
+      hoveredSegmentId: pathEditHoveredControl?.segmentId ?? null,
+      hoveredComponent: pathEditHoveredControl?.component ?? null,
+      hasDraft: Boolean(pathEditSession || pathEdit3DSession),
+      draftBezierPath: pathEditSession
+        ? cloneStructuredBezierPath(pathEditSession.draft)
+        : null,
+      draftBezierPath3d: pathEdit3DSession
+        ? cloneStructuredBezierPath3D(pathEdit3DSession.draft)
         : null,
       controls: getPathEditScreenControls(),
+      controls3d: getSourcePathEdit3DControls(),
+      projectedCommandCount: getSourcePathEdit3DProjectedCommands().length,
     }),
     getInPlacePathEditState: () => ({
       nodeId: inPlacePathEditSession?.nodeId ?? null,

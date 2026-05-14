@@ -11,6 +11,17 @@ type StructuredBezierPathDebug = {
   }>;
 };
 
+type StructuredBezierPath3DDebug = {
+  version: 1;
+  closed: false;
+  segments: Array<{
+    id: string;
+    anchor: [number, number, number];
+    handleIn: [number, number, number];
+    handleOut: [number, number, number];
+  }>;
+};
+
 declare global {
   interface Window {
     __vectorStageDebug?: {
@@ -25,6 +36,7 @@ declare global {
         stroke: string | null;
         strokeWidth: number | null;
         bezierPath: StructuredBezierPathDebug;
+        bezierPath3d: StructuredBezierPath3DDebug | null;
         pathD: string;
       }>;
       getAssetLoadState: () => "loading" | "ready" | "error";
@@ -140,6 +152,7 @@ declare global {
         } | null;
       };
       getPathEditState: () => {
+        is3d: boolean;
         assetId: string | null;
         selectedSegmentId: string | null;
         selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
@@ -147,12 +160,21 @@ declare global {
         hoveredComponent: "anchor" | "handleIn" | "handleOut" | null;
         hasDraft: boolean;
         draftBezierPath: StructuredBezierPathDebug | null;
+        draftBezierPath3d: StructuredBezierPath3DDebug | null;
         controls: Array<{
           segmentId: string;
           component: "anchor" | "handleIn" | "handleOut";
           x: number;
           y: number;
         }>;
+        controls3d: Array<{
+          id: string;
+          segmentId: string;
+          component: "anchor" | "handleIn" | "handleOut";
+          position: [number, number, number];
+          selected: boolean;
+        }>;
+        projectedCommandCount: number;
       };
       getInPlacePathEditState: () => {
         nodeId: string | null;

@@ -59,7 +59,7 @@ export function drawPrimitivePreview(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  if (asset.assetKind === "strokePath") {
+  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
     context.strokeStyle = asset.stroke;
     context.lineWidth = asset.strokeWidth;
     context.lineCap = "round";

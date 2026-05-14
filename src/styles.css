@@ -717,6 +717,15 @@ body[data-path-edit-active="true"] #three-overlay-canvas {
   pointer-events: none;
 }
 
+body[data-path-edit-3d-active="true"] #paper-canvas {
+  pointer-events: none;
+}
+
+body[data-path-edit-3d-active="true"] #three-overlay-canvas {
+  cursor: grab;
+  pointer-events: auto;
+}
+
 .stage-hud {
   position: absolute;
   left: 24px;

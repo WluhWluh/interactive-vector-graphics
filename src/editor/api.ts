@@ -7,6 +7,10 @@ import {
   cloneStructuredBezierPath,
   type StructuredBezierPath,
 } from "../core/assets/structuredBezierPath";
+import {
+  cloneStructuredBezierPath3D,
+  type StructuredBezierPath3D,
+} from "../core/assets/structuredBezierPath3d";
 import type {
   EditorSceneNode,
   EditorViewportCameraSnapshot,
@@ -34,6 +38,7 @@ export type StoredPrimitiveAssetDto = {
   stroke: string | null;
   strokeWidth: number | null;
   bezierPath: StructuredBezierPath;
+  bezierPath3d: StructuredBezierPath3D | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -307,6 +312,57 @@ export async function updateAssetPath(
   return hydratePrimitiveAsset(body.asset);
 }
 
+export async function convertAssetTo3DCurve(
+  projectId: string,
+  assetId: string,
+): Promise<PrimitiveSvgAsset> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/convert-to-3d-curve`,
+    {
+      method: "POST",
+    },
+  );
+  const body = (await response.json()) as {
+    asset?: StoredPrimitiveAssetDto;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.asset) {
+    throw new Error("Asset API did not return a converted 3D curve asset.");
+  }
+
+  return hydratePrimitiveAsset(body.asset);
+}
+
+export async function updateAssetCurve3D(
+  projectId: string,
+  assetId: string,
+  bezierPath3d: StructuredBezierPath3D,
+): Promise<PrimitiveSvgAsset> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/curve3d`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ bezierPath3d }),
+    },
+  );
+  const body = (await response.json()) as {
+    asset?: StoredPrimitiveAssetDto;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.asset) {
+    throw new Error("Asset API did not return an updated 3D curve asset.");
+  }
+
+  return hydratePrimitiveAsset(body.asset);
+}
+
 export async function listPrefabs(projectId: string): Promise<PrefabRecord[]> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/prefabs`,
@@ -540,6 +596,20 @@ function hydratePrimitiveAsset(asset: StoredPrimitiveAssetDto): PrimitiveSvgAsse
         stroke: asset.stroke ?? "#000000",
         strokeWidth: asset.strokeWidth ?? 1,
       }
+    : asset.assetKind === "bezierCurve3d"
+      ? {
+          ...baseAsset,
+          assetKind: "bezierCurve3d",
+          stroke: asset.stroke ?? "#000000",
+          strokeWidth: asset.strokeWidth ?? 1,
+          bezierPath3d: asset.bezierPath3d
+            ? cloneStructuredBezierPath3D(asset.bezierPath3d)
+            : {
+                version: 1,
+                closed: false,
+                segments: [],
+              },
+        }
     : {
         ...baseAsset,
         assetKind: "filledPath",

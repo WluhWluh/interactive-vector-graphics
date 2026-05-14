@@ -1,10 +1,12 @@
 import { structuredBezierToPathD } from "./structuredBezierPath";
 import type { StructuredBezierPath } from "./structuredBezierPath";
+import type { StructuredBezierPath3D } from "./structuredBezierPath3d";
 
 export type SerializedPrimitiveAssetSvgInput = {
-  assetKind: "filledPath" | "strokePath";
+  assetKind: "filledPath" | "strokePath" | "bezierCurve3d";
   viewBox: [number, number, number, number];
   bezierPath: StructuredBezierPath;
+  bezierPath3d?: StructuredBezierPath3D | null;
   fill: string;
   fillRule: "nonzero" | "evenodd";
   stroke: string | null;
@@ -23,14 +25,21 @@ export function createNormalizedPrimitiveSvg(
   const pathD = structuredBezierToPathD(input.bezierPath);
   const viewBox = input.viewBox.map(formatSvgNumber).join(" ");
   const pathMarkup =
-    input.assetKind === "strokePath"
+    input.assetKind === "strokePath" || input.assetKind === "bezierCurve3d"
       ? createStrokePathMarkup(input, pathD)
       : createFilledPathMarkup(input, pathD);
+  const metadata =
+    input.assetKind === "bezierCurve3d" && input.bezierPath3d
+      ? `  <metadata data-ivg-asset-kind="bezierCurve3d">${escapeXmlText(
+          JSON.stringify(input.bezierPath3d),
+        )}</metadata>`
+      : null;
 
   return {
     pathD,
     svgText: [
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
+      ...(metadata ? [metadata] : []),
       `  ${pathMarkup}`,
       "</svg>",
       "",
@@ -73,6 +82,10 @@ function escapeXmlAttribute(value: string): string {
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function escapeXmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function formatSvgNumber(value: number): string {

@@ -12,6 +12,8 @@ import {
   validateStructuredBezierPath,
   type StructuredBezierPath,
 } from "../src/core/assets/structuredBezierPath";
+import { validateStructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
+import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 import type { PrefabDocument, SceneDocument } from "../server/types";
 
 const tempDataDir = await mkdtemp(join(tmpdir(), "ivg-server-smoke-"));
@@ -116,6 +118,100 @@ try {
 
   assert.match(normalizedStrokeSvg, /stroke-linecap="round"/);
   assert.match(normalizedStrokeSvg, /stroke-linejoin="round"/);
+
+  const curve3dAsset = await store.convertPrimitiveAssetTo3DCurve(
+    firstProject.id,
+    strokeAsset.id,
+  );
+
+  assert.equal(curve3dAsset.assetKind, "bezierCurve3d");
+  assert.equal(curve3dAsset.stroke, strokeAsset.stroke);
+  assert.equal(curve3dAsset.strokeWidth, strokeAsset.strokeWidth);
+  assert.equal(curve3dAsset.bezierPath3d?.closed, false);
+  assert.equal(
+    curve3dAsset.bezierPath3d?.segments.length,
+    strokeAsset.bezierPath.segments.length,
+  );
+  assert.ok(
+    curve3dAsset.bezierPath3d?.segments.every(
+      (segment) =>
+        segment.anchor[2] === 0 &&
+        segment.handleIn[2] === 0 &&
+        segment.handleOut[2] === 0,
+    ),
+  );
+  assert.match(
+    await readFile(join(tempDataDir, curve3dAsset.sourcePath), "utf8"),
+    /data-ivg-asset-kind="bezierCurve3d"/,
+  );
+  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 4);
+  await assert.rejects(
+    () => store.convertPrimitiveAssetTo3DCurve(firstProject.id, firstAsset.id),
+    /Only strokePath assets/,
+  );
+  await assert.rejects(
+    () =>
+      store.convertPrimitiveAssetTo3DCurve(firstProject.id, curve3dAsset.id),
+    /Only strokePath assets/,
+  );
+
+  const editedCurve3d = cloneStructuredBezierPath3DForTest(
+    curve3dAsset.bezierPath3d!,
+  );
+  editedCurve3d.segments[0] = {
+    ...editedCurve3d.segments[0]!,
+    anchor: [10, 80, 12],
+  };
+  const updatedCurve3dAsset = await store.updatePrimitiveAssetCurve3D(
+    firstProject.id,
+    curve3dAsset.id,
+    editedCurve3d,
+  );
+
+  assert.deepEqual(
+    updatedCurve3dAsset.bezierPath3d?.segments[0]?.anchor,
+    [10, 80, 12],
+  );
+  assert.deepEqual(updatedCurve3dAsset.bezierPath.segments[0]?.anchor, [10, 80]);
+  await assert.rejects(
+    () =>
+      store.updatePrimitiveAssetCurve3D(firstProject.id, strokeAsset.id, editedCurve3d),
+    /Only 3D curve assets/,
+  );
+  assertInvalidStructuredBezierPath3D(
+    {
+      ...editedCurve3d,
+      closed: true,
+    } as unknown as StructuredBezierPath3D,
+    /must be open/,
+  );
+  assertInvalidStructuredBezierPath3D(
+    {
+      ...editedCurve3d,
+      segments: [editedCurve3d.segments[0]!],
+    },
+    /at least 2 segments/,
+  );
+  assertInvalidStructuredBezierPath3D(
+    {
+      ...editedCurve3d,
+      segments: editedCurve3d.segments.map((segment, index) =>
+        index === 1
+          ? { ...segment, anchor: [0, Number.POSITIVE_INFINITY, 0] }
+          : segment,
+      ),
+    },
+    /finite numbers/,
+  );
+  assertInvalidStructuredBezierPath3D(
+    {
+      ...editedCurve3d,
+      segments: editedCurve3d.segments.map((segment, index) =>
+        index === 1 ? { ...segment, id: editedCurve3d.segments[0]!.id } : segment,
+      ),
+    },
+    /duplicated/,
+  );
 
   const editedFilledBezier = cloneStructuredBezierPathForTest(
     firstAsset.bezierPath,
@@ -997,6 +1093,7 @@ try {
     join(tempDataDir, "projects", firstProject.id, "primitives"),
   );
   assert.deepEqual(primitiveFiles.sort(), [
+    "leg-stroke-3d-curve.svg",
     "leg-stroke.svg",
     "uploaded-face-2.svg",
     "uploaded-face.svg",
@@ -1043,7 +1140,7 @@ try {
   assert.deepEqual(remainingSceneFiles, ["opening-scene-2.json"]);
 
   await store.deletePrimitiveAsset(firstProject.id, firstAsset.id);
-  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 2);
+  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 3);
 
   await store.deleteProject(firstProject.id);
   assert.equal(store.listProjects().length, 1);
@@ -1085,6 +1182,16 @@ function assertInvalidStructuredBezierPath(
   );
 }
 
+function assertInvalidStructuredBezierPath3D(
+  path: StructuredBezierPath3D,
+  expectedMessage: RegExp,
+): void {
+  assert.throws(
+    () => validateStructuredBezierPath3D(path),
+    expectedMessage,
+  );
+}
+
 function createBezierSegment(
   id: string,
   anchor: [number, number],
@@ -1103,6 +1210,21 @@ function cloneStructuredBezierPathForTest(
   return {
     version: 1,
     closed: path.closed,
+    segments: path.segments.map((segment) => ({
+      id: segment.id,
+      anchor: [...segment.anchor],
+      handleIn: [...segment.handleIn],
+      handleOut: [...segment.handleOut],
+    })),
+  };
+}
+
+function cloneStructuredBezierPath3DForTest(
+  path: StructuredBezierPath3D,
+): StructuredBezierPath3D {
+  return {
+    version: 1,
+    closed: false,
     segments: path.segments.map((segment) => ({
       id: segment.id,
       anchor: [...segment.anchor],
