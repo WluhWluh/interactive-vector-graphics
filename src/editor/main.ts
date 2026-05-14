@@ -422,6 +422,7 @@ declare global {
         nodes: SceneNode[];
         selectedNodeId: string | null;
         transformMode: TransformMode;
+        viewportProxies: ReturnType<ThreeEditorViewport["getProxySnapshot"]>;
       };
       getActiveEditorTool: () => EditorTool;
       getScenes: () => SceneRecord[];
@@ -705,9 +706,10 @@ function bindEditorEvents(): void {
   threeViewport.setCallbacks({
     onSelectionChange: (nodeId) => {
       if (editorMode === "asset") {
-        exitPathTool();
         selectedPrefabNodeId = nodeId;
         syncSelectionFromPrefabNode();
+        syncActiveToolAfterSelectionChange();
+        rebuildViewportProxies();
       } else if (editorMode === "scene") {
         selectedSceneNodeId = nodeId;
         syncSelectionFromSceneNode();
@@ -1436,9 +1438,7 @@ function toggleProjection(): void {
 
 function setActiveEditorTool(tool: EditorTool): void {
   if (tool === "path" && !canUsePathTool()) {
-    discardInPlacePathEditSession();
-    activeEditorTool = threeViewport.currentTransformMode;
-    threeViewport.setTransformControlsVisible(true);
+    fallbackToTransformTool();
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
@@ -1525,10 +1525,33 @@ function discardInPlacePathEditSession(): void {
   inPlacePathEditCameraDragActive = false;
 }
 
-function exitPathTool(): void {
+function fallbackToTransformTool(): void {
   discardInPlacePathEditSession();
   activeEditorTool = threeViewport.currentTransformMode;
   threeViewport.setTransformControlsVisible(true);
+}
+
+function exitPathTool(): void {
+  if (activeEditorTool === "path") {
+    fallbackToTransformTool();
+    return;
+  }
+
+  discardInPlacePathEditSession();
+}
+
+function syncActiveToolAfterSelectionChange(): void {
+  if (activeEditorTool !== "path") {
+    discardInPlacePathEditSession();
+    return;
+  }
+
+  if (canUsePathTool()) {
+    startInPlacePathEditSession();
+    return;
+  }
+
+  fallbackToTransformTool();
 }
 
 function setEditorMode(mode: EditorMode): void {
@@ -1671,11 +1694,19 @@ function rebuildViewportProxies(): void {
     const activeClip = getActiveTimelineClip();
 
     for (const node of prefabNodes) {
-      const isSelected =
-        activeClip &&
-        selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID &&
-        node.id === selectedPrefabNodeId;
-      const stagingPose = isSelected ? getOrCreateTimelineStagingPose(node, activeClip) : null;
+      const selectedForTimeline =
+        selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID && node.id === selectedPrefabNodeId;
+      const stagingPose =
+        getTimelineStagingPose(node.id, activeClip) ??
+        (activeClip && selectedForTimeline
+          ? getOrCreateTimelineStagingPose(
+              node,
+              activeClip,
+              node.kind === "primitive" && node.assetId
+                ? getAssetById(node.assetId)
+                : null,
+            )
+          : null);
       const worldTransform = stagingPose
         ? getTimelineStagingWorldTransform(stagingPose)
         : matrixToTransform(worldTransforms.get(node.id) ?? transformToMatrix(node));
@@ -3388,6 +3419,7 @@ function renderPrefabNodeList(): void {
       exitPathTool();
     }
     selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    syncActiveToolAfterSelectionChange();
     threeViewport.setSelectedNode(null);
     renderEditorShell();
     exposeEditorDebugHooks();
@@ -3415,13 +3447,11 @@ function renderPrefabNodeList(): void {
       button.style.paddingLeft = `${12 + depth * 14}px`;
       button.textContent = label;
       button.addEventListener("click", () => {
-        if (selectedPrefabNodeId !== node.id) {
-          exitPathTool();
-        }
         selectedPrefabNodeId = node.id;
         syncSelectionFromPrefabNode();
+        syncActiveToolAfterSelectionChange();
         if (editorMode === "asset") {
-          threeViewport.setSelectedNode(node.id);
+          rebuildViewportProxies();
         }
         renderEditorShell();
         exposeEditorDebugHooks();
@@ -6798,6 +6828,7 @@ function exposeEditorDebugHooks(): void {
         nodes: sceneNodes.map(cloneSceneNode),
         selectedNodeId: selectedSceneNodeId,
         transformMode: threeViewport.currentTransformMode,
+        viewportProxies: threeViewport.getProxySnapshot(),
       };
     },
     getActiveEditorTool: () => activeEditorTool,

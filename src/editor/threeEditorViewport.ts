@@ -430,6 +430,7 @@ export class ThreeEditorViewport {
 
     this.curve3DControls.clear();
     this.setCurve3DHandleLines([]);
+    this.attachCurrentTransformTarget();
   }
 
   setSelectedCurve3DControl(controlId: string | null): void {
@@ -439,13 +440,7 @@ export class ThreeEditorViewport {
       this.selectedNodeId = null;
     }
 
-    const proxy = controlId ? this.curve3DControls.get(controlId) : null;
-
-    if (proxy && this.transformControlsVisible) {
-      this.transformControls.attach(proxy.mesh);
-    } else {
-      this.transformControls.detach();
-    }
+    this.attachCurrentTransformTarget();
   }
 
   syncNodeFromProxy(node: EditorTransformNode): void {
@@ -476,21 +471,7 @@ export class ThreeEditorViewport {
     if (nodeId) {
       this.selectedCurve3DControlId = null;
     }
-    const proxy = nodeId ? this.proxies.get(nodeId) : null;
-
-    if (proxy && this.transformControlsVisible) {
-      this.transformControls.attach(proxy.root);
-    } else if (
-      this.selectedCurve3DControlId &&
-      this.transformControlsVisible &&
-      this.curve3DControls.has(this.selectedCurve3DControlId)
-    ) {
-      this.transformControls.attach(
-        this.curve3DControls.get(this.selectedCurve3DControlId)!.mesh,
-      );
-    } else {
-      this.transformControls.detach();
-    }
+    this.attachCurrentTransformTarget();
 
     for (const candidate of this.proxies.values()) {
       this.updateProxySelection(candidate);
@@ -534,16 +515,7 @@ export class ThreeEditorViewport {
     this.transformControls.enabled = visible;
 
     if (visible) {
-      const curveProxy = this.selectedCurve3DControlId
-        ? this.curve3DControls.get(this.selectedCurve3DControlId)
-        : null;
-      const proxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
-
-      if (curveProxy) {
-        this.transformControls.attach(curveProxy.mesh);
-      } else if (proxy) {
-        this.transformControls.attach(proxy.root);
-      }
+      this.attachCurrentTransformTarget();
     } else {
       this.transformControls.detach();
     }
@@ -658,6 +630,22 @@ export class ThreeEditorViewport {
     return screenScale * 180 * baseWorldSize;
   }
 
+  getProxySnapshot(): Array<{
+    nodeId: string;
+    position: Vector3Tuple;
+    rotation: Vector3Tuple;
+    scale: Vector3Tuple;
+    selected: boolean;
+  }> {
+    return [...this.proxies.values()].map((proxy) => ({
+      nodeId: proxy.nodeId,
+      position: vectorToTuple(proxy.root.position),
+      rotation: eulerToTuple(proxy.root.rotation),
+      scale: vectorToTuple(proxy.root.scale),
+      selected: proxy.nodeId === this.selectedNodeId,
+    }));
+  }
+
   dispose(): void {
     this.orbitControls.dispose();
     this.transformControls.dispose();
@@ -754,6 +742,31 @@ export class ThreeEditorViewport {
       this.scaleDragStart.z * scaleRatio,
     );
     proxy.root.updateMatrixWorld();
+  }
+
+  private attachCurrentTransformTarget(): void {
+    if (!this.transformControlsVisible) {
+      this.transformControls.detach();
+      return;
+    }
+
+    const curveProxy = this.selectedCurve3DControlId
+      ? this.curve3DControls.get(this.selectedCurve3DControlId)
+      : null;
+
+    if (curveProxy) {
+      this.transformControls.attach(curveProxy.mesh);
+      return;
+    }
+
+    const nodeProxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
+
+    if (nodeProxy) {
+      this.transformControls.attach(nodeProxy.root);
+      return;
+    }
+
+    this.transformControls.detach();
   }
 
   private updateActiveProjectionMatrix(): void {

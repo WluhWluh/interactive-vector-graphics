@@ -224,6 +224,13 @@ declare global {
         >;
         selectedNodeId: string | null;
         transformMode: "translate" | "rotate" | "scale";
+        viewportProxies: Array<{
+          nodeId: string;
+          position: [number, number, number];
+          rotation: [number, number, number];
+          scale: [number, number, number];
+          selected: boolean;
+        }>;
       };
       getActiveEditorTool: () => "translate" | "rotate" | "scale" | "path";
       getScenes: () => Array<{
