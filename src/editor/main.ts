@@ -138,11 +138,13 @@ import {
 } from "./tools/editorUtils";
 import {
   buildPathEditPathD,
-  createPrimitiveAssetPathPreview,
-  drawPrimitiveAssetPath,
   getAssetKindListLabel,
-  getPrimitiveGhostColor,
 } from "./render/primitiveAssetDrawing";
+import {
+  drawBillboards as drawBillboardsWithRenderer,
+  type BillboardRendererContext,
+  type DrawableBillboard,
+} from "./render/billboardRenderer";
 import {
   drawPathEditControls,
   drawPathEditPreview,
@@ -205,16 +207,6 @@ type InPlacePathEditSession = PathEditSession & {
   nodeId: string;
   assetId: string;
 };
-type DrawableBillboard = {
-  id: string;
-  asset: PrimitiveSvgAsset;
-  transform: TransformSnapshot;
-  selected: boolean;
-  opacity?: number;
-  ghost?: boolean;
-  pathOverride?: StructuredBezierPath;
-};
-
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
   "position",
@@ -4158,128 +4150,19 @@ function drawBillboards(
   context: CanvasRenderingContext2D,
   drawables: DrawableBillboard[],
 ): void {
-  const sortedDrawables = drawables
-    .map((drawable) => {
-      const worldPosition = tupleToVector(drawable.transform.position);
-      const projected = threeViewport.projectWorldPosition(worldPosition, stage.size);
-
-      if (!projected) {
-        return null;
-      }
-
-      return {
-        ...drawable,
-        projected,
-        screenScale: threeViewport.getDistanceScale(worldPosition, 1),
-      };
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-    .sort((a, b) => {
-      const ghostOrder = Number(Boolean(a.ghost)) - Number(Boolean(b.ghost));
-
-      return ghostOrder === 0 ? b.projected.depth - a.projected.depth : ghostOrder;
-    });
-
-  for (const drawable of sortedDrawables) {
-    drawBillboardNode(context, drawable);
-  }
+  drawBillboardsWithRenderer(context, drawables, getBillboardRendererContext());
 }
 
-function getBillboardWorldMatrix(drawable: DrawableBillboard): Matrix4 {
-  return transformToMatrix(drawable.transform).multiply(
-    getAsset3DLocalToWorldUnitMatrix(drawable.asset),
-  );
-}
-
-function drawBillboardNode(
-  context: CanvasRenderingContext2D,
-  drawable: DrawableBillboard & {
-    projected: { x: number; y: number };
-    screenScale: number;
-  },
-): void {
-  const {
-    asset,
-    transform,
-    projected,
-    screenScale,
-    selected,
-    opacity = 1,
-    ghost = false,
-  } = drawable;
-  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
-  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
-  const assetScale = screenScale / largestDimension;
-  const drawAsset = drawable.pathOverride
-    ? createPrimitiveAssetPathPreview(asset, drawable.pathOverride)
-    : asset;
-  const ghostColor = ghost ? getPrimitiveGhostColor(asset) : null;
-
-  if (asset.assetKind === "bezierCurve3d") {
-    drawBezierCurve3DBillboard(context, drawable, asset, ghostColor ?? undefined);
-    return;
-  }
-
-  context.save();
-  context.globalAlpha *= opacity;
-  context.translate(projected.x, projected.y);
-  context.rotate(transform.rotation[2]);
-  context.scale(assetScale * transform.scale[0], assetScale * transform.scale[1]);
-  context.translate(
-    -(viewBoxX + viewBoxWidth / 2),
-    -(viewBoxY + viewBoxHeight / 2),
-  );
-  drawPrimitiveAssetPath(context, drawAsset, ghostColor ?? undefined);
-
-  if (selected || ghost) {
-    context.lineWidth = 3 / Math.max(assetScale, 0.001);
-    context.strokeStyle = ghostColor ?? "#ffcf4a";
-    context.setLineDash(ghost ? [8 / Math.max(assetScale, 0.001)] : []);
-    context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
-  }
-
-  context.restore();
-}
-
-function drawBezierCurve3DBillboard(
-  context: CanvasRenderingContext2D,
-  drawable: DrawableBillboard & {
-    projected: { x: number; y: number };
-    screenScale: number;
-  },
-  asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>,
-  colorOverride?: string,
-): void {
-  const commands = projectBezierPath3DToCommands(asset.bezierPath3d, {
+function getBillboardRendererContext(): BillboardRendererContext {
+  return {
     camera: threeViewport.activeCamera,
     viewport: stage.size,
-    worldMatrix: getBillboardWorldMatrix(drawable),
-  });
-
-  if (commands.length === 0) {
-    return;
-  }
-
-  context.save();
-  context.globalAlpha *= drawable.opacity ?? 1;
-  context.strokeStyle = colorOverride ?? asset.stroke;
-  context.lineWidth = asset.strokeWidth;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.setLineDash([]);
-  context.beginPath();
-  drawProjectedCurveCommands(context, commands);
-  context.stroke();
-  context.restore();
-
-  if (drawable.selected || drawable.ghost) {
-    context.save();
-    context.strokeStyle = colorOverride ?? "#ffcf4a";
-    context.lineWidth = 2;
-    context.setLineDash(drawable.ghost ? [8] : []);
-    strokeProjectedCommandBounds(context, commands);
-    context.restore();
-  }
+    projectWorldPosition: (position) =>
+      threeViewport.projectWorldPosition(tupleToVector(position), stage.size),
+    getDistanceScale: (position, worldSize) =>
+      threeViewport.getDistanceScale(tupleToVector(position), worldSize),
+    getAsset3DLocalToWorldUnitMatrix,
+  };
 }
 
 function drawSourcePathEdit3DPreview(
@@ -4340,51 +4223,6 @@ function transformPoint3DFromWorldUnit(
   const local = new Vector3(point[0], point[1], point[2]).applyMatrix4(inverse);
 
   return [roundBezierValue(local.x), roundBezierValue(local.y), roundBezierValue(local.z)];
-}
-
-function strokeProjectedCommandBounds(
-  context: CanvasRenderingContext2D,
-  commands: ProjectedCurveCommand[],
-): void {
-  const points = getProjectedCommandPoints(commands);
-
-  if (points.length === 0) {
-    return;
-  }
-
-  const bounds = points.reduce(
-    (accumulator, point) => ({
-      minX: Math.min(accumulator.minX, point[0]),
-      minY: Math.min(accumulator.minY, point[1]),
-      maxX: Math.max(accumulator.maxX, point[0]),
-      maxY: Math.max(accumulator.maxY, point[1]),
-    }),
-    {
-      minX: points[0]?.[0] ?? 0,
-      minY: points[0]?.[1] ?? 0,
-      maxX: points[0]?.[0] ?? 0,
-      maxY: points[0]?.[1] ?? 0,
-    },
-  );
-
-  context.strokeRect(
-    bounds.minX - 8,
-    bounds.minY - 8,
-    bounds.maxX - bounds.minX + 16,
-    bounds.maxY - bounds.minY + 16,
-  );
-}
-
-function getProjectedCommandPoints(
-  commands: ProjectedCurveCommand[],
-): BezierPoint[] {
-  return commands.flatMap((command) => {
-    if (command.kind === "bezierCurveTo") {
-      return [command.cp1, command.cp2, command.point];
-    }
-
-    return [command.point];
-  });
 }
 
 function selectPathEditControl(event: PointerEvent | MouseEvent): void {
