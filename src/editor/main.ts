@@ -167,6 +167,7 @@ import {
   applyPrefabDocumentState,
   createEmptyPrefabAnimation as createEmptyPrefabAnimationState,
   createPrefabDocument,
+  type PrefabSelectionId,
 } from "./state/prefabState";
 import {
   applySceneDocumentState,
@@ -210,6 +211,16 @@ import {
   type EditorTool,
   type TransformProperty,
 } from "./tools/toolController";
+import {
+  addPrimitiveAssetToPrefab,
+  clearInvalidPrefabClipboard as clearInvalidPrefabClipboardForState,
+  createPrefabGroupNode,
+  deletePrefabNodeSubtree,
+  pastePrefabClipboard,
+  startPrefabClipboard,
+  type PendingPrefabClipboard,
+  type PrefabClipboardMode,
+} from "./controllers/prefabAssemblyController";
 
 type EditorMode = "asset" | "path" | "scene";
 type TimelineVectorProperty = PrefabVectorTrackProperty;
@@ -219,12 +230,6 @@ type TimelinePointerDrag = {
   property: PrefabTrackProperty;
 };
 type SceneCreateSource = "empty" | "current";
-type PrefabSelectionId = string | typeof PREFAB_ROOT_NODE_ID;
-type PrefabClipboardMode = "copy" | "cut";
-type PendingPrefabClipboard = {
-  mode: PrefabClipboardMode;
-  sourceNodeId: string;
-};
 type SourcePathEditSession = PathEditSession & {
   assetId: string;
 };
@@ -1175,19 +1180,16 @@ function createPrefabGroup(): void {
   }
 
   const nodeNumber = nextPrefabNodeNumber;
-  const node: PrefabNode = {
-    id: createNextPrefabNodeId(),
-    kind: "group",
-    parentId: getParentIdForNewPrefabNode(),
-    name: `Group ${nodeNumber}`,
-    position: [0, 0, 0],
-    rotation: [0, 0, 0],
-    scale: [1, 1, 1],
-    billboardMode: "spherical",
-  };
+  const nextState = createPrefabGroupNode(
+    prefabNodes,
+    selectedPrefabNodeId,
+    PREFAB_ROOT_NODE_ID,
+    createNextPrefabNodeId(),
+    nodeNumber,
+  );
 
-  prefabNodes = [...prefabNodes, node];
-  selectedPrefabNodeId = node.id;
+  prefabNodes = nextState.nodes;
+  selectedPrefabNodeId = nextState.selectedNodeId;
   pauseTimeline();
   loadedPrefabId = null;
   rebuildViewportProxies();
@@ -1203,20 +1205,16 @@ function addSelectedAssetToPrefab(): void {
     return;
   }
 
-  const node: PrefabNode = {
-    id: createNextPrefabNodeId(),
-    kind: "primitive",
-    parentId: getParentIdForNewPrefabNode(),
-    assetId: selectedAsset.id,
-    name: selectedAsset.name,
-    position: [0, 1, 0],
-    rotation: [0, 0, 0],
-    scale: [1, 1, 1],
-    billboardMode: "spherical",
-  };
+  const nextState = addPrimitiveAssetToPrefab(
+    prefabNodes,
+    selectedPrefabNodeId,
+    PREFAB_ROOT_NODE_ID,
+    selectedAsset,
+    createNextPrefabNodeId(),
+  );
 
-  prefabNodes = [...prefabNodes, node];
-  selectedPrefabNodeId = node.id;
+  prefabNodes = nextState.nodes;
+  selectedPrefabNodeId = nextState.selectedNodeId;
   selectedAssetId = selectedAsset.id;
   pauseTimeline();
   loadedPrefabId = null;
@@ -1232,7 +1230,13 @@ function deleteSelectedPrefabNode(): void {
     return;
   }
 
-  const deletedNodeIds = getPrefabNodeAndDescendantIds(selectedPrefabNodeId);
+  const nextState = deletePrefabNodeSubtree(
+    prefabNodes,
+    PREFAB_ROOT_NODE_ID,
+    selectedPrefabNodeId,
+  );
+  const { deletedNodeIds } = nextState;
+
   if (
     inPlacePathEditSession &&
     deletedNodeIds.has(inPlacePathEditSession.nodeId)
@@ -1240,8 +1244,8 @@ function deleteSelectedPrefabNode(): void {
     exitPathTool();
   }
   pruneTimelineStagingPoses({ nodeIds: deletedNodeIds });
-  prefabNodes = prefabNodes.filter((node) => !deletedNodeIds.has(node.id));
-  selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+  prefabNodes = nextState.nodes;
+  selectedPrefabNodeId = nextState.selectedNodeId;
   clearInvalidPrefabClipboard();
   pauseTimeline();
   loadedPrefabId = null;
@@ -2592,19 +2596,22 @@ function handlePrefabClipboardSecondaryAction(): void {
 }
 
 function startPendingPrefabClipboard(mode: PrefabClipboardMode): void {
-  if (!selectedPrefabNodeId || selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+  const clipboard = startPrefabClipboard(
+    mode,
+    selectedPrefabNodeId,
+    PREFAB_ROOT_NODE_ID,
+  );
+
+  if (!clipboard) {
     return;
   }
 
-  if (!getPrefabNode(selectedPrefabNodeId)) {
+  if (!getPrefabNode(clipboard.sourceNodeId)) {
     setImportError(new Error("Select an existing prefab node before copy or cut."));
     return;
   }
 
-  pendingPrefabClipboard = {
-    mode,
-    sourceNodeId: selectedPrefabNodeId,
-  };
+  pendingPrefabClipboard = clipboard;
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -2614,38 +2621,24 @@ function pastePendingPrefabClipboard(): void {
     return;
   }
 
-  const clipboard = pendingPrefabClipboard;
-  const sourceNode = getPrefabNode(clipboard.sourceNodeId);
+  const nextState = pastePrefabClipboard(
+    prefabNodes,
+    pendingPrefabClipboard,
+    selectedPrefabNodeId,
+    PREFAB_ROOT_NODE_ID,
+    createNextPrefabNodeId,
+  );
 
-  if (!sourceNode) {
-    pendingPrefabClipboard = null;
-    setImportError(new Error("The copied or cut prefab node no longer exists."));
+  if ("error" in nextState) {
+    if (nextState.error !== "Cannot paste a group or node inside itself.") {
+      pendingPrefabClipboard = null;
+    }
+    setImportError(new Error(nextState.error));
     return;
   }
 
-  const targetParentId = getPasteParentId();
-
-  if (targetParentId === undefined) {
-    pendingPrefabClipboard = null;
-    setImportError(new Error("Select an existing paste target."));
-    return;
-  }
-
-  if (
-    clipboard.mode === "cut" &&
-    targetParentId &&
-    getPrefabNodeAndDescendantIds(sourceNode.id).has(targetParentId)
-  ) {
-    setImportError(new Error("Cannot paste a group or node inside itself."));
-    return;
-  }
-
-  if (clipboard.mode === "copy") {
-    copyPrefabSubtree(sourceNode, targetParentId);
-  } else {
-    cutPrefabSubtree(sourceNode, targetParentId);
-  }
-
+  prefabNodes = nextState.nodes;
+  selectedPrefabNodeId = nextState.selectedNodeId;
   pendingPrefabClipboard = null;
   loadedPrefabId = null;
   lastImportError = null;
@@ -4610,30 +4603,6 @@ function getSceneNode(nodeId: string): SceneNode | null {
   return getNodeById(sceneNodes, nodeId);
 }
 
-function getParentIdForNewPrefabNode(): string | null {
-  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
-    return null;
-  }
-
-  const selectedNode = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
-
-  return selectedNode?.kind === "group" ? selectedNode.id : null;
-}
-
-function getPasteParentId(): string | null | undefined {
-  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
-    return null;
-  }
-
-  const targetNode = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
-
-  if (!targetNode) {
-    return undefined;
-  }
-
-  return targetNode.kind === "group" ? targetNode.id : targetNode.parentId;
-}
-
 function getPrefabNodeAndDescendantIds(rootNodeId: string): Set<string> {
   return getPrefabNodeAndDescendantIdsFromNodes(prefabNodes, rootNodeId);
 }
@@ -4694,54 +4663,6 @@ function timeMsFromTimelinePointer(
   const ratio = Math.min(Math.max(rawRatio, 0), 1);
 
   return snapAndClampTimelineTimeMs(Math.round(ratio * clip.durationMs), clip);
-}
-
-function copyPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
-  const subtreeIds = getPrefabNodeAndDescendantIds(sourceNode.id);
-  const subtreeNodes = prefabNodes.filter((node) => subtreeIds.has(node.id));
-  const idMap = new Map<string, string>();
-
-  for (const node of subtreeNodes) {
-    idMap.set(node.id, createNextPrefabNodeId());
-  }
-
-  const copiedNodes = subtreeNodes.map((node) => {
-    const copiedNode = clonePrefabNode(node);
-    const nextId = idMap.get(node.id);
-
-    if (!nextId) {
-      throw new Error(`Missing copied node id for "${node.id}".`);
-    }
-
-    copiedNode.id = nextId;
-    copiedNode.parentId =
-      node.id === sourceNode.id
-        ? targetParentId
-        : (idMap.get(node.parentId ?? "") ?? null);
-
-    if (node.id === sourceNode.id) {
-      copiedNode.name = `${copiedNode.name} Copy`;
-    }
-
-    return copiedNode;
-  });
-
-  prefabNodes = [...prefabNodes, ...copiedNodes];
-  selectedPrefabNodeId = idMap.get(sourceNode.id) ?? PREFAB_ROOT_NODE_ID;
-}
-
-function cutPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
-  const nextNodes = prefabNodes.map((node) =>
-    node.id === sourceNode.id
-      ? {
-          ...node,
-          parentId: targetParentId,
-        }
-      : node,
-  );
-
-  prefabNodes = nextNodes;
-  selectedPrefabNodeId = sourceNode.id;
 }
 
 function resetPrefabTimelineState(): void {
@@ -4870,12 +4791,10 @@ function createNextPrefabNodeId(): string {
 }
 
 function clearInvalidPrefabClipboard(): void {
-  if (
-    pendingPrefabClipboard &&
-    !getPrefabNode(pendingPrefabClipboard.sourceNodeId)
-  ) {
-    pendingPrefabClipboard = null;
-  }
+  pendingPrefabClipboard = clearInvalidPrefabClipboardForState(
+    pendingPrefabClipboard,
+    prefabNodes,
+  );
 }
 
 function getPrefabNodeTreeEntries(): PrefabNodeTreeEntry[] {

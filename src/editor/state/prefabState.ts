@@ -3,6 +3,8 @@ import { clonePrefabAnimation } from "../timeline/prefabTimelineCore";
 import { getNextNodeNumber } from "../tools/editorUtils";
 import { clonePrefabNode } from "./documentNodes";
 
+export type PrefabSelectionId = string;
+
 export type AppliedPrefabDocumentState = {
   nodes: PrefabNode[];
   animation: PrefabAnimation;
