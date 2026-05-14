@@ -119,6 +119,14 @@ import {
   snapTimelineTimeMs as snapTimelineTimeMsWithFps,
 } from "./timeline/prefabTimelineCore";
 import {
+  TimelineStagingPoseStore,
+  cloneTimelineStagingTransform,
+  getPrefabNodesWithTimelineStagingPose as getPrefabNodesWithTimelineStagingPoseForNodes,
+  getTimelineStagingWorldTransform as getTimelineStagingWorldTransformForNodes,
+  type TimelineStagingPose,
+  type TimelineStagingPruneOptions,
+} from "./timeline/stagingPose";
+import {
   chooseStableSelection,
   createUniqueId,
   formatTimelineNumber,
@@ -176,11 +184,6 @@ type TimelineLaneProperty = PrefabTrackProperty;
 type TimelinePointerDrag = {
   keyframeId: string;
   property: PrefabTrackProperty;
-};
-type TimelineStagingPose = TransformSnapshot & {
-  nodeId: string;
-  clipId: string;
-  pathDraft?: StructuredBezierPath;
 };
 type SceneCreateSource = "empty" | "current";
 type PrefabSelectionId = string | typeof PREFAB_ROOT_NODE_ID;
@@ -251,7 +254,7 @@ let selectedPrefabId: string | null = null;
 let loadedPrefabId: string | null = null;
 let selectedPrefabNodeId: PrefabSelectionId | null = PREFAB_ROOT_NODE_ID;
 let prefabAnimation: PrefabAnimation = createEmptyPrefabAnimation();
-let timelineStagingPoses = new Map<string, TimelineStagingPose>();
+let timelineStagingPoses = new TimelineStagingPoseStore();
 let timelineCurrentTimeMs = 0;
 let isTimelinePlaying = false;
 let selectedTimelineKeyframeId: string | null = null;
@@ -1572,7 +1575,7 @@ function applyPrefabDocument(document: PrefabDocument): void {
   exitPathTool();
   prefabNodes = document.nodes.map(clonePrefabNode);
   prefabAnimation = clonePrefabAnimation(document.animation);
-  timelineStagingPoses = new Map();
+  timelineStagingPoses = new TimelineStagingPoseStore();
   timelineCurrentTimeMs = 0;
   isTimelinePlaying = false;
   selectedTimelineKeyframeId = null;
@@ -5211,7 +5214,7 @@ function cutPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null)
 
 function resetPrefabTimelineState(): void {
   prefabAnimation = createEmptyPrefabAnimation();
-  timelineStagingPoses = new Map();
+  timelineStagingPoses = new TimelineStagingPoseStore();
   timelineCurrentTimeMs = 0;
   isTimelinePlaying = false;
   selectedTimelineKeyframeId = null;
@@ -5225,10 +5228,6 @@ function createEmptyPrefabAnimation(): PrefabAnimation {
     activeClipId: null,
     clips: [],
   };
-}
-
-function getTimelineStagingKey(clipId: string, nodeId: string): string {
-  return `${clipId}/${nodeId}`;
 }
 
 function getSelectedPrefabNode(): PrefabNode | null {
@@ -5252,11 +5251,7 @@ function getTimelineStagingPose(
   nodeId: string,
   clip: PrefabAnimationClip | null = getActiveTimelineClip(),
 ): TimelineStagingPose | null {
-  if (!clip) {
-    return null;
-  }
-
-  return timelineStagingPoses.get(getTimelineStagingKey(clip.id, nodeId)) ?? null;
+  return timelineStagingPoses.get(nodeId, clip);
 }
 
 function getOrCreateTimelineStagingPose(
@@ -5264,49 +5259,19 @@ function getOrCreateTimelineStagingPose(
   clip: PrefabAnimationClip,
   asset?: PrimitiveSvgAsset | null,
 ): TimelineStagingPose {
-  const key = getTimelineStagingKey(clip.id, node.id);
-  const existing = timelineStagingPoses.get(key);
-
-  if (existing) {
-    return existing;
-  }
-
-  const pose: TimelineStagingPose = {
-    nodeId: node.id,
-    clipId: clip.id,
-    position: [...node.position],
-    rotation: [...node.rotation],
-    scale: [...node.scale],
-    pathDraft: asset ? cloneStructuredBezierPath(asset.bezierPath) : undefined,
-  };
-
-  timelineStagingPoses.set(key, pose);
-  return pose;
+  return timelineStagingPoses.getOrCreate(node, clip, asset);
 }
 
 function getPrefabNodesWithTimelineStagingPose(
   pose: TimelineStagingPose,
 ): PrefabNode[] {
-  return prefabNodes.map((node) =>
-    node.id === pose.nodeId
-      ? {
-          ...clonePrefabNode(node),
-          position: [...pose.position],
-          rotation: [...pose.rotation],
-          scale: [...pose.scale],
-        }
-      : clonePrefabNode(node),
-  );
+  return getPrefabNodesWithTimelineStagingPoseForNodes(prefabNodes, pose);
 }
 
 function getTimelineStagingWorldTransform(
   pose: TimelineStagingPose,
 ): TransformSnapshot {
-  const stagedNodes = getPrefabNodesWithTimelineStagingPose(pose);
-  const worldMatrix =
-    getPrefabWorldTransforms(stagedNodes).get(pose.nodeId) ?? transformToMatrix(pose);
-
-  return matrixToTransform(worldMatrix);
+  return getTimelineStagingWorldTransformForNodes(prefabNodes, pose);
 }
 
 function getSelectedTimelineStagingPose(): TimelineStagingPose | null {
@@ -5328,13 +5293,7 @@ function getSelectedTimelineStagingPose(): TimelineStagingPose | null {
 function getSelectedTimelineStagingTransform(): TransformSnapshot | null {
   const pose = getSelectedTimelineStagingPose();
 
-  return pose
-    ? {
-        position: [...pose.position],
-        rotation: [...pose.rotation],
-        scale: [...pose.scale],
-      }
-    : null;
+  return pose ? cloneTimelineStagingTransform(pose) : null;
 }
 
 function syncInPlacePathSessionToStagingPose(): void {
@@ -5345,32 +5304,13 @@ function syncInPlacePathSessionToStagingPose(): void {
     return;
   }
 
-  pose.pathDraft = cloneStructuredBezierPath(session.draft);
+  timelineStagingPoses.syncPathDraft(session.nodeId, session.draft);
 }
 
-function pruneTimelineStagingPoses(options?: {
-  clipIds?: Set<string>;
-  nodeIds?: Set<string>;
-  assetIds?: Set<string>;
-}): void {
-  if (!options) {
-    return;
-  }
-
-  for (const [key, pose] of [...timelineStagingPoses]) {
-    const node = getPrefabNode(pose.nodeId);
-    const shouldDelete =
-      (options.clipIds && options.clipIds.has(pose.clipId)) ||
-      (options.nodeIds && options.nodeIds.has(pose.nodeId)) ||
-      (options.assetIds &&
-        node?.kind === "primitive" &&
-        node.assetId &&
-        options.assetIds.has(node.assetId));
-
-    if (shouldDelete) {
-      timelineStagingPoses.delete(key);
-    }
-  }
+function pruneTimelineStagingPoses(
+  options?: TimelineStagingPruneOptions,
+): void {
+  timelineStagingPoses.prune(options, getPrefabNode);
 }
 
 function createUniqueTimelineClipId(name: string): string {
