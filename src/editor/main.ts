@@ -47,9 +47,7 @@ import {
   type PrefabAnimationClip,
   type PrefabAnimationTrack,
   type PrefabPathAnimationKeyframe,
-  type PrefabPathAnimationTrack,
   type PrefabVectorAnimationKeyframe,
-  type PrefabVectorAnimationTrack,
   type PrefabVectorTrackProperty,
   type PrefabTrackEasing,
   type PrefabTrackProperty,
@@ -104,9 +102,7 @@ import {
 import {
   clonePrefabAnimation,
   clonePrefabAnimationClip,
-  clonePrefabAnimationKeyframe,
   clonePrefabAnimationTrack,
-  clonePrefabPathAnimationKeyframe,
   clampTimelineTimeMs,
   evaluatePrefabPathTrack,
   evaluatePrefabTrack,
@@ -114,7 +110,6 @@ import {
   isPrefabVectorTrack,
   isPrefabVectorTrackProperty,
   snapAndClampTimelineTimeMs as snapAndClampTimelineTimeMsWithFps,
-  snapTimelineTimeMs as snapTimelineTimeMsWithFps,
 } from "./timeline/prefabTimelineCore";
 import {
   TimelineStagingPoseStore,
@@ -126,11 +121,9 @@ import {
 } from "./timeline/stagingPose";
 import {
   chooseStableSelection,
-  createUniqueId,
   formatTransformValue,
   roundTimelineNumber,
   roundTransformValue,
-  slugifyTimelineName,
 } from "./tools/editorUtils";
 import {
   buildPathEditPathD,
@@ -221,6 +214,19 @@ import {
   type PendingPrefabClipboard,
   type PrefabClipboardMode,
 } from "./controllers/prefabAssemblyController";
+import {
+  createTimelineClip,
+  deleteActiveTimelineClip,
+  deleteTimelineKeyframe,
+  getActiveTimelineClip as getActiveTimelineClipFromState,
+  getSelectedTimelineKeyframe as getSelectedTimelineKeyframeFromState,
+  selectBasePoseTimeline as selectBasePoseTimelineForState,
+  selectTimelineClip as selectTimelineClipForState,
+  updateActiveTimelineClip as updateActiveTimelineClipForState,
+  updateTimelineKeyframe,
+  upsertPrefabPathKeyframe,
+  upsertPrefabVectorKeyframe,
+} from "./controllers/timelineController";
 
 type EditorMode = "asset" | "path" | "scene";
 type TimelineVectorProperty = PrefabVectorTrackProperty;
@@ -1758,11 +1764,7 @@ function syncSelectionFromPrefabNode(): void {
 }
 
 function getActiveTimelineClip(): PrefabAnimationClip | null {
-  return prefabAnimation.activeClipId
-    ? (prefabAnimation.clips.find(
-        (clip) => clip.id === prefabAnimation.activeClipId,
-      ) ?? null)
-    : null;
+  return getActiveTimelineClipFromState(prefabAnimation);
 }
 
 function getActiveTimelineProperty(): PrefabTrackProperty {
@@ -1774,13 +1776,7 @@ function setActiveTimelineProperty(property: PrefabTrackProperty): void {
 }
 
 function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
-  prefabAnimation = {
-    ...prefabAnimation,
-    activeClipId: nextClip.id,
-    clips: prefabAnimation.clips.map((clip) =>
-      clip.id === nextClip.id ? clonePrefabAnimationClip(nextClip) : clonePrefabAnimationClip(clip),
-    ),
-  };
+  prefabAnimation = updateActiveTimelineClipForState(prefabAnimation, nextClip);
 }
 
 function updateTimelinePlayback(deltaSeconds: number): void {
@@ -1871,135 +1867,6 @@ function getEvaluatedPrefabPathOverrides(): Map<string, StructuredBezierPath> {
   return overrides;
 }
 
-function upsertPrefabKeyframe(
-  clip: PrefabAnimationClip,
-  input: {
-    nodeId: string;
-    property: PrefabVectorTrackProperty;
-    timeMs: number;
-    value: Vector3Tuple;
-    easing: PrefabTrackEasing;
-  },
-): PrefabAnimationClip {
-  const trackId = `${input.nodeId}-${input.property}`;
-  const tracks = clip.tracks.map(clonePrefabAnimationTrack);
-  let track = tracks.find(
-    (candidate): candidate is PrefabVectorAnimationTrack =>
-      isPrefabVectorTrack(candidate) &&
-      candidate.target.nodeId === input.nodeId &&
-      candidate.target.property === input.property,
-  );
-
-  if (!track) {
-    track = {
-      id: createUniqueTimelineTrackId(trackId, tracks),
-      target: {
-        nodeId: input.nodeId,
-        property: input.property,
-      },
-      keyframes: [],
-    };
-    tracks.push(track);
-  }
-
-  const snappedTimeMs = snapTimelineTimeMs(input.timeMs);
-  const nextKeyframe = {
-    id: "",
-    timeMs: snappedTimeMs,
-    value: [...input.value] as Vector3Tuple,
-    easing: input.easing,
-  };
-  const existingIndex = track.keyframes.findIndex(
-    (keyframe) => keyframe.timeMs === snappedTimeMs,
-  );
-
-  if (existingIndex >= 0) {
-    const existingKeyframe = track.keyframes[existingIndex];
-    track.keyframes[existingIndex] = {
-      ...nextKeyframe,
-      id: existingKeyframe?.id ?? createUniqueTimelineKeyframeId(track),
-    };
-    selectedTimelineKeyframeId = track.keyframes[existingIndex]?.id ?? null;
-  } else {
-    const createdKeyframe = {
-      ...nextKeyframe,
-      id: createUniqueTimelineKeyframeId(track),
-    };
-    track.keyframes.push(createdKeyframe);
-    selectedTimelineKeyframeId = createdKeyframe.id;
-  }
-
-  track.keyframes.sort((a, b) => a.timeMs - b.timeMs);
-
-  return {
-    ...clip,
-    tracks,
-  };
-}
-
-function upsertPrefabPathKeyframe(
-  clip: PrefabAnimationClip,
-  input: {
-    nodeId: string;
-    timeMs: number;
-    value: StructuredBezierPath;
-    easing: PrefabTrackEasing;
-  },
-): PrefabAnimationClip {
-  const trackId = `${input.nodeId}-path`;
-  const tracks = clip.tracks.map(clonePrefabAnimationTrack);
-  let track = tracks.find(
-    (candidate): candidate is PrefabPathAnimationTrack =>
-      isPrefabPathTrack(candidate) && candidate.target.nodeId === input.nodeId,
-  );
-
-  if (!track) {
-    track = {
-      id: createUniqueTimelineTrackId(trackId, tracks),
-      target: {
-        nodeId: input.nodeId,
-        property: "path",
-      },
-      keyframes: [],
-    };
-    tracks.push(track);
-  }
-
-  const snappedTimeMs = snapTimelineTimeMs(input.timeMs);
-  const nextKeyframe: PrefabPathAnimationKeyframe = {
-    id: "",
-    timeMs: snappedTimeMs,
-    value: cloneStructuredBezierPath(input.value),
-    easing: input.easing,
-  };
-  const existingIndex = track.keyframes.findIndex(
-    (keyframe) => keyframe.timeMs === snappedTimeMs,
-  );
-
-  if (existingIndex >= 0) {
-    const existingKeyframe = track.keyframes[existingIndex];
-    track.keyframes[existingIndex] = {
-      ...nextKeyframe,
-      id: existingKeyframe?.id ?? createUniqueTimelineKeyframeId(track),
-    };
-    selectedTimelineKeyframeId = track.keyframes[existingIndex]?.id ?? null;
-  } else {
-    const createdKeyframe = {
-      ...nextKeyframe,
-      id: createUniqueTimelineKeyframeId(track),
-    };
-    track.keyframes.push(createdKeyframe);
-    selectedTimelineKeyframeId = createdKeyframe.id;
-  }
-
-  track.keyframes.sort((a, b) => a.timeMs - b.timeMs);
-
-  return {
-    ...clip,
-    tracks,
-  };
-}
-
 function createTimelineClipFromInput(): void {
   if (!selectedProjectId) {
     setImportError(new Error("Create or select a project before creating a clip."));
@@ -2013,19 +1880,13 @@ function createTimelineClipFromInput(): void {
     return;
   }
 
-  const clip: PrefabAnimationClip = {
-    id: createUniqueTimelineClipId(name),
+  const result = createTimelineClip(prefabAnimation, {
     name,
     durationMs: DEFAULT_TIMELINE_DURATION_MS,
     loop: true,
-    tracks: [],
-  };
+  });
 
-  prefabAnimation = {
-    ...prefabAnimation,
-    activeClipId: clip.id,
-    clips: [...prefabAnimation.clips.map(clonePrefabAnimationClip), clip],
-  };
+  prefabAnimation = result.animation;
   timelineCurrentTimeMs = 0;
   isTimelinePlaying = false;
   selectedTimelineKeyframeId = null;
@@ -2039,20 +1900,14 @@ function createTimelineClipFromInput(): void {
 }
 
 function deleteSelectedTimelineClip(): void {
-  const activeClip = getActiveTimelineClip();
+  const result = deleteActiveTimelineClip(prefabAnimation);
 
-  if (!activeClip) {
+  if (!result.deletedClipId) {
     return;
   }
 
-  prefabAnimation = {
-    ...prefabAnimation,
-    activeClipId: null,
-    clips: prefabAnimation.clips
-      .filter((clip) => clip.id !== activeClip.id)
-      .map(clonePrefabAnimationClip),
-  };
-  pruneTimelineStagingPoses({ clipIds: new Set([activeClip.id]) });
+  prefabAnimation = result.animation;
+  pruneTimelineStagingPoses({ clipIds: new Set([result.deletedClipId]) });
   if (inPlacePathEditSession) {
     exitPathTool();
   }
@@ -2066,18 +1921,14 @@ function deleteSelectedTimelineClip(): void {
 }
 
 function selectTimelineClip(clipId: string): void {
-  const clip = prefabAnimation.clips.find((candidate) => candidate.id === clipId);
+  const result = selectTimelineClipForState(prefabAnimation, clipId);
 
-  if (!clip) {
+  if (!result.clip) {
     return;
   }
 
-  prefabAnimation = {
-    ...prefabAnimation,
-    activeClipId: clip.id,
-    clips: prefabAnimation.clips.map(clonePrefabAnimationClip),
-  };
-  timelineCurrentTimeMs = clampTimelineTimeMs(timelineCurrentTimeMs, clip);
+  prefabAnimation = result.animation;
+  timelineCurrentTimeMs = clampTimelineTimeMs(timelineCurrentTimeMs, result.clip);
   isTimelinePlaying = false;
   if (activeEditorTool === "path") {
     startInPlacePathEditSession();
@@ -2088,11 +1939,7 @@ function selectTimelineClip(clipId: string): void {
 }
 
 function selectBasePoseTimeline(): void {
-  prefabAnimation = {
-    ...prefabAnimation,
-    activeClipId: null,
-    clips: prefabAnimation.clips.map(clonePrefabAnimationClip),
-  };
+  prefabAnimation = selectBasePoseTimelineForState(prefabAnimation);
   timelineCurrentTimeMs = 0;
   isTimelinePlaying = false;
   selectedTimelineKeyframeId = null;
@@ -2299,44 +2146,7 @@ function deleteSelectedTimelineKeyframe(): void {
     return;
   }
 
-  if (!isPrefabVectorTrack(selected.track)) {
-    const nextClip: PrefabAnimationClip = {
-      ...activeClip,
-      tracks: activeClip.tracks.map((track) =>
-        track.id === selected.track.id && isPrefabPathTrack(track)
-          ? {
-              ...track,
-              keyframes: track.keyframes
-                .filter((keyframe) => keyframe.id !== selected.keyframe.id)
-                .map(clonePrefabPathAnimationKeyframe),
-            }
-          : clonePrefabAnimationTrack(track),
-      ),
-    };
-
-    selectedTimelineKeyframeId = null;
-    updateActiveTimelineClip(nextClip);
-    loadedPrefabId = null;
-    rebuildViewportProxies();
-    renderEditorShell();
-    exposeEditorDebugHooks();
-    return;
-  }
-
-  const selectedVectorTrack = selected.track;
-  const nextClip: PrefabAnimationClip = {
-    ...activeClip,
-    tracks: activeClip.tracks.map((track) =>
-      track.id === selectedVectorTrack.id && isPrefabVectorTrack(track)
-        ? {
-            ...track,
-            keyframes: track.keyframes
-              .filter((keyframe) => keyframe.id !== selected.keyframe.id)
-              .map(clonePrefabAnimationKeyframe),
-          }
-        : clonePrefabAnimationTrack(track),
-    ),
-  };
+  const nextClip = deleteTimelineKeyframe(activeClip, selected);
 
   selectedTimelineKeyframeId = null;
   updateActiveTimelineClip(nextClip);
@@ -2356,61 +2166,11 @@ function updateSelectedTimelineKeyframe(
     return;
   }
 
-  const nextTimeMs = clampTimelineTimeMs(nextKeyframe.timeMs, activeClip);
-  const nextClip = {
-    ...activeClip,
-    tracks: activeClip.tracks.map((track) => {
-      if (track.id !== selected.track.id) {
-        return clonePrefabAnimationTrack(track);
-      }
+  const result = updateTimelineKeyframe(activeClip, selected, nextKeyframe);
 
-      if (isPrefabPathTrack(selected.track) && isPrefabPathTrack(track)) {
-        const pathKeyframe = nextKeyframe as PrefabPathAnimationKeyframe;
-        const nextKeyframes = track.keyframes
-          .filter((keyframe) => keyframe.id !== selected.keyframe.id)
-          .filter((keyframe) => keyframe.timeMs !== nextTimeMs)
-          .map(clonePrefabPathAnimationKeyframe);
-
-        nextKeyframes.push({
-          ...pathKeyframe,
-          timeMs: nextTimeMs,
-          value: cloneStructuredBezierPath(pathKeyframe.value),
-        });
-        nextKeyframes.sort((a, b) => a.timeMs - b.timeMs);
-
-        return {
-          ...track,
-          keyframes: nextKeyframes,
-        };
-      }
-
-      if (isPrefabVectorTrack(selected.track) && isPrefabVectorTrack(track)) {
-        const vectorKeyframe = nextKeyframe as PrefabVectorAnimationKeyframe;
-        const nextKeyframes = track.keyframes
-          .filter((keyframe) => keyframe.id !== selected.keyframe.id)
-          .filter((keyframe) => keyframe.timeMs !== nextTimeMs)
-          .map(clonePrefabAnimationKeyframe);
-
-        nextKeyframes.push({
-          ...vectorKeyframe,
-          timeMs: nextTimeMs,
-          value: [...vectorKeyframe.value],
-        });
-        nextKeyframes.sort((a, b) => a.timeMs - b.timeMs);
-
-        return {
-          ...track,
-          keyframes: nextKeyframes,
-        };
-      }
-
-      return clonePrefabAnimationTrack(track);
-    }),
-  };
-
-  selectedTimelineKeyframeId = nextKeyframe.id;
-  timelineCurrentTimeMs = nextTimeMs;
-  updateActiveTimelineClip(nextClip);
+  selectedTimelineKeyframeId = result.selectedKeyframeId;
+  timelineCurrentTimeMs = result.currentTimeMs;
+  updateActiveTimelineClip(result.clip);
   loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
@@ -2475,14 +2235,16 @@ function addKeyframeForSelectedPrefabNode(): void {
       return;
     }
 
-    const nextClip = upsertPrefabPathKeyframe(clonePrefabAnimationClip(activeClip), {
+    const result = upsertPrefabPathKeyframe(clonePrefabAnimationClip(activeClip), {
       nodeId: selectedNode.id,
       timeMs,
       value: pathDraft,
       easing: "linear",
+      snapFps: prefabAnimation.snapFps,
     });
 
-    updateActiveTimelineClip(nextClip);
+    selectedTimelineKeyframeId = result.selectedKeyframeId;
+    updateActiveTimelineClip(result.clip);
     timelineCurrentTimeMs = timeMs;
     loadedPrefabId = null;
     lastImportError = null;
@@ -2497,17 +2259,17 @@ function addKeyframeForSelectedPrefabNode(): void {
     return;
   }
 
-  let nextClip = clonePrefabAnimationClip(activeClip);
-
-  nextClip = upsertPrefabKeyframe(nextClip, {
+  const result = upsertPrefabVectorKeyframe(clonePrefabAnimationClip(activeClip), {
     nodeId: selectedNode.id,
     property,
     timeMs,
     value: [...stagingPose[property]],
     easing: "linear",
+    snapFps: prefabAnimation.snapFps,
   });
 
-  updateActiveTimelineClip(nextClip);
+  selectedTimelineKeyframeId = result.selectedKeyframeId;
+  updateActiveTimelineClip(result.clip);
   timelineCurrentTimeMs = timeMs;
   loadedPrefabId = null;
   lastImportError = null;
@@ -4625,24 +4387,7 @@ function getSelectedTimelineKeyframe(
   track: PrefabAnimationTrack;
   keyframe: PrefabAnimationTrack["keyframes"][number];
 } | null {
-  if (!selectedTimelineKeyframeId) {
-    return null;
-  }
-
-  for (const track of clip.tracks) {
-    const keyframe = track.keyframes.find(
-      (candidate) => candidate.id === selectedTimelineKeyframeId,
-    );
-
-    if (keyframe) {
-      return {
-        track,
-        keyframe,
-      };
-    }
-  }
-
-  return null;
+  return getSelectedTimelineKeyframeFromState(clip, selectedTimelineKeyframeId);
 }
 
 function timeMsFromTimelinePointer(
@@ -4762,28 +4507,6 @@ function pruneTimelineStagingPoses(
   timelineStagingPoses.prune(options, getPrefabNode);
 }
 
-function createUniqueTimelineClipId(name: string): string {
-  const baseId = slugifyTimelineName(name);
-  const existingIds = new Set(prefabAnimation.clips.map((clip) => clip.id));
-
-  return createUniqueId(baseId, existingIds);
-}
-
-function createUniqueTimelineTrackId(
-  baseId: string,
-  tracks: PrefabAnimationTrack[],
-): string {
-  return createUniqueId(baseId, new Set(tracks.map((track) => track.id)));
-}
-
-function createUniqueTimelineKeyframeId(track: PrefabAnimationTrack): string {
-  const baseId = `${track.id}-key`;
-  return createUniqueId(
-    baseId,
-    new Set(track.keyframes.map((keyframe) => keyframe.id)),
-  );
-}
-
 function createNextPrefabNodeId(): string {
   const id = `prefab-node-${nextPrefabNodeNumber}`;
   nextPrefabNodeNumber += 1;
@@ -4825,10 +4548,6 @@ function getEditorModeLabel(mode: EditorMode): string {
   }
 
   return "Scene Layout";
-}
-
-function snapTimelineTimeMs(timeMs: number): number {
-  return snapTimelineTimeMsWithFps(timeMs, prefabAnimation.snapFps);
 }
 
 function snapAndClampTimelineTimeMs(
