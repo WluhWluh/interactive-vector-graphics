@@ -110,8 +110,6 @@ import {
   clampTimelineTimeMs,
   evaluatePrefabPathTrack,
   evaluatePrefabTrack,
-  getTimelinePropertyLabel,
-  getTimelineSnapTickTimes as getTimelineSnapTickTimesForClip,
   isPrefabPathTrack,
   isPrefabVectorTrack,
   isPrefabVectorTrackProperty,
@@ -129,7 +127,6 @@ import {
 import {
   chooseStableSelection,
   createUniqueId,
-  formatTimelineNumber,
   formatTransformValue,
   getNextNodeNumber,
   roundTimelineNumber,
@@ -150,6 +147,7 @@ import {
   drawPathEditPreview,
   type SourcePathEditViewTransform,
 } from "./render/pathEditDrawing";
+import { renderTimelinePanel } from "./ui/timelinePanel";
 import {
   clonePrefabNode,
   cloneSceneNode,
@@ -2980,98 +2978,52 @@ function renderPrefabNodeList(): void {
 function renderPrefabTimeline(): void {
   const activeClip = getActiveTimelineClip();
   const activeProperty = getActiveTimelineProperty();
-  const basePoseItem = document.createElement("li");
-  const basePoseButton = document.createElement("button");
-
-  basePoseButton.type = "button";
-  basePoseButton.className = "timeline-clip-item";
-  basePoseButton.dataset.clipId = "__base-pose__";
-  basePoseButton.dataset.selected = String(prefabAnimation.activeClipId === null);
-  basePoseButton.textContent = "Base Pose";
-  basePoseButton.addEventListener("click", () => {
-    selectBasePoseTimeline();
-  });
-  basePoseItem.append(basePoseButton);
-
-  const clipButtons = prefabAnimation.clips.map((clip) => {
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-
-    button.type = "button";
-    button.className = "timeline-clip-item";
-    button.dataset.clipId = clip.id;
-    button.dataset.selected = String(clip.id === prefabAnimation.activeClipId);
-    button.textContent = `${clip.name} (${clip.durationMs} ms)`;
-    button.addEventListener("click", () => {
-      selectTimelineClip(clip.id);
-    });
-
-    item.append(button);
-    return item;
-  });
-
-  elements.timelineClipList.replaceChildren(basePoseItem, ...clipButtons);
-  elements.timelineTimeInput.value = String(timelineCurrentTimeMs);
-  elements.timelineDurationInput.value = activeClip
-    ? String(activeClip.durationMs)
-    : String(DEFAULT_TIMELINE_DURATION_MS);
-  elements.timelineSnapFpsInput.value = formatTimelineNumber(prefabAnimation.snapFps);
-  elements.timelineLoopInput.checked = activeClip?.loop ?? false;
-  elements.timelineScrubInput.max = String(Math.max(activeClip?.durationMs ?? 1, 1));
-  elements.timelineScrubInput.value = String(clampTimelineTimeMs(timelineCurrentTimeMs, activeClip));
 
   if (!activeClip) {
-    elements.timelineTrackLanes.replaceChildren();
-    elements.timelineKeyframeEditor.hidden = true;
-    elements.timelineStatus.textContent =
-      "Base Pose: editing prefab defaults outside animation";
+    renderTimelinePanel({
+      elements,
+      animation: prefabAnimation,
+      currentTimeMs: timelineCurrentTimeMs,
+      defaultDurationMs: DEFAULT_TIMELINE_DURATION_MS,
+      activeClip: null,
+      selectedNode:
+        selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+          ? getPrefabNode(selectedPrefabNodeId)
+          : null,
+      activeProperty,
+      laneProperties: TIMELINE_LANE_PROPERTIES,
+      selectedKeyframeId: selectedTimelineKeyframeId,
+      getTrack: findTimelineTrack,
+      getSelectedKeyframe: getSelectedTimelineKeyframe,
+      onSelectBasePose: selectBasePoseTimeline,
+      onSelectClip: selectTimelineClip,
+      onSelectProperty: setActiveTimelineProperty,
+      onTrackClick: () => {},
+      onKeyframeClick: () => {},
+      onKeyframePointerDown: () => {},
+    });
     return;
   }
 
-  const selectedNode =
-    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-      ? getPrefabNode(selectedPrefabNodeId)
-      : null;
-  const trackCount = activeClip.tracks.length;
-  const keyframeCount = activeClip.tracks.reduce(
-    (total, track) => total + track.keyframes.length,
-    0,
-  );
-
-  renderTimelineTrackLanes(activeClip, selectedNode, activeProperty);
-  renderTimelineKeyframeEditor(activeClip);
-
-  elements.timelineStatus.textContent = selectedNode
-    ? `${activeClip.name}: ${trackCount} tracks, ${keyframeCount} keyframes`
-    : `${activeClip.name}: select a real prefab node to add keyframes`;
-}
-
-function renderTimelineTrackLanes(
-  activeClip: PrefabAnimationClip,
-  selectedNode: PrefabNode | null,
-  activeProperty: PrefabTrackProperty,
-): void {
-  const lanes = TIMELINE_LANE_PROPERTIES.map((property) => {
-    const lane = document.createElement("div");
-    const labelButton = document.createElement("button");
-    const trackBar = document.createElement("div");
-    const isActive = property === activeProperty;
-
-    lane.className = "timeline-track-lane";
-    labelButton.type = "button";
-    labelButton.className = "timeline-track-label";
-    labelButton.dataset.timelineProperty = property;
-    labelButton.dataset.active = String(isActive);
-    labelButton.textContent = getTimelinePropertyLabel(property);
-    labelButton.addEventListener("click", () => {
-      setActiveTimelineProperty(property);
-    });
-
-    trackBar.className = "timeline-track-bar";
-    trackBar.dataset.timelineProperty = property;
-    trackBar.dataset.active = String(isActive);
-    appendTimelineSnapTicks(trackBar, activeClip);
-    trackBar.addEventListener("click", (event) => {
+  renderTimelinePanel({
+    elements,
+    animation: prefabAnimation,
+    currentTimeMs: timelineCurrentTimeMs,
+    defaultDurationMs: DEFAULT_TIMELINE_DURATION_MS,
+    activeClip,
+    selectedNode:
+      selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+        ? getPrefabNode(selectedPrefabNodeId)
+        : null,
+    activeProperty,
+    laneProperties: TIMELINE_LANE_PROPERTIES,
+    selectedKeyframeId: selectedTimelineKeyframeId,
+    getTrack: findTimelineTrack,
+    getSelectedKeyframe: getSelectedTimelineKeyframe,
+    onSelectBasePose: selectBasePoseTimeline,
+    onSelectClip: selectTimelineClip,
+    onSelectProperty: setActiveTimelineProperty,
+    onTrackClick: (property, event) => {
       if (property !== getActiveTimelineProperty()) {
         setActiveTimelineProperty(property);
         return;
@@ -3083,118 +3035,34 @@ function renderTimelineTrackLanes(
       rebuildViewportProxies();
       renderEditorShell();
       exposeEditorDebugHooks();
-    });
+    },
+    onKeyframeClick: (property, keyframeId, timeMs, event) => {
+      event.stopPropagation();
+      if (property !== getActiveTimelineProperty()) {
+        setActiveTimelineProperty(property);
+        return;
+      }
 
-    const track =
-      selectedNode && activeClip
-        ? findTimelineTrack(activeClip, selectedNode.id, property)
-        : null;
+      selectedTimelineKeyframeId = keyframeId;
+      timelineCurrentTimeMs = timeMs;
+      isTimelinePlaying = false;
+      renderEditorShell();
+      exposeEditorDebugHooks();
+    },
+    onKeyframePointerDown: (property, keyframeId, event) => {
+      event.stopPropagation();
+      if (property !== getActiveTimelineProperty()) {
+        setActiveTimelineProperty(property);
+        return;
+      }
 
-    for (const keyframe of track?.keyframes ?? []) {
-      const marker = document.createElement("button");
-      const left =
-        activeClip.durationMs > 0
-          ? (keyframe.timeMs / activeClip.durationMs) * 100
-          : 0;
-
-      marker.type = "button";
-      marker.className = "timeline-keyframe-marker";
-      marker.dataset.keyframeId = keyframe.id;
-      marker.dataset.selected = String(keyframe.id === selectedTimelineKeyframeId);
-      marker.style.left = `${Math.min(Math.max(left, 0), 100)}%`;
-      marker.ariaLabel = `${getTimelinePropertyLabel(property)} keyframe ${keyframe.timeMs} ms`;
-      marker.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (property !== getActiveTimelineProperty()) {
-          setActiveTimelineProperty(property);
-          return;
-        }
-
-        selectedTimelineKeyframeId = keyframe.id;
-        timelineCurrentTimeMs = keyframe.timeMs;
-        isTimelinePlaying = false;
-        renderEditorShell();
-        exposeEditorDebugHooks();
-      });
-      marker.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-        if (property !== getActiveTimelineProperty()) {
-          setActiveTimelineProperty(property);
-          return;
-        }
-
-        selectedTimelineKeyframeId = keyframe.id;
-        timelinePointerDrag = {
-          keyframeId: keyframe.id,
-          property,
-        };
-        marker.setPointerCapture(event.pointerId);
-      });
-      trackBar.append(marker);
-    }
-
-    lane.append(labelButton, trackBar);
-    return lane;
+      selectedTimelineKeyframeId = keyframeId;
+      timelinePointerDrag = {
+        keyframeId,
+        property,
+      };
+    },
   });
-
-  elements.timelineTrackLanes.replaceChildren(...lanes);
-}
-
-function appendTimelineSnapTicks(
-  trackBar: HTMLElement,
-  activeClip: PrefabAnimationClip,
-): void {
-  const fragment = document.createDocumentFragment();
-
-  for (const timeMs of getTimelineSnapTickTimesForClip(
-    activeClip,
-    prefabAnimation.snapFps,
-  )) {
-    const tick = document.createElement("span");
-    const left =
-      activeClip.durationMs > 0 ? (timeMs / activeClip.durationMs) * 100 : 0;
-
-    tick.className = "timeline-snap-tick";
-    tick.dataset.timeMs = String(timeMs);
-    tick.dataset.major = String(
-      timeMs === 0 || timeMs === activeClip.durationMs || timeMs % 1000 === 0,
-    );
-    tick.style.left = `${Math.min(Math.max(left, 0), 100)}%`;
-    fragment.append(tick);
-  }
-
-  trackBar.append(fragment);
-}
-
-function renderTimelineKeyframeEditor(activeClip: PrefabAnimationClip): void {
-  const selected = getSelectedTimelineKeyframe(activeClip);
-
-  if (!selected || !isPrefabVectorTrack(selected.track)) {
-    elements.timelineKeyframeEditor.hidden = true;
-    return;
-  }
-
-  const keyframe = selected.track.keyframes.find(
-    (candidate) => candidate.id === selected.keyframe.id,
-  );
-
-  if (!keyframe) {
-    elements.timelineKeyframeEditor.hidden = true;
-    return;
-  }
-
-  elements.timelineKeyframeEditor.hidden = false;
-  elements.timelineKeyframeTimeInput.value = String(keyframe.timeMs);
-  elements.timelineKeyframeValueXInput.value = formatTransformValue(
-    keyframe.value[0],
-  );
-  elements.timelineKeyframeValueYInput.value = formatTransformValue(
-    keyframe.value[1],
-  );
-  elements.timelineKeyframeValueZInput.value = formatTransformValue(
-    keyframe.value[2],
-  );
-  elements.timelineKeyframeEasingSelect.value = keyframe.easing;
 }
 
 function renderSceneList(): void {
