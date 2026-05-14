@@ -3,7 +3,7 @@ import {
   type BezierPoint,
   type BezierSegment,
   type StructuredBezierPath,
-} from "../core/assets/structuredBezierPath";
+} from "../../core/assets/structuredBezierPath";
 
 export type PathEditComponent = "anchor" | "handleIn" | "handleOut";
 

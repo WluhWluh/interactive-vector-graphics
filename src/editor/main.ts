@@ -1,9 +1,8 @@
 import "../styles.css";
-import { Euler, Matrix4, Quaternion, Vector3 } from "three";
+import { Matrix4, Vector3 } from "three";
 import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
 import {
   cloneStructuredBezierPath,
-  structuredBezierToPathD,
   type BezierPoint,
   type BezierSegment,
   type StructuredBezierPath,
@@ -61,16 +60,13 @@ import {
   type SceneDocument,
   type SceneNode,
   type ScenePrefabInstanceNode,
-  type ScenePrimitiveNode,
   type SceneRecord,
 } from "./api";
 import {
-  addBezierPoints,
   createPathEditSession,
   dragPathEditControl as dragPathEditCoreControl,
   findNearestPathEditControl,
   getPathEditComponentPoint,
-  getPathEditControls,
   getPathEditScreenControls as getCorePathEditScreenControls,
   getPathEditSegment,
   getSelectedPathEditSegment,
@@ -83,10 +79,11 @@ import {
   type PathEditScreenControl,
   type PathEditSession,
   type PathEditViewportAdapter,
-} from "./pathEditCore";
+} from "./tools/pathEditCore";
 import {
   ThreeEditorViewport,
   tupleToVector,
+  vectorToTuple,
   type CameraProjection,
   type Curve3DControlComponent,
   type Curve3DControlDescriptor,
@@ -95,6 +92,81 @@ import {
   type TransformMode,
   type Vector3Tuple,
 } from "./threeEditorViewport";
+import {
+  applyWorldTransformToPrefabNode,
+  cloneTransform,
+  getLocalTransformFromPrefabWorldTransform,
+  getPrefabWorldTransforms,
+  matrixToTransform,
+  transformToMatrix,
+  type TransformSnapshot,
+} from "./tools/prefabTransform";
+import {
+  clonePrefabAnimation,
+  clonePrefabAnimationClip,
+  clonePrefabAnimationKeyframe,
+  clonePrefabAnimationTrack,
+  clonePrefabPathAnimationKeyframe,
+  clampTimelineTimeMs,
+  evaluatePrefabPathTrack,
+  evaluatePrefabTrack,
+  getTimelinePropertyLabel,
+  getTimelineSnapTickTimes as getTimelineSnapTickTimesForClip,
+  isPrefabPathTrack,
+  isPrefabVectorTrack,
+  isPrefabVectorTrackProperty,
+  snapAndClampTimelineTimeMs as snapAndClampTimelineTimeMsWithFps,
+  snapTimelineTimeMs as snapTimelineTimeMsWithFps,
+} from "./timeline/prefabTimelineCore";
+import {
+  chooseStableSelection,
+  createUniqueId,
+  formatTimelineNumber,
+  formatTransformValue,
+  getNextNodeNumber,
+  roundTimelineNumber,
+  roundTransformValue,
+  slugifyTimelineName,
+} from "./tools/editorUtils";
+import {
+  buildPathEditPathD,
+  createPrimitiveAssetPathPreview,
+  drawPrimitiveAssetPath,
+  getAssetKindListLabel,
+  getPrimitiveGhostColor,
+} from "./render/primitiveAssetDrawing";
+import {
+  drawPathEditControls,
+  drawPathEditPreview,
+  type SourcePathEditViewTransform,
+} from "./render/pathEditDrawing";
+import {
+  clonePrefabNode,
+  cloneSceneNode,
+  getPrefabNodeAndDescendantIds as getPrefabNodeAndDescendantIdsFromNodes,
+  getPrefabNodeTreeEntries as getPrefabNodeTreeEntriesFromNodes,
+  type PrefabNodeTreeEntry,
+} from "./state/documentNodes";
+import { getEditorElements } from "./ui/editorDom";
+import {
+  COLLAPSIBLE_MODULE_IDS,
+  getModuleCollapseButton,
+  readCollapsedModuleCookie,
+  renderCollapsibleModules as renderCollapsibleModulesForState,
+  writeCollapsedModuleCookie,
+  type CollapsibleModuleId,
+} from "./ui/collapsibleModules";
+import {
+  addBezierPoints3D,
+  getPathEdit3DComponentPoint,
+  getPathEdit3DSegment,
+  getSelectedPathEdit3DSegment,
+  getSourcePathEdit3DControlId,
+  parseSourcePathEdit3DControlId,
+  sourcePathEdit3DSelectionMatches,
+  subtractBezierPoints3D,
+  type SourcePathEdit3DSession,
+} from "./tools/pathEdit3dCore";
 
 type EditorMode = "asset" | "path" | "scene";
 type TransformProperty = "position" | "rotation" | "scale";
@@ -120,110 +192,10 @@ type PendingPrefabClipboard = {
 type SourcePathEditSession = PathEditSession & {
   assetId: string;
 };
-type SourcePathEdit3DSelection = {
-  segmentId: string;
-  component: PathEditComponent;
-};
-type SourcePathEdit3DSession = {
-  assetId: string;
-  draft: StructuredBezierPath3D;
-  selected: SourcePathEdit3DSelection | null;
-};
 type InPlacePathEditSession = PathEditSession & {
   nodeId: string;
   assetId: string;
 };
-type CollapsibleModuleId =
-  | "projects"
-  | "primitive-assets"
-  | "prefabs"
-  | "prefab-contents"
-  | "source-path-assets"
-  | "scene-documents"
-  | "scene-contents";
-
-type EditorElements = {
-  assetModeButton: HTMLButtonElement;
-  pathModeButton: HTMLButtonElement;
-  sceneModeButton: HTMLButtonElement;
-  assetModePanel: HTMLElement;
-  pathModePanel: HTMLElement;
-  sceneModePanel: HTMLElement;
-  projectForm: HTMLFormElement;
-  projectNameInput: HTMLInputElement;
-  projectList: HTMLUListElement;
-  deleteProjectButton: HTMLButtonElement;
-  prefabNameInput: HTMLInputElement;
-  prefabList: HTMLUListElement;
-  createPrefabButton: HTMLButtonElement;
-  loadPrefabButton: HTMLButtonElement;
-  savePrefabButton: HTMLButtonElement;
-  deletePrefabButton: HTMLButtonElement;
-  prefabNodeList: HTMLUListElement;
-  createPrefabGroupButton: HTMLButtonElement;
-  prefabCopyButton: HTMLButtonElement;
-  prefabCutButton: HTMLButtonElement;
-  deletePrefabNodeButton: HTMLButtonElement;
-  prefabTimelinePanel: HTMLElement;
-  timelineClipNameInput: HTMLInputElement;
-  timelineCreateClipButton: HTMLButtonElement;
-  timelineClipList: HTMLUListElement;
-  timelineDeleteClipButton: HTMLButtonElement;
-  timelinePlayButton: HTMLButtonElement;
-  timelinePauseButton: HTMLButtonElement;
-  timelineStopButton: HTMLButtonElement;
-  timelineTimeInput: HTMLInputElement;
-  timelineDurationInput: HTMLInputElement;
-  timelineSnapFpsInput: HTMLInputElement;
-  timelineLoopInput: HTMLInputElement;
-  timelineScrubInput: HTMLInputElement;
-  timelineTrackLanes: HTMLDivElement;
-  timelineAddKeyframeButton: HTMLButtonElement;
-  timelineSnapBaseButton: HTMLButtonElement;
-  timelineStatus: HTMLSpanElement;
-  timelineKeyframeEditor: HTMLDivElement;
-  timelineKeyframeTimeInput: HTMLInputElement;
-  timelineKeyframeValueXInput: HTMLInputElement;
-  timelineKeyframeValueYInput: HTMLInputElement;
-  timelineKeyframeValueZInput: HTMLInputElement;
-  timelineKeyframeEasingSelect: HTMLSelectElement;
-  timelineDeleteKeyframeButton: HTMLButtonElement;
-  sceneNameInput: HTMLInputElement;
-  sceneList: HTMLUListElement;
-  createSceneButton: HTMLButtonElement;
-  cloneSceneButton: HTMLButtonElement;
-  loadSceneButton: HTMLButtonElement;
-  saveSceneButton: HTMLButtonElement;
-  deleteSceneButton: HTMLButtonElement;
-  fileInput: HTMLInputElement;
-  assetList: HTMLUListElement;
-  pathAssetList: HTMLUListElement;
-  editPathButton: HTMLButtonElement;
-  create3DCurveButton: HTMLButtonElement;
-  savePathButton: HTMLButtonElement;
-  cancelPathButton: HTMLButtonElement;
-  pathEditFields: HTMLDivElement;
-  addNodeButton: HTMLButtonElement;
-  addPrefabInstanceButton: HTMLButtonElement;
-  deleteAssetButton: HTMLButtonElement;
-  sceneNodeList: HTMLUListElement;
-  deleteSceneNodeButton: HTMLButtonElement;
-  projectionToggleButton: HTMLButtonElement;
-  transformTranslateButton: HTMLButtonElement;
-  transformRotateButton: HTMLButtonElement;
-  transformScaleButton: HTMLButtonElement;
-  transformPathButton: HTMLButtonElement;
-  resetViewButton: HTMLButtonElement;
-  importError: HTMLParagraphElement;
-  inspectorFields: HTMLDListElement;
-};
-
-type TransformSnapshot = {
-  position: Vector3Tuple;
-  rotation: Vector3Tuple;
-  scale: Vector3Tuple;
-};
-
 type DrawableBillboard = {
   id: string;
   asset: PrimitiveSvgAsset;
@@ -234,30 +206,6 @@ type DrawableBillboard = {
   pathOverride?: StructuredBezierPath;
 };
 
-type RgbColor = {
-  r: number;
-  g: number;
-  b: number;
-};
-
-type PrefabNodeTreeEntry = {
-  node: PrefabNode;
-  depth: number;
-};
-
-const COLLAPSIBLE_MODULE_IDS: CollapsibleModuleId[] = [
-  "projects",
-  "primitive-assets",
-  "prefabs",
-  "prefab-contents",
-  "source-path-assets",
-  "scene-documents",
-  "scene-contents",
-];
-const COLLAPSED_MODULE_COOKIE_NAME = "ivg_editor_collapsed_modules";
-const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
-const EXPANDED_ARROW = "▴";
-const COLLAPSED_ARROW = "▾";
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
   "position",
@@ -1759,7 +1707,11 @@ function syncNodeFromViewport(nodeId: string): void {
       };
 
       threeViewport.syncNodeFromProxy(worldNode);
-      const localTransform = getLocalTransformFromPrefabWorldTransform(node, worldNode);
+      const localTransform = getLocalTransformFromPrefabWorldTransform(
+        prefabNodes,
+        node,
+        worldNode,
+      );
       stagingPose.position = [...localTransform.position];
       stagingPose.rotation = [...localTransform.rotation];
       stagingPose.scale = [...localTransform.scale];
@@ -1774,7 +1726,7 @@ function syncNodeFromViewport(nodeId: string): void {
     };
 
     threeViewport.syncNodeFromProxy(worldNode);
-    applyWorldTransformToPrefabNode(node, worldNode);
+    applyWorldTransformToPrefabNode(prefabNodes, node, worldNode);
     loadedPrefabId = null;
 
     /**
@@ -1900,56 +1852,6 @@ function getEvaluatedPrefabNodes(): PrefabNode[] {
   return nodes;
 }
 
-function evaluatePrefabTrack(
-  track: PrefabVectorAnimationTrack,
-  timeMs: number,
-): Vector3Tuple | null {
-  const keyframes = [...track.keyframes].sort((a, b) => a.timeMs - b.timeMs);
-
-  if (keyframes.length === 0) {
-    return null;
-  }
-
-  const firstKeyframe = keyframes[0];
-  const lastKeyframe = keyframes[keyframes.length - 1];
-
-  if (!firstKeyframe || !lastKeyframe) {
-    return null;
-  }
-
-  if (timeMs <= firstKeyframe.timeMs) {
-    return [...firstKeyframe.value];
-  }
-
-  if (timeMs >= lastKeyframe.timeMs) {
-    return [...lastKeyframe.value];
-  }
-
-  for (let index = 0; index < keyframes.length - 1; index += 1) {
-    const current = keyframes[index];
-    const next = keyframes[index + 1];
-
-    if (!current || !next || timeMs < current.timeMs || timeMs > next.timeMs) {
-      continue;
-    }
-
-    if (current.easing === "step" || current.timeMs === next.timeMs) {
-      return [...current.value];
-    }
-
-    const span = next.timeMs - current.timeMs;
-    const rawProgress = (timeMs - current.timeMs) / span;
-    const progress =
-      current.easing === "easeInOut"
-        ? smoothstep(rawProgress)
-        : rawProgress;
-
-    return lerpVector3(current.value, next.value, progress);
-  }
-
-  return null;
-}
-
 function getEvaluatedPrefabPathOverrides(): Map<string, StructuredBezierPath> {
   const overrides = new Map<string, StructuredBezierPath>();
   const activeClip = getActiveTimelineClip();
@@ -1973,94 +1875,6 @@ function getEvaluatedPrefabPathOverrides(): Map<string, StructuredBezierPath> {
   }
 
   return overrides;
-}
-
-function evaluatePrefabPathTrack(
-  track: PrefabPathAnimationTrack,
-  timeMs: number,
-): StructuredBezierPath | null {
-  const keyframes = [...track.keyframes].sort((a, b) => a.timeMs - b.timeMs);
-
-  if (keyframes.length === 0) {
-    return null;
-  }
-
-  const firstKeyframe = keyframes[0];
-  const lastKeyframe = keyframes[keyframes.length - 1];
-
-  if (!firstKeyframe || !lastKeyframe) {
-    return null;
-  }
-
-  if (timeMs <= firstKeyframe.timeMs) {
-    return cloneStructuredBezierPath(firstKeyframe.value);
-  }
-
-  if (timeMs >= lastKeyframe.timeMs) {
-    return cloneStructuredBezierPath(lastKeyframe.value);
-  }
-
-  for (let index = 0; index < keyframes.length - 1; index += 1) {
-    const current = keyframes[index];
-    const next = keyframes[index + 1];
-
-    if (!current || !next || timeMs < current.timeMs || timeMs > next.timeMs) {
-      continue;
-    }
-
-    if (
-      current.easing === "step" ||
-      current.timeMs === next.timeMs ||
-      !canInterpolateBezierPaths(current.value, next.value)
-    ) {
-      return cloneStructuredBezierPath(current.value);
-    }
-
-    const span = next.timeMs - current.timeMs;
-    const rawProgress = (timeMs - current.timeMs) / span;
-    const progress =
-      current.easing === "easeInOut"
-        ? smoothstep(rawProgress)
-        : rawProgress;
-
-    return interpolateBezierPaths(current.value, next.value, progress);
-  }
-
-  return null;
-}
-
-function canInterpolateBezierPaths(
-  start: StructuredBezierPath,
-  end: StructuredBezierPath,
-): boolean {
-  return (
-    start.closed === end.closed &&
-    start.segments.length === end.segments.length &&
-    start.segments.every(
-      (segment, index) => segment.id === end.segments[index]?.id,
-    )
-  );
-}
-
-function interpolateBezierPaths(
-  start: StructuredBezierPath,
-  end: StructuredBezierPath,
-  progress: number,
-): StructuredBezierPath {
-  return {
-    version: 1,
-    closed: start.closed,
-    segments: start.segments.map((segment, index) => {
-      const endSegment = end.segments[index] ?? segment;
-
-      return {
-        id: segment.id,
-        anchor: lerpBezierPoint(segment.anchor, endSegment.anchor, progress),
-        handleIn: lerpBezierPoint(segment.handleIn, endSegment.handleIn, progress),
-        handleOut: lerpBezierPoint(segment.handleOut, endSegment.handleOut, progress),
-      };
-    }),
-  };
 }
 
 function upsertPrefabKeyframe(
@@ -2893,302 +2707,13 @@ function toggleCollapsibleModule(moduleId: CollapsibleModuleId): void {
     collapsedModuleIds.add(moduleId);
   }
 
-  writeCollapsedModuleCookie();
+  writeCollapsedModuleCookie(collapsedModuleIds);
   renderCollapsibleModules();
   exposeEditorDebugHooks();
 }
 
 function renderCollapsibleModules(): void {
-  for (const moduleId of COLLAPSIBLE_MODULE_IDS) {
-    const moduleElement = getCollapsibleModule(moduleId);
-    const body = getCollapsibleModuleBody(moduleElement, moduleId);
-    const button = getModuleCollapseButton(moduleId);
-    const collapsed = collapsedModuleIds.has(moduleId);
-
-    moduleElement.dataset.collapsed = String(collapsed);
-    body.hidden = collapsed;
-    button.textContent = collapsed ? COLLAPSED_ARROW : EXPANDED_ARROW;
-    button.setAttribute("aria-expanded", String(!collapsed));
-  }
-}
-
-function readCollapsedModuleCookie(): Set<CollapsibleModuleId> {
-  const rawValue = document.cookie
-    .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${COLLAPSED_MODULE_COOKIE_NAME}=`))
-    ?.slice(COLLAPSED_MODULE_COOKIE_NAME.length + 1);
-
-  if (!rawValue) {
-    return new Set();
-  }
-
-  const allowedIds = new Set(COLLAPSIBLE_MODULE_IDS);
-  const decodedValue = decodeURIComponent(rawValue);
-  const moduleIds = decodedValue
-    .split(",")
-    .filter((value): value is CollapsibleModuleId =>
-      allowedIds.has(value as CollapsibleModuleId),
-    );
-
-  return new Set(moduleIds);
-}
-
-function writeCollapsedModuleCookie(): void {
-  const value = encodeURIComponent(
-    COLLAPSIBLE_MODULE_IDS.filter((moduleId) =>
-      collapsedModuleIds.has(moduleId),
-    ).join(","),
-  );
-
-  document.cookie = [
-    `${COLLAPSED_MODULE_COOKIE_NAME}=${value}`,
-    "path=/",
-    `max-age=${COOKIE_MAX_AGE_SECONDS}`,
-    "SameSite=Lax",
-  ].join("; ");
-}
-
-function getCollapsibleModule(moduleId: CollapsibleModuleId): HTMLElement {
-  const element = document.querySelector(
-    `[data-collapsible-module="${moduleId}"]`,
-  );
-
-  if (!(element instanceof HTMLElement)) {
-    throw new Error(`Expected collapsible module "${moduleId}" to exist.`);
-  }
-
-  return element;
-}
-
-function getCollapsibleModuleBody(
-  moduleElement: HTMLElement,
-  moduleId: CollapsibleModuleId,
-): HTMLElement {
-  const body = moduleElement.querySelector(".collapsible-module-body");
-
-  if (!(body instanceof HTMLElement)) {
-    throw new Error(`Expected collapsible body for module "${moduleId}".`);
-  }
-
-  return body;
-}
-
-function getModuleCollapseButton(moduleId: CollapsibleModuleId): HTMLButtonElement {
-  const button = document.querySelector(
-    `[data-module-collapse-button="${moduleId}"]`,
-  );
-
-  if (!(button instanceof HTMLButtonElement)) {
-    throw new Error(`Expected collapse button for module "${moduleId}".`);
-  }
-
-  return button;
-}
-
-function getEditorElements(): EditorElements {
-  return {
-    assetModeButton: getRequiredElement("asset-mode-button", HTMLButtonElement),
-    pathModeButton: getRequiredElement("path-mode-button", HTMLButtonElement),
-    sceneModeButton: getRequiredElement("scene-mode-button", HTMLButtonElement),
-    assetModePanel: getRequiredElement("asset-mode-panel", HTMLElement),
-    pathModePanel: getRequiredElement("path-mode-panel", HTMLElement),
-    sceneModePanel: getRequiredElement("scene-mode-panel", HTMLElement),
-    projectForm: getRequiredElement("project-form", HTMLFormElement),
-    projectNameInput: getRequiredElement("project-name-input", HTMLInputElement),
-    projectList: getRequiredElement("project-list", HTMLUListElement),
-    deleteProjectButton: getRequiredElement(
-      "delete-project-button",
-      HTMLButtonElement,
-    ),
-    prefabNameInput: getRequiredElement("prefab-name-input", HTMLInputElement),
-    prefabList: getRequiredElement("prefab-list", HTMLUListElement),
-    createPrefabButton: getRequiredElement(
-      "create-prefab-button",
-      HTMLButtonElement,
-    ),
-    loadPrefabButton: getRequiredElement("load-prefab-button", HTMLButtonElement),
-    savePrefabButton: getRequiredElement("save-prefab-button", HTMLButtonElement),
-    deletePrefabButton: getRequiredElement(
-      "delete-prefab-button",
-      HTMLButtonElement,
-    ),
-    prefabNodeList: getRequiredElement("prefab-node-list", HTMLUListElement),
-    createPrefabGroupButton: getRequiredElement(
-      "create-prefab-group-button",
-      HTMLButtonElement,
-    ),
-    deletePrefabNodeButton: getRequiredElement(
-      "delete-prefab-node-button",
-      HTMLButtonElement,
-    ),
-    prefabCopyButton: getRequiredElement("prefab-copy-button", HTMLButtonElement),
-    prefabCutButton: getRequiredElement("prefab-cut-button", HTMLButtonElement),
-    prefabTimelinePanel: getRequiredElement("prefab-timeline-panel", HTMLElement),
-    timelineClipNameInput: getRequiredElement(
-      "timeline-clip-name-input",
-      HTMLInputElement,
-    ),
-    timelineCreateClipButton: getRequiredElement(
-      "timeline-create-clip-button",
-      HTMLButtonElement,
-    ),
-    timelineClipList: getRequiredElement(
-      "timeline-clip-list",
-      HTMLUListElement,
-    ),
-    timelineDeleteClipButton: getRequiredElement(
-      "timeline-delete-clip-button",
-      HTMLButtonElement,
-    ),
-    timelinePlayButton: getRequiredElement(
-      "timeline-play-button",
-      HTMLButtonElement,
-    ),
-    timelinePauseButton: getRequiredElement(
-      "timeline-pause-button",
-      HTMLButtonElement,
-    ),
-    timelineStopButton: getRequiredElement(
-      "timeline-stop-button",
-      HTMLButtonElement,
-    ),
-    timelineTimeInput: getRequiredElement(
-      "timeline-time-input",
-      HTMLInputElement,
-    ),
-    timelineDurationInput: getRequiredElement(
-      "timeline-duration-input",
-      HTMLInputElement,
-    ),
-    timelineSnapFpsInput: getRequiredElement(
-      "timeline-snap-fps-input",
-      HTMLInputElement,
-    ),
-    timelineLoopInput: getRequiredElement(
-      "timeline-loop-input",
-      HTMLInputElement,
-    ),
-    timelineScrubInput: getRequiredElement(
-      "timeline-scrub-input",
-      HTMLInputElement,
-    ),
-    timelineTrackLanes: getRequiredElement(
-      "timeline-track-lanes",
-      HTMLDivElement,
-    ),
-    timelineAddKeyframeButton: getRequiredElement(
-      "timeline-add-keyframe-button",
-      HTMLButtonElement,
-    ),
-    timelineSnapBaseButton: getRequiredElement(
-      "timeline-snap-base-button",
-      HTMLButtonElement,
-    ),
-    timelineStatus: getRequiredElement("timeline-status", HTMLSpanElement),
-    timelineKeyframeEditor: getRequiredElement(
-      "timeline-keyframe-editor",
-      HTMLDivElement,
-    ),
-    timelineKeyframeTimeInput: getRequiredElement(
-      "timeline-keyframe-time-input",
-      HTMLInputElement,
-    ),
-    timelineKeyframeValueXInput: getRequiredElement(
-      "timeline-keyframe-value-x-input",
-      HTMLInputElement,
-    ),
-    timelineKeyframeValueYInput: getRequiredElement(
-      "timeline-keyframe-value-y-input",
-      HTMLInputElement,
-    ),
-    timelineKeyframeValueZInput: getRequiredElement(
-      "timeline-keyframe-value-z-input",
-      HTMLInputElement,
-    ),
-    timelineKeyframeEasingSelect: getRequiredElement(
-      "timeline-keyframe-easing-select",
-      HTMLSelectElement,
-    ),
-    timelineDeleteKeyframeButton: getRequiredElement(
-      "timeline-delete-keyframe-button",
-      HTMLButtonElement,
-    ),
-    sceneNameInput: getRequiredElement("scene-name-input", HTMLInputElement),
-    sceneList: getRequiredElement("scene-list", HTMLUListElement),
-    createSceneButton: getRequiredElement(
-      "create-scene-button",
-      HTMLButtonElement,
-    ),
-    cloneSceneButton: getRequiredElement(
-      "clone-scene-button",
-      HTMLButtonElement,
-    ),
-    loadSceneButton: getRequiredElement("load-scene-button", HTMLButtonElement),
-    saveSceneButton: getRequiredElement("save-scene-button", HTMLButtonElement),
-    deleteSceneButton: getRequiredElement(
-      "delete-scene-button",
-      HTMLButtonElement,
-    ),
-    fileInput: getRequiredElement("svg-file-input", HTMLInputElement),
-    assetList: getRequiredElement("asset-list", HTMLUListElement),
-    pathAssetList: getRequiredElement("path-asset-list", HTMLUListElement),
-    editPathButton: getRequiredElement("edit-path-button", HTMLButtonElement),
-    create3DCurveButton: getRequiredElement(
-      "create-3d-curve-button",
-      HTMLButtonElement,
-    ),
-    savePathButton: getRequiredElement("save-path-button", HTMLButtonElement),
-    cancelPathButton: getRequiredElement("cancel-path-button", HTMLButtonElement),
-    pathEditFields: getRequiredElement("path-edit-fields", HTMLDivElement),
-    addNodeButton: getRequiredElement("add-node-button", HTMLButtonElement),
-    addPrefabInstanceButton: getRequiredElement(
-      "add-prefab-instance-button",
-      HTMLButtonElement,
-    ),
-    deleteAssetButton: getRequiredElement(
-      "delete-asset-button",
-      HTMLButtonElement,
-    ),
-    sceneNodeList: getRequiredElement("scene-node-list", HTMLUListElement),
-    deleteSceneNodeButton: getRequiredElement(
-      "delete-scene-node-button",
-      HTMLButtonElement,
-    ),
-    projectionToggleButton: getRequiredElement(
-      "projection-toggle-button",
-      HTMLButtonElement,
-    ),
-    transformTranslateButton: getRequiredElement(
-      "transform-translate-button",
-      HTMLButtonElement,
-    ),
-    transformRotateButton: getRequiredElement(
-      "transform-rotate-button",
-      HTMLButtonElement,
-    ),
-    transformScaleButton: getRequiredElement(
-      "transform-scale-button",
-      HTMLButtonElement,
-    ),
-    transformPathButton: getRequiredElement("transform-path-button", HTMLButtonElement),
-    resetViewButton: getRequiredElement("reset-view-button", HTMLButtonElement),
-    importError: getRequiredElement("import-error", HTMLParagraphElement),
-    inspectorFields: getRequiredElement("inspector-fields", HTMLDListElement),
-  };
-}
-
-function getRequiredElement<T extends HTMLElement>(
-  id: string,
-  constructor: new () => T,
-): T {
-  const element = document.getElementById(id);
-
-  if (!(element instanceof constructor)) {
-    throw new Error(`Expected #${id} to be ${constructor.name}.`);
-  }
-
-  return element;
+  renderCollapsibleModulesForState(collapsedModuleIds);
 }
 
 function renderEditorShell(): void {
@@ -3632,7 +3157,10 @@ function appendTimelineSnapTicks(
 ): void {
   const fragment = document.createDocumentFragment();
 
-  for (const timeMs of getTimelineSnapTickTimes(activeClip)) {
+  for (const timeMs of getTimelineSnapTickTimesForClip(
+    activeClip,
+    prefabAnimation.snapFps,
+  )) {
     const tick = document.createElement("span");
     const left =
       activeClip.durationMs > 0 ? (timeMs / activeClip.durationMs) * 100 : 0;
@@ -4455,10 +3983,13 @@ function renderPathEditFrame(): void {
     bezierPath: pathEditSession.draft,
   };
 
-  drawPathEditPreview(vectorContext, previewAsset);
+  drawPathEditPreview(
+    vectorContext,
+    previewAsset,
+    getSourcePathEditViewTransform(previewAsset),
+  );
   drawPathEditControls(
     paperContext,
-    previewAsset,
     pathEditSession,
     getSourcePathEditAdapter(previewAsset),
     pathEditHoveredControl,
@@ -4479,16 +4010,11 @@ function renderInPlacePathEditOverlay(): void {
   if (adapter) {
     drawPathEditControls(
       paperContext,
-      asset,
       session,
       adapter,
       inPlacePathEditHoveredControl,
     );
   }
-}
-
-function buildPathEditPathD(path: StructuredBezierPath): string {
-  return path.segments.length > 0 ? structuredBezierToPathD(path) : "";
 }
 
 function getAssetAssemblyBillboards(): DrawableBillboard[] {
@@ -4759,226 +4285,6 @@ function drawBezierCurve3DBillboard(
   }
 }
 
-function createPrimitiveAssetPathPreview(
-  asset: PrimitiveSvgAsset,
-  bezierPath: StructuredBezierPath,
-): PrimitiveSvgAsset {
-  const pathD = buildPathEditPathD(bezierPath);
-
-  return {
-    ...asset,
-    bezierPath,
-    pathD,
-    path: new Path2D(pathD),
-  };
-}
-
-function drawPrimitiveAssetPath(
-  context: CanvasRenderingContext2D,
-  asset: PrimitiveSvgAsset,
-  colorOverride?: string,
-): void {
-  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
-    context.strokeStyle = colorOverride ?? asset.stroke;
-    context.lineWidth = asset.strokeWidth;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-    context.setLineDash([]);
-    context.stroke(asset.path);
-    return;
-  }
-
-  context.fillStyle = colorOverride ?? asset.fill;
-  context.fill(asset.path, asset.fillRule);
-}
-
-function getAssetKindListLabel(asset: PrimitiveSvgAsset): string {
-  if (asset.assetKind === "bezierCurve3d") {
-    return "3D Curve";
-  }
-
-  return asset.assetKind === "strokePath" ? "Stroke" : "Fill";
-}
-
-const primitiveGhostColorCache = new Map<string, string>();
-const GHOST_COLOR_CANDIDATES: RgbColor[] = [
-  { r: 255, g: 207, b: 74 },
-  { r: 91, g: 196, b: 191 },
-  { r: 244, g: 114, b: 182 },
-  { r: 163, g: 230, b: 53 },
-  { r: 56, g: 189, b: 248 },
-  { r: 249, g: 115, b: 22 },
-  { r: 248, g: 250, b: 252 },
-];
-
-function getPrimitiveGhostColor(asset: PrimitiveSvgAsset): string {
-  const sourceColor =
-    asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
-      ? asset.stroke
-      : asset.fill;
-  const cachedColor = primitiveGhostColorCache.get(sourceColor);
-
-  if (cachedColor) {
-    return cachedColor;
-  }
-
-  const sourceRgb = parseCssColorToRgb(sourceColor);
-  const selectedColor = sourceRgb
-    ? GHOST_COLOR_CANDIDATES.reduce((best, candidate) =>
-        getRgbContrastScore(candidate, sourceRgb) >
-        getRgbContrastScore(best, sourceRgb)
-          ? candidate
-          : best,
-      )
-    : GHOST_COLOR_CANDIDATES[0];
-  const color = rgbToHex(selectedColor);
-  primitiveGhostColorCache.set(sourceColor, color);
-  return color;
-}
-
-function parseCssColorToRgb(color: string): RgbColor | null {
-  const canonicalColor = getCanonicalCanvasColor(color);
-  const hexMatch = /^#([0-9a-f]{6})$/i.exec(canonicalColor);
-
-  if (hexMatch?.[1]) {
-    return {
-      r: Number.parseInt(hexMatch[1].slice(0, 2), 16),
-      g: Number.parseInt(hexMatch[1].slice(2, 4), 16),
-      b: Number.parseInt(hexMatch[1].slice(4, 6), 16),
-    };
-  }
-
-  const rgbMatch =
-    /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i.exec(
-      canonicalColor,
-    );
-
-  if (!rgbMatch?.[1] || !rgbMatch[2] || !rgbMatch[3]) {
-    return null;
-  }
-
-  return {
-    r: clampColorChannel(Number(rgbMatch[1])),
-    g: clampColorChannel(Number(rgbMatch[2])),
-    b: clampColorChannel(Number(rgbMatch[3])),
-  };
-}
-
-function getCanonicalCanvasColor(color: string): string {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    return color;
-  }
-
-  context.fillStyle = "#000000";
-  context.fillStyle = color;
-  return context.fillStyle;
-}
-
-function getRgbContrastScore(left: RgbColor, right: RgbColor): number {
-  const channelDistance =
-    Math.abs(left.r - right.r) +
-    Math.abs(left.g - right.g) +
-    Math.abs(left.b - right.b);
-  const luminanceDistance = Math.abs(getRelativeLuminance(left) - getRelativeLuminance(right));
-
-  return channelDistance + luminanceDistance * 255;
-}
-
-function getRelativeLuminance(color: RgbColor): number {
-  return (
-    0.2126 * normalizeColorChannel(color.r) +
-    0.7152 * normalizeColorChannel(color.g) +
-    0.0722 * normalizeColorChannel(color.b)
-  );
-}
-
-function normalizeColorChannel(channel: number): number {
-  const value = channel / 255;
-
-  return value <= 0.03928
-    ? value / 12.92
-    : ((value + 0.055) / 1.055) ** 2.4;
-}
-
-function clampColorChannel(channel: number): number {
-  return Math.max(0, Math.min(255, Math.round(channel)));
-}
-
-function rgbToHex(color: RgbColor): string {
-  return `#${[color.r, color.g, color.b]
-    .map((channel) => clampColorChannel(channel).toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-function drawPathEditControls(
-  context: CanvasRenderingContext2D,
-  asset: PrimitiveSvgAsset,
-  session: PathEditSession,
-  adapter = getSourcePathEditAdapter(asset),
-  hoveredControl: PathEditDragState | null = null,
-): void {
-  const controls = getPathEditControls(session.draft);
-
-  context.save();
-  context.font = "600 12px system-ui, sans-serif";
-
-  for (const segment of session.draft.segments) {
-    const anchor = adapter?.pathToScreen(segment.anchor);
-    const handleIn = adapter?.pathToScreen(addBezierPoints(segment.anchor, segment.handleIn));
-    const handleOut = adapter?.pathToScreen(
-      addBezierPoints(segment.anchor, segment.handleOut),
-    );
-
-    if (!anchor || !handleIn || !handleOut) {
-      continue;
-    }
-
-    drawPathEditHandleLine(context, anchor, handleIn);
-    drawPathEditHandleLine(context, anchor, handleOut);
-  }
-
-  for (const control of controls) {
-    const screenPoint = adapter?.pathToScreen(control.point);
-
-    if (!screenPoint) {
-      continue;
-    }
-
-    const selected =
-      session.selected?.segmentId === control.segmentId &&
-      session.selected.component === control.component;
-    const hovered =
-      hoveredControl?.segmentId === control.segmentId &&
-      hoveredControl.component === control.component;
-
-    drawPathEditControlPoint(
-      context,
-      screenPoint,
-      control.component,
-      selected,
-      hovered,
-    );
-  }
-
-  context.restore();
-}
-
-function drawPathEditPreview(
-  context: CanvasRenderingContext2D,
-  asset: PrimitiveSvgAsset,
-): void {
-  const transform = getSourcePathEditViewTransform(asset);
-
-  context.save();
-  context.translate(transform.offsetX, transform.offsetY);
-  context.scale(transform.scale, transform.scale);
-  drawPrimitiveAssetPath(context, asset);
-  context.restore();
-}
-
 function drawSourcePathEdit3DPreview(
   context: CanvasRenderingContext2D,
   asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>,
@@ -5082,47 +4388,6 @@ function getProjectedCommandPoints(
 
     return [command.point];
   });
-}
-
-function drawPathEditHandleLine(
-  context: CanvasRenderingContext2D,
-  anchor: BezierPoint,
-  handle: BezierPoint,
-): void {
-  context.save();
-  context.strokeStyle = "rgba(238, 244, 255, 0.44)";
-  context.lineWidth = 1;
-  context.beginPath();
-  context.moveTo(anchor[0], anchor[1]);
-  context.lineTo(handle[0], handle[1]);
-  context.stroke();
-  context.restore();
-}
-
-function drawPathEditControlPoint(
-  context: CanvasRenderingContext2D,
-  point: BezierPoint,
-  component: PathEditComponent,
-  selected: boolean,
-  hovered: boolean,
-): void {
-  context.save();
-  context.fillStyle = selected ? "#ffcf4a" : "#5bc4bf";
-  context.strokeStyle = hovered ? "#ffffff" : "rgba(17, 24, 39, 0.86)";
-  context.lineWidth = hovered ? 3 : 2;
-
-  if (component === "anchor") {
-    context.beginPath();
-    context.arc(point[0], point[1], selected || hovered ? 6 : 5, 0, Math.PI * 2);
-    context.fill();
-    context.stroke();
-  } else {
-    const size = selected || hovered ? 10 : 8;
-    context.fillRect(point[0] - size / 2, point[1] - size / 2, size, size);
-    context.strokeRect(point[0] - size / 2, point[1] - size / 2, size, size);
-  }
-
-  context.restore();
 }
 
 function selectPathEditControl(event: PointerEvent | MouseEvent): void {
@@ -5243,11 +4508,9 @@ function getCanvasPointerPoint(event: PointerEvent | MouseEvent): BezierPoint {
   ];
 }
 
-function getSourcePathEditViewTransform(asset: PrimitiveSvgAsset): {
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-} {
+function getSourcePathEditViewTransform(
+  asset: PrimitiveSvgAsset,
+): SourcePathEditViewTransform {
   const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
   const targetSize = Math.max(
     220,
@@ -5486,62 +4749,6 @@ function updateSourcePathEdit3DControlPosition(
   syncSourcePathEdit3DControls();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
-}
-
-function getPathEdit3DSegment(
-  session: SourcePathEdit3DSession | null,
-  segmentId: string,
-): BezierSegment3D | null {
-  return session?.draft.segments.find((segment) => segment.id === segmentId) ?? null;
-}
-
-function getSelectedPathEdit3DSegment(
-  session: SourcePathEdit3DSession | null,
-): BezierSegment3D | null {
-  return session?.selected
-    ? getPathEdit3DSegment(session, session.selected.segmentId)
-    : null;
-}
-
-function getPathEdit3DComponentPoint(
-  segment: BezierSegment3D,
-  component: PathEditComponent,
-): BezierPoint3D {
-  if (component === "anchor") {
-    return [...segment.anchor];
-  }
-
-  return [...segment[component]];
-}
-
-function getSourcePathEdit3DControlId(
-  segmentId: string,
-  component: PathEditComponent,
-): string {
-  return `${segmentId}:${component}`;
-}
-
-function parseSourcePathEdit3DControlId(
-  controlId: string,
-): SourcePathEdit3DSelection | null {
-  const [segmentId, component] = controlId.split(":");
-
-  if (
-    !segmentId ||
-    (component !== "anchor" && component !== "handleIn" && component !== "handleOut")
-  ) {
-    return null;
-  }
-
-  return { segmentId, component };
-}
-
-function sourcePathEdit3DSelectionMatches(
-  selection: SourcePathEdit3DSelection | null,
-  segmentId: string,
-  component: PathEditComponent,
-): boolean {
-  return selection?.segmentId === segmentId && selection.component === component;
 }
 
 function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean {
@@ -5893,21 +5100,7 @@ function getPasteParentId(): string | null | undefined {
 }
 
 function getPrefabNodeAndDescendantIds(rootNodeId: string): Set<string> {
-  const ids = new Set<string>([rootNodeId]);
-  let changed = true;
-
-  while (changed) {
-    changed = false;
-
-    for (const node of prefabNodes) {
-      if (node.parentId && ids.has(node.parentId) && !ids.has(node.id)) {
-        ids.add(node.id);
-        changed = true;
-      }
-    }
-  }
-
-  return ids;
+  return getPrefabNodeAndDescendantIdsFromNodes(prefabNodes, rootNodeId);
 }
 
 function findTimelineTrack(
@@ -5966,50 +5159,6 @@ function timeMsFromTimelinePointer(
   const ratio = Math.min(Math.max(rawRatio, 0), 1);
 
   return snapAndClampTimelineTimeMs(Math.round(ratio * clip.durationMs), clip);
-}
-
-function getTimelineSnapTickTimes(clip: PrefabAnimationClip): number[] {
-  if (clip.durationMs <= 0) {
-    return [0];
-  }
-
-  const snapFrameMs = getTimelineSnapFrameMs();
-  const times = new Set<number>([0, clip.durationMs]);
-
-  for (
-    let frameIndex = 1;
-    ;
-    frameIndex += 1
-  ) {
-    const timeMs = Math.round(frameIndex * snapFrameMs);
-
-    if (timeMs >= clip.durationMs) {
-      break;
-    }
-
-    times.add(timeMs);
-  }
-
-  return [...times].sort((a, b) => a - b);
-}
-
-function getTimelinePropertyLabel(property: PrefabTrackProperty): string {
-  switch (property) {
-    case "position":
-      return "Position";
-    case "rotation":
-      return "Rotation";
-    case "scale":
-      return "Scale";
-    case "path":
-      return "Path";
-  }
-}
-
-function isPrefabVectorTrackProperty(
-  property: PrefabTrackProperty,
-): property is PrefabVectorTrackProperty {
-  return property === "position" || property === "rotation" || property === "scale";
 }
 
 function copyPrefabSubtree(sourceNode: PrefabNode, targetParentId: string | null): void {
@@ -6262,24 +5411,7 @@ function clearInvalidPrefabClipboard(): void {
 }
 
 function getPrefabNodeTreeEntries(): PrefabNodeTreeEntry[] {
-  const entries: PrefabNodeTreeEntry[] = [];
-  const childrenByParent = new Map<string | null, PrefabNode[]>();
-
-  for (const node of prefabNodes) {
-    const siblings = childrenByParent.get(node.parentId) ?? [];
-    siblings.push(node);
-    childrenByParent.set(node.parentId, siblings);
-  }
-
-  function appendChildren(parentId: string | null, depth: number): void {
-    for (const node of childrenByParent.get(parentId) ?? []) {
-      entries.push({ node, depth });
-      appendChildren(node.id, depth + 1);
-    }
-  }
-
-  appendChildren(null, 0);
-  return entries;
+  return getPrefabNodeTreeEntriesFromNodes(prefabNodes);
 }
 
 function getSceneNodeLabel(node: SceneNode): string {
@@ -6296,244 +5428,6 @@ function getSceneNodeLabel(node: SceneNode): string {
     : `${node.id} Prefab: Missing ${node.prefabId}`;
 }
 
-function getPrefabWorldTransforms(
-  nodes: PrefabNode[],
-  baseMatrix = new Matrix4(),
-): Map<string, Matrix4> {
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const cache = new Map<string, Matrix4>();
-
-  function resolve(node: PrefabNode): Matrix4 {
-    const cached = cache.get(node.id);
-
-    if (cached) {
-      return cached.clone();
-    }
-
-    const local = transformToMatrix(node);
-    const parent = node.parentId ? nodeById.get(node.parentId) : null;
-    const world = parent
-      ? resolve(parent).multiply(local)
-      : baseMatrix.clone().multiply(local);
-
-    cache.set(node.id, world.clone());
-    return world;
-  }
-
-  for (const node of nodes) {
-    resolve(node);
-  }
-
-  return cache;
-}
-
-function applyWorldTransformToPrefabNode(
-  node: PrefabNode,
-  worldTransform: EditorTransformNode,
-): void {
-  const localTransform = getLocalTransformFromPrefabWorldTransform(node, worldTransform);
-  node.position = localTransform.position;
-  node.rotation = localTransform.rotation;
-  node.scale = localTransform.scale;
-}
-
-function getLocalTransformFromPrefabWorldTransform(
-  node: PrefabNode,
-  worldTransform: EditorTransformNode,
-): TransformSnapshot {
-  const worldMatrix = transformToMatrix(worldTransform);
-  const parent = node.parentId ? getPrefabNode(node.parentId) : null;
-
-  if (!parent) {
-    return cloneTransform(worldTransform);
-  }
-
-  const parentWorldMatrix =
-    getPrefabWorldTransforms(prefabNodes).get(parent.id) ?? transformToMatrix(parent);
-  const localMatrix = parentWorldMatrix.clone().invert().multiply(worldMatrix);
-
-  return matrixToTransform(localMatrix);
-}
-
-function transformToMatrix(transform: TransformSnapshot): Matrix4 {
-  const position = tupleToVector(transform.position);
-  const rotation = new Quaternion().setFromEuler(
-    new Euler(transform.rotation[0], transform.rotation[1], transform.rotation[2], "XYZ"),
-  );
-  const scale = tupleToVector(transform.scale);
-
-  return new Matrix4().compose(position, rotation, scale);
-}
-
-function matrixToTransform(matrix: Matrix4): TransformSnapshot {
-  const position = new Vector3();
-  const rotation = new Quaternion();
-  const scale = new Vector3();
-
-  matrix.decompose(position, rotation, scale);
-
-  return {
-    position: vectorToTuple(position),
-    rotation: eulerToTuple(new Euler().setFromQuaternion(rotation, "XYZ")),
-    scale: vectorToTuple(scale),
-  };
-}
-
-function cloneTransform(transform: TransformSnapshot): TransformSnapshot {
-  return {
-    position: [...transform.position],
-    rotation: [...transform.rotation],
-    scale: [...transform.scale],
-  };
-}
-
-function clonePrefabAnimation(animation: PrefabAnimation): PrefabAnimation {
-  const clips = animation.clips.map(clonePrefabAnimationClip);
-  const activeClipId =
-    animation.activeClipId && clips.some((clip) => clip.id === animation.activeClipId)
-      ? animation.activeClipId
-      : null;
-
-  return {
-    snapFps: animation.snapFps,
-    activeClipId,
-    clips,
-  };
-}
-
-function clonePrefabAnimationClip(clip: PrefabAnimationClip): PrefabAnimationClip {
-  return {
-    id: clip.id,
-    name: clip.name,
-    durationMs: clip.durationMs,
-    loop: clip.loop,
-    tracks: clip.tracks.map(clonePrefabAnimationTrack),
-  };
-}
-
-function clonePrefabAnimationTrack(
-  track: PrefabAnimationTrack,
-): PrefabAnimationTrack {
-  if (isPrefabPathTrack(track)) {
-    return {
-      id: track.id,
-      target: {
-        nodeId: track.target.nodeId,
-        property: "path",
-      },
-      keyframes: track.keyframes.map(clonePrefabPathAnimationKeyframe),
-    };
-  }
-
-  return {
-    id: track.id,
-    target: {
-      nodeId: track.target.nodeId,
-      property: track.target.property,
-    },
-    keyframes: track.keyframes.map(clonePrefabAnimationKeyframe),
-  };
-}
-
-function clonePrefabAnimationKeyframe(
-  keyframe: PrefabVectorAnimationKeyframe,
-): PrefabVectorAnimationKeyframe {
-  return {
-    id: keyframe.id,
-    timeMs: keyframe.timeMs,
-    value: [...keyframe.value],
-    easing: keyframe.easing,
-  };
-}
-
-function clonePrefabPathAnimationKeyframe(
-  keyframe: PrefabPathAnimationKeyframe,
-): PrefabPathAnimationKeyframe {
-  return {
-    id: keyframe.id,
-    timeMs: keyframe.timeMs,
-    value: cloneStructuredBezierPath(keyframe.value),
-    easing: keyframe.easing,
-  };
-}
-
-function isPrefabVectorTrack(
-  track: PrefabAnimationTrack,
-): track is PrefabVectorAnimationTrack {
-  return track.target.property !== "path";
-}
-
-function isPrefabPathTrack(
-  track: PrefabAnimationTrack,
-): track is Extract<PrefabAnimationTrack, { target: { property: "path" } }> {
-  return track.target.property === "path";
-}
-
-function clonePrefabNode(node: PrefabNode): PrefabNode {
-  if (node.kind === "group") {
-    return {
-      id: node.id,
-      kind: "group",
-      parentId: node.parentId,
-      name: node.name,
-      position: [...node.position],
-      rotation: [...node.rotation],
-      scale: [...node.scale],
-      billboardMode: node.billboardMode,
-    };
-  }
-
-  return {
-    id: node.id,
-    kind: "primitive",
-    parentId: node.parentId,
-    assetId: node.assetId,
-    name: node.name,
-    position: [...node.position],
-    rotation: [...node.rotation],
-    scale: [...node.scale],
-    billboardMode: node.billboardMode,
-  };
-}
-
-function cloneSceneNode(node: SceneNode): SceneNode {
-  if (node.kind === "primitive") {
-    const primitiveNode: ScenePrimitiveNode = {
-      id: node.id,
-      kind: "primitive",
-      assetId: node.assetId,
-      position: [...node.position],
-      rotation: [...node.rotation],
-      scale: [...node.scale],
-      billboardMode: node.billboardMode,
-    };
-
-    return primitiveNode;
-  }
-
-  const prefabInstanceNode: ScenePrefabInstanceNode = {
-    id: node.id,
-    kind: "prefabInstance",
-    prefabId: node.prefabId,
-    position: [...node.position],
-    rotation: [...node.rotation],
-    scale: [...node.scale],
-  };
-
-  return prefabInstanceNode;
-}
-
-function chooseStableSelection(
-  currentId: string | null,
-  availableIds: string[],
-): string | null {
-  if (currentId && availableIds.includes(currentId)) {
-    return currentId;
-  }
-
-  return availableIds[0] ?? null;
-}
-
 function getEditorModeLabel(mode: EditorMode): string {
   if (mode === "asset") {
     return "Asset Assembly";
@@ -6546,149 +5440,19 @@ function getEditorModeLabel(mode: EditorMode): string {
   return "Scene Layout";
 }
 
-function getNextNodeNumber(ids: string[], prefix: string): number {
-  const pattern = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`);
-  const largestExistingNumber = ids.reduce((largest, id) => {
-    const match = pattern.exec(id);
-    const value = match ? Number(match[1]) : 0;
-
-    return Number.isFinite(value) ? Math.max(largest, value) : largest;
-  }, 0);
-
-  return largestExistingNumber + 1;
-}
-
-function createUniqueId(baseId: string, existingIds: Set<string>): string {
-  if (!existingIds.has(baseId)) {
-    return baseId;
-  }
-
-  let suffix = 2;
-
-  while (existingIds.has(`${baseId}-${suffix}`)) {
-    suffix += 1;
-  }
-
-  return `${baseId}-${suffix}`;
-}
-
-function slugifyTimelineName(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "clip";
-}
-
-function formatTransformValue(value: number): string {
-  return String(roundTransformValue(value));
-}
-
-function roundTransformValue(value: number): number {
-  return Number(value.toFixed(4));
-}
-
-function formatTimelineNumber(value: number): string {
-  return String(roundTimelineNumber(value));
-}
-
-function roundTimelineNumber(value: number): number {
-  return Number(value.toFixed(3));
-}
-
-function clampTimelineTimeMs(
-  timeMs: number,
-  clip: PrefabAnimationClip | null,
-): number {
-  if (!clip || !Number.isFinite(timeMs)) {
-    return 0;
-  }
-
-  return Math.round(Math.min(Math.max(timeMs, 0), clip.durationMs));
-}
-
 function snapTimelineTimeMs(timeMs: number): number {
-  if (!Number.isFinite(timeMs)) {
-    return 0;
-  }
-
-  const frameMs = getTimelineSnapFrameMs();
-  return Math.round(Math.round(timeMs / frameMs) * frameMs);
+  return snapTimelineTimeMsWithFps(timeMs, prefabAnimation.snapFps);
 }
 
 function snapAndClampTimelineTimeMs(
   timeMs: number,
   clip: PrefabAnimationClip | null,
 ): number {
-  return clampTimelineTimeMs(snapTimelineTimeMs(timeMs), clip);
-}
-
-function getTimelineSnapFrameMs(): number {
-  return 1000 / Math.min(Math.max(prefabAnimation.snapFps, 1), 240);
-}
-
-function smoothstep(value: number): number {
-  const clamped = Math.min(Math.max(value, 0), 1);
-  return clamped * clamped * (3 - 2 * clamped);
-}
-
-function lerpVector3(
-  start: Vector3Tuple,
-  end: Vector3Tuple,
-  progress: number,
-): Vector3Tuple {
-  return [
-    roundTransformValue(start[0] + (end[0] - start[0]) * progress),
-    roundTransformValue(start[1] + (end[1] - start[1]) * progress),
-    roundTransformValue(start[2] + (end[2] - start[2]) * progress),
-  ];
-}
-
-function lerpBezierPoint(
-  start: BezierPoint,
-  end: BezierPoint,
-  progress: number,
-): BezierPoint {
-  return [
-    roundBezierValue(start[0] + (end[0] - start[0]) * progress),
-    roundBezierValue(start[1] + (end[1] - start[1]) * progress),
-  ];
-}
-
-function addBezierPoints3D(
-  left: BezierPoint3D,
-  right: BezierPoint3D,
-): Vector3Tuple {
-  return [
-    roundBezierValue(left[0] + right[0]),
-    roundBezierValue(left[1] + right[1]),
-    roundBezierValue(left[2] + right[2]),
-  ];
-}
-
-function subtractBezierPoints3D(
-  left: BezierPoint3D,
-  right: BezierPoint3D,
-): BezierPoint3D {
-  return [
-    roundBezierValue(left[0] - right[0]),
-    roundBezierValue(left[1] - right[1]),
-    roundBezierValue(left[2] - right[2]),
-  ];
-}
-
-function vectorToTuple(value: Vector3): Vector3Tuple {
-  return [roundTransformValue(value.x), roundTransformValue(value.y), roundTransformValue(value.z)];
-}
-
-function eulerToTuple(value: Euler): Vector3Tuple {
-  return [roundTransformValue(value.x), roundTransformValue(value.y), roundTransformValue(value.z)];
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return snapAndClampTimelineTimeMsWithFps(
+    timeMs,
+    clip,
+    prefabAnimation.snapFps,
+  );
 }
 
 function setImportError(error: unknown): void {
