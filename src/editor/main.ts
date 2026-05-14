@@ -175,10 +175,16 @@ import {
   subtractBezierPoints3D,
   type SourcePathEdit3DSession,
 } from "./tools/pathEdit3dCore";
+import {
+  canUsePathToolForSelection,
+  getEditorToolForTimelineProperty,
+  getFallbackTransformTool,
+  getTimelinePropertyForEditorTool,
+  type EditorTool,
+  type TransformProperty,
+} from "./tools/toolController";
 
 type EditorMode = "asset" | "path" | "scene";
-type TransformProperty = "position" | "rotation" | "scale";
-type EditorTool = TransformMode | "path";
 type TimelineVectorProperty = PrefabVectorTrackProperty;
 type TimelineLaneProperty = PrefabTrackProperty;
 type TimelinePointerDrag = {
@@ -219,18 +225,6 @@ const TIMELINE_LANE_PROPERTIES: TimelineLaneProperty[] = [
   ...TIMELINE_VECTOR_PROPERTIES,
   "path",
 ];
-const EDITOR_TOOL_TO_PREFAB_PROPERTY: Record<EditorTool, PrefabTrackProperty> = {
-  translate: "position",
-  rotate: "rotation",
-  scale: "scale",
-  path: "path",
-};
-const PREFAB_PROPERTY_TO_EDITOR_TOOL: Record<PrefabTrackProperty, EditorTool> = {
-  position: "translate",
-  rotation: "rotate",
-  scale: "scale",
-  path: "path",
-};
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
 const PATH_EDIT_HIT_RADIUS = 10;
@@ -1478,7 +1472,7 @@ function discardInPlacePathEditSession(): void {
 
 function fallbackToTransformTool(): void {
   discardInPlacePathEditSession();
-  activeEditorTool = threeViewport.currentTransformMode;
+  activeEditorTool = getFallbackTransformTool(threeViewport.currentTransformMode);
   threeViewport.setTransformControlsVisible(true);
 }
 
@@ -1775,11 +1769,11 @@ function getActiveTimelineClip(): PrefabAnimationClip | null {
 }
 
 function getActiveTimelineProperty(): PrefabTrackProperty {
-  return EDITOR_TOOL_TO_PREFAB_PROPERTY[activeEditorTool];
+  return getTimelinePropertyForEditorTool(activeEditorTool);
 }
 
 function setActiveTimelineProperty(property: PrefabTrackProperty): void {
-  setActiveEditorTool(PREFAB_PROPERTY_TO_EDITOR_TOOL[property]);
+  setActiveEditorTool(getEditorToolForTimelineProperty(property));
 }
 
 function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
@@ -5239,12 +5233,12 @@ function getSelectedPrefabNode(): PrefabNode | null {
 function canUsePathTool(): boolean {
   const selection = getSelectedInPlacePathNodeAndAsset();
 
-  return Boolean(
-    editorMode === "asset" &&
-      getActiveTimelineClip() &&
-      selection &&
-      selection.asset.assetKind !== "bezierCurve3d",
-  );
+  return canUsePathToolForSelection({
+    editorMode,
+    hasActiveClip: Boolean(getActiveTimelineClip()),
+    hasPrimitiveSelection: Boolean(selection),
+    assetKind: selection?.asset.assetKind ?? null,
+  });
 }
 
 function getTimelineStagingPose(
