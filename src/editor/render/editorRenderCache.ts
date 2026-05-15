@@ -11,6 +11,10 @@ import {
 export type EditorRenderCache = {
   flags: RenderDirtyFlags;
   markAllDirty: () => void;
+  markUiShellDirty: () => void;
+  markCameraDirty: () => void;
+  markPoseDirty: () => void;
+  markTimelineDirty: () => void;
   markAssetBillboardsDirty: () => void;
   markSceneBillboardsDirty: () => void;
   markVectorDirty: () => void;
@@ -35,6 +39,10 @@ export function createEditorRenderCache(
   return {
     flags: invalidation.flags,
     markAllDirty: invalidation.markAllDirty,
+    markUiShellDirty: invalidation.markUiShellDirty,
+    markCameraDirty: invalidation.markCameraDirty,
+    markPoseDirty: invalidation.markPoseDirty,
+    markTimelineDirty: invalidation.markTimelineDirty,
     markAssetBillboardsDirty: invalidation.markAssetBillboardsDirty,
     markSceneBillboardsDirty: invalidation.markSceneBillboardsDirty,
     markVectorDirty: invalidation.markVectorDirty,

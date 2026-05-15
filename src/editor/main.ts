@@ -501,6 +501,7 @@ function handleViewportObjectTransform(nodeId: string): void {
     return;
   }
   syncNodeFromViewport(nodeId);
+  renderCache.markPoseDirty();
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -509,7 +510,7 @@ function handleViewportCameraChange(): void {
   if (editorState.editorMode === "scene") {
     editorState.loadedSceneId = null;
   }
-  renderCache.markAllDirty();
+  renderCache.markCameraDirty();
   scheduleCameraInspectorRender();
   exposeEditorDebugHooks();
 }
@@ -2382,7 +2383,7 @@ function renderCollapsibleModules(): void {
 }
 
 function renderEditorShell(): void {
-  renderCache.markAllDirty();
+  renderCache.markUiShellDirty();
   const activeTimelineClip = getActiveTimelineClip();
   const validInPlacePathEditSession =
     editorState.editorMode === "asset" &&
