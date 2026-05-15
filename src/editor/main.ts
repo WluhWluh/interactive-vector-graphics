@@ -48,7 +48,6 @@ import {
   type PrefabAnimationTrack,
   type PrefabPathAnimationKeyframe,
   type PrefabVectorAnimationKeyframe,
-  type PrefabTrackEasing,
   type PrefabTrackProperty,
   type PrefabDocument,
   type PrefabNode,
@@ -240,11 +239,16 @@ import {
   type SourcePathEditSession,
 } from "./controllers/pathEditController";
 import {
+  advanceTimelinePlayback,
   createTimelineClip,
   deleteActiveTimelineClip,
   deleteTimelineKeyframe,
   getActiveTimelineClip as getActiveTimelineClipFromState,
   getSelectedTimelineKeyframe as getSelectedTimelineKeyframeFromState,
+  parseTimelineDurationInput,
+  parseTimelineEasingInput,
+  parseTimelineSnapFpsInput,
+  parseVectorKeyframeValueInput,
   selectBasePoseTimeline as selectBasePoseTimelineForState,
   selectTimelineClip as selectTimelineClipForState,
   updateActiveTimelineClip as updateActiveTimelineClipForState,
@@ -1774,31 +1778,22 @@ function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
 }
 
 function updateTimelinePlayback(deltaSeconds: number): void {
-  if (!isTimelinePlaying) {
+  const nextPlayback = advanceTimelinePlayback({
+    isPlaying: isTimelinePlaying,
+    activeClip: getActiveTimelineClip(),
+    currentTimeMs: timelineCurrentTimeMs,
+    deltaSeconds,
+  });
+
+  if (
+    nextPlayback.currentTimeMs === timelineCurrentTimeMs &&
+    nextPlayback.isPlaying === isTimelinePlaying
+  ) {
     return;
   }
 
-  const activeClip = getActiveTimelineClip();
-
-  if (!activeClip || activeClip.durationMs <= 0) {
-    isTimelinePlaying = false;
-    renderEditorShell();
-    exposeEditorDebugHooks();
-    return;
-  }
-
-  const nextTimeMs = timelineCurrentTimeMs + deltaSeconds * 1000;
-
-  if (nextTimeMs > activeClip.durationMs) {
-    if (activeClip.loop) {
-      timelineCurrentTimeMs = Math.round(nextTimeMs % activeClip.durationMs);
-    } else {
-      timelineCurrentTimeMs = activeClip.durationMs;
-      isTimelinePlaying = false;
-    }
-  } else {
-    timelineCurrentTimeMs = Math.round(nextTimeMs);
-  }
+  timelineCurrentTimeMs = nextPlayback.currentTimeMs;
+  isTimelinePlaying = nextPlayback.isPlaying;
 
   renderInvalidation.markAssetBillboardsDirty();
   renderPrefabTimeline();
@@ -1965,19 +1960,15 @@ function applyTimelineTimeInput(): void {
 
 function applyTimelineDurationInput(): void {
   const activeClip = getActiveTimelineClip();
-  const nextDuration = Number(elements.timelineDurationInput.value.trim());
+  const durationMs = parseTimelineDurationInput(
+    elements.timelineDurationInput.value,
+  );
 
-  if (
-    !activeClip ||
-    !Number.isFinite(nextDuration) ||
-    nextDuration < 0 ||
-    !Number.isInteger(nextDuration)
-  ) {
+  if (!activeClip || durationMs === null) {
     renderEditorShell();
     return;
   }
 
-  const durationMs = Math.round(nextDuration);
   updateActiveTimelineClip({
     ...activeClip,
     durationMs,
@@ -2011,9 +2002,11 @@ function applyTimelineLoopInput(): void {
 }
 
 function applyTimelineSnapFpsInput(): void {
-  const nextSnapFps = Number(elements.timelineSnapFpsInput.value.trim());
+  const nextSnapFps = parseTimelineSnapFpsInput(
+    elements.timelineSnapFpsInput.value,
+  );
 
-  if (!Number.isFinite(nextSnapFps) || nextSnapFps < 1 || nextSnapFps > 240) {
+  if (nextSnapFps === null) {
     renderEditorShell();
     return;
   }
@@ -2051,16 +2044,17 @@ function applySelectedKeyframeTimeInput(): void {
 function applySelectedKeyframeValueInput(): void {
   const activeClip = getActiveTimelineClip();
   const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
-  const x = Number(elements.timelineKeyframeValueXInput.value.trim());
-  const y = Number(elements.timelineKeyframeValueYInput.value.trim());
-  const z = Number(elements.timelineKeyframeValueZInput.value.trim());
+  const value = parseVectorKeyframeValueInput({
+    x: elements.timelineKeyframeValueXInput.value,
+    y: elements.timelineKeyframeValueYInput.value,
+    z: elements.timelineKeyframeValueZInput.value,
+    round: roundTransformValue,
+  });
 
   if (
     !selected ||
     !isPrefabVectorTrack(selected.track) ||
-    !Number.isFinite(x) ||
-    !Number.isFinite(y) ||
-    !Number.isFinite(z)
+    !value
   ) {
     renderEditorShell();
     return;
@@ -2068,19 +2062,21 @@ function applySelectedKeyframeValueInput(): void {
 
   updateSelectedTimelineKeyframe({
     ...selected.keyframe,
-    value: [roundTransformValue(x), roundTransformValue(y), roundTransformValue(z)],
+    value,
   });
 }
 
 function applySelectedKeyframeEasingInput(): void {
   const activeClip = getActiveTimelineClip();
   const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
-  const easing = elements.timelineKeyframeEasingSelect.value as PrefabTrackEasing;
+  const easing = parseTimelineEasingInput(
+    elements.timelineKeyframeEasingSelect.value,
+  );
 
   if (
     !selected ||
     !isPrefabVectorTrack(selected.track) ||
-    !["linear", "step", "easeInOut"].includes(easing)
+    !easing
   ) {
     renderEditorShell();
     return;

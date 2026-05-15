@@ -42,6 +42,11 @@ export type TimelineUpdateKeyframeResult = {
   currentTimeMs: number;
 };
 
+export type TimelinePlaybackResult = {
+  currentTimeMs: number;
+  isPlaying: boolean;
+};
+
 export function getActiveTimelineClip(
   animation: PrefabAnimation,
 ): PrefabAnimationClip | null {
@@ -166,6 +171,93 @@ export function getSelectedTimelineKeyframe(
   }
 
   return null;
+}
+
+export function advanceTimelinePlayback(input: {
+  isPlaying: boolean;
+  activeClip: PrefabAnimationClip | null;
+  currentTimeMs: number;
+  deltaSeconds: number;
+}): TimelinePlaybackResult {
+  if (!input.isPlaying) {
+    return {
+      currentTimeMs: input.currentTimeMs,
+      isPlaying: false,
+    };
+  }
+
+  const { activeClip } = input;
+
+  if (!activeClip || activeClip.durationMs <= 0) {
+    return {
+      currentTimeMs: input.currentTimeMs,
+      isPlaying: false,
+    };
+  }
+
+  const nextTimeMs = input.currentTimeMs + input.deltaSeconds * 1000;
+
+  if (nextTimeMs > activeClip.durationMs) {
+    if (activeClip.loop) {
+      return {
+        currentTimeMs: Math.round(nextTimeMs % activeClip.durationMs),
+        isPlaying: true,
+      };
+    }
+
+    return {
+      currentTimeMs: activeClip.durationMs,
+      isPlaying: false,
+    };
+  }
+
+  return {
+    currentTimeMs: Math.round(nextTimeMs),
+    isPlaying: true,
+  };
+}
+
+export function parseTimelineDurationInput(
+  value: string,
+): number | null {
+  const duration = Number(value.trim());
+
+  return Number.isFinite(duration) &&
+    duration >= 0 &&
+    Number.isInteger(duration)
+    ? Math.round(duration)
+    : null;
+}
+
+export function parseTimelineSnapFpsInput(value: string): number | null {
+  const snapFps = Number(value.trim());
+
+  return Number.isFinite(snapFps) && snapFps >= 1 && snapFps <= 240
+    ? snapFps
+    : null;
+}
+
+export function parseVectorKeyframeValueInput(input: {
+  x: string;
+  y: string;
+  z: string;
+  round: (value: number) => number;
+}): Vector3Tuple | null {
+  const x = Number(input.x.trim());
+  const y = Number(input.y.trim());
+  const z = Number(input.z.trim());
+
+  return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)
+    ? [input.round(x), input.round(y), input.round(z)]
+    : null;
+}
+
+export function parseTimelineEasingInput(
+  value: string,
+): PrefabTrackEasing | null {
+  return value === "linear" || value === "step" || value === "easeInOut"
+    ? value
+    : null;
 }
 
 export function upsertPrefabVectorKeyframe(
