@@ -89,12 +89,7 @@ import {
   type Vector3Tuple,
 } from "./threeEditorViewport";
 import {
-  applyWorldTransformToPrefabNode,
   cloneTransform,
-  getLocalTransformFromPrefabWorldTransform,
-  getPrefabWorldTransforms,
-  matrixToTransform,
-  transformToMatrix,
   type TransformSnapshot,
 } from "./tools/prefabTransform";
 import {
@@ -128,6 +123,13 @@ import {
 import { BillboardFrameDataCache } from "./render/billboardFrameData";
 import { renderEditorFrame } from "./render/editorFrameRenderer";
 import { createRenderInvalidation } from "./render/renderInvalidation";
+import {
+  applyViewportTransformToPrefabNode,
+  applyViewportTransformToStagingPose,
+  createAssetViewportProxyNodes,
+  createPrefabWorldProxyNodes,
+  createSceneViewportProxyNodes,
+} from "./render/viewportProxySync";
 import {
   drawPathEditControls,
   drawPathEditPreview,
@@ -1647,35 +1649,17 @@ function rebuildViewportProxies(): void {
   }
 
   if (editorMode === "asset") {
-    const worldTransforms = getPrefabWorldTransforms(prefabNodes);
-    const activeClip = getActiveTimelineClip();
-
-    for (const node of prefabNodes) {
-      const selectedForTimeline =
-        selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID && node.id === selectedPrefabNodeId;
-      const stagingPose =
-        getTimelineStagingPose(node.id, activeClip) ??
-        (activeClip && selectedForTimeline
-          ? getOrCreateTimelineStagingPose(
-              node,
-              activeClip,
-              node.kind === "primitive" && node.assetId
-                ? getAssetById(node.assetId)
-                : null,
-            )
-          : null);
-      const worldTransform = stagingPose
-        ? getTimelineStagingWorldTransform(stagingPose)
-        : matrixToTransform(worldTransforms.get(node.id) ?? transformToMatrix(node));
-      const proxyNode: EditorTransformNode = {
-        id: node.id,
-        ...worldTransform,
-      };
-      const asset =
-        node.kind === "primitive" && node.assetId
-          ? getAssetById(node.assetId)
-          : null;
-      threeViewport.addOrUpdateNode(proxyNode, asset ?? undefined);
+    for (const proxy of createAssetViewportProxyNodes({
+      nodes: prefabNodes,
+      selectedNodeId: selectedPrefabNodeId,
+      rootNodeId: PREFAB_ROOT_NODE_ID,
+      activeClip: getActiveTimelineClip(),
+      getAssetById,
+      getTimelineStagingPose,
+      getOrCreateTimelineStagingPose,
+      getTimelineStagingWorldTransform,
+    })) {
+      threeViewport.addOrUpdateNode(proxy.node, proxy.asset ?? undefined);
     }
 
     threeViewport.setSelectedNode(
@@ -1684,9 +1668,8 @@ function rebuildViewportProxies(): void {
     return;
   }
 
-  for (const node of sceneNodes) {
-    const asset = node.kind === "primitive" ? getAssetById(node.assetId) : null;
-    threeViewport.addOrUpdateNode(node, asset ?? undefined);
+  for (const proxy of createSceneViewportProxyNodes(sceneNodes, getAssetById)) {
+    threeViewport.addOrUpdateNode(proxy.node, proxy.asset ?? undefined);
   }
 
   threeViewport.setSelectedNode(selectedSceneNodeId);
@@ -1716,14 +1699,12 @@ function syncNodeFromViewport(nodeId: string): void {
       };
 
       threeViewport.syncNodeFromProxy(worldNode);
-      const localTransform = getLocalTransformFromPrefabWorldTransform(
-        prefabNodes,
+      applyViewportTransformToStagingPose({
+        nodes: prefabNodes,
         node,
         worldNode,
-      );
-      stagingPose.position = [...localTransform.position];
-      stagingPose.rotation = [...localTransform.rotation];
-      stagingPose.scale = [...localTransform.scale];
+        stagingPose,
+      });
       renderInvalidation.markAssetBillboardsDirty();
       return;
     }
@@ -1736,7 +1717,11 @@ function syncNodeFromViewport(nodeId: string): void {
     };
 
     threeViewport.syncNodeFromProxy(worldNode);
-    applyWorldTransformToPrefabNode(prefabNodes, node, worldNode);
+    applyViewportTransformToPrefabNode({
+      nodes: prefabNodes,
+      node,
+      worldNode,
+    });
     loadedPrefabId = null;
 
     /**
@@ -2394,23 +2379,8 @@ function syncSelectionFromSceneNode(): void {
 }
 
 function syncPrefabProxyWorldTransforms(exceptNodeId: string | null = null): void {
-  const worldTransforms = getPrefabWorldTransforms(prefabNodes);
-
-  for (const node of prefabNodes) {
-    if (node.id === exceptNodeId) {
-      continue;
-    }
-
-    const worldTransform = worldTransforms.get(node.id);
-
-    if (!worldTransform) {
-      continue;
-    }
-
-    threeViewport.syncProxyFromNode({
-      id: node.id,
-      ...matrixToTransform(worldTransform),
-    });
+  for (const proxyNode of createPrefabWorldProxyNodes(prefabNodes, exceptNodeId)) {
+    threeViewport.syncProxyFromNode(proxyNode);
   }
 }
 
