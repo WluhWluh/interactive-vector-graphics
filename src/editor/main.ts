@@ -235,7 +235,10 @@ import {
   applyDeletedAsset,
   applyImportedAsset,
   applyUpdatedAsset,
-  canConvertAssetTo3DCurve,
+  runConvertAssetTo3DCurveCommand,
+  runDeleteAssetCommand,
+  runImportPrimitiveAssetCommand,
+  runSaveSourcePathEditCommand,
 } from "./controllers/assetCommandController";
 import {
   addPrefabInstanceToScene,
@@ -1004,17 +1007,17 @@ async function savePathEditSession(): Promise<void> {
   }
 
   try {
-    const updatedAsset = pathEdit3DSession
-      ? await updateAssetCurve3D(
-          selectedProjectId,
-          pathEdit3DSession.assetId,
-          pathEdit3DSession.draft,
-        )
-      : await updateAssetPath(
-          selectedProjectId,
-          pathEditSession!.assetId,
-          pathEditSession!.draft,
-        );
+    const updatedAsset = await runSaveSourcePathEditCommand({
+      projectId: selectedProjectId,
+      pathEditSession,
+      pathEdit3DSession,
+      updateAssetPath,
+      updateAssetCurve3D,
+    });
+
+    if (!updatedAsset) {
+      return;
+    }
     const nextAssetState = applyUpdatedAsset(
       { assets, selectedAssetId },
       updatedAsset,
@@ -1074,16 +1077,13 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
 
   const asset = getSelectedAsset();
 
-  if (!canConvertAssetTo3DCurve(asset)) {
-    setImportError(new Error("Only strokePath assets can be converted to 3D curves."));
-    return;
-  }
-
   try {
-    const convertedAsset = await convertAssetTo3DCurve(
-      selectedProjectId,
-      selectedAssetId,
-    );
+    const convertedAsset = await runConvertAssetTo3DCurveCommand({
+      projectId: selectedProjectId,
+      assetId: selectedAssetId,
+      asset,
+      convertAssetTo3DCurve,
+    });
     const nextAssetState = applyImportedAsset(
       { assets, selectedAssetId },
       convertedAsset,
@@ -1113,7 +1113,11 @@ async function importSelectedFile(): Promise<void> {
   }
 
   try {
-    const asset = await uploadAsset(selectedProjectId, file);
+    const asset = await runImportPrimitiveAssetCommand({
+      projectId: selectedProjectId,
+      file,
+      uploadAsset,
+    });
     const nextAssetState = applyImportedAsset({ assets, selectedAssetId }, asset);
     assets = nextAssetState.assets;
     selectedAssetId = nextAssetState.selectedAssetId;
@@ -1138,8 +1142,11 @@ async function deleteSelectedAsset(): Promise<void> {
   }
 
   try {
-    const deletedAssetId = selectedAssetId;
-    await deleteAsset(selectedProjectId, selectedAssetId);
+    const deletedAssetId = await runDeleteAssetCommand({
+      projectId: selectedProjectId,
+      assetId: selectedAssetId,
+      deleteAsset,
+    });
     if (pathEditSession?.assetId === deletedAssetId) {
       pathEditSession = null;
       pathEditDragState = null;
