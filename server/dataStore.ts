@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type {
   PrefabDocument,
@@ -24,6 +24,7 @@ import {
 } from "../src/core/assets/structuredBezierPath3d";
 import { validatePrefabDocument } from "./prefabDocument";
 import { validateSceneDocument } from "./sceneDocument";
+import { writeTextFileAtomic } from "./persistence/atomicFile";
 
 const PROJECTS_DIR_NAME = "projects";
 const DATABASE_FILE_NAME = "ivg.sqlite";
@@ -205,6 +206,19 @@ export function createDataStore(dataDir: string): DataStore {
     return row.count;
   }
 
+  function runDatabaseTransaction<T>(operation: () => T): T {
+    database.exec("BEGIN IMMEDIATE;");
+
+    try {
+      const result = operation();
+      database.exec("COMMIT;");
+      return result;
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
   function listProjects(): ProjectRecord[] {
     return database
       .prepare("SELECT id, name, createdAt, updatedAt FROM projects ORDER BY createdAt")
@@ -227,11 +241,13 @@ export function createDataStore(dataDir: string): DataStore {
       updatedAt: timestamp,
     };
 
-    database
-      .prepare(
-        "INSERT INTO projects (id, name, createdAt, updatedAt) VALUES (?, ?, ?, ?)",
-      )
-      .run(project.id, project.name, project.createdAt, project.updatedAt);
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          "INSERT INTO projects (id, name, createdAt, updatedAt) VALUES (?, ?, ?, ?)",
+        )
+        .run(project.id, project.name, project.createdAt, project.updatedAt);
+    });
 
     await mkdir(getProjectDir(project.id), { recursive: true });
 
@@ -245,7 +261,9 @@ export function createDataStore(dataDir: string): DataStore {
      * filesystem path prevents arbitrary path removal through crafted ids.
      */
     assertProjectExists(projectId);
-    database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+    runDatabaseTransaction(() => {
+      database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+    });
     await rm(getProjectDir(projectId), { recursive: true, force: true });
   }
 
@@ -311,10 +329,11 @@ export function createDataStore(dataDir: string): DataStore {
     };
 
     await mkdir(dirname(sourcePath), { recursive: true });
-    await writeFile(sourcePath, normalized.svgText, "utf8");
-    database
-      .prepare(
-        `
+    await writeTextFileAtomic(sourcePath, normalized.svgText);
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
         INSERT INTO primitive_assets (
           id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
           pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d, createdAt,
@@ -322,25 +341,26 @@ export function createDataStore(dataDir: string): DataStore {
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      )
-      .run(
-        asset.id,
-        asset.projectId,
-        asset.name,
-        asset.sourceFilename,
-        asset.sourcePath,
-        asset.assetKind,
-        JSON.stringify(asset.viewBox),
-        asset.pathD,
-        asset.fill,
-        asset.fillRule,
-        asset.stroke,
-        asset.strokeWidth,
-        JSON.stringify(asset.bezierPath),
-        null,
-        asset.createdAt,
-        asset.updatedAt,
-      );
+        )
+        .run(
+          asset.id,
+          asset.projectId,
+          asset.name,
+          asset.sourceFilename,
+          asset.sourcePath,
+          asset.assetKind,
+          JSON.stringify(asset.viewBox),
+          asset.pathD,
+          asset.fill,
+          asset.fillRule,
+          asset.stroke,
+          asset.strokeWidth,
+          JSON.stringify(asset.bezierPath),
+          null,
+          asset.createdAt,
+          asset.updatedAt,
+        );
+    });
 
     return asset;
   }
@@ -376,26 +396,27 @@ export function createDataStore(dataDir: string): DataStore {
       updatedAt: timestamp,
     };
 
-    await writeFile(
+    await writeTextFileAtomic(
       join(resolvedDataDir, existingAsset.sourcePath),
       normalized.svgText,
-      "utf8",
     );
-    database
-      .prepare(
-        `
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
         UPDATE primitive_assets
         SET pathD = ?, bezierPath = ?, updatedAt = ?
         WHERE projectId = ? AND id = ?
       `,
-      )
-      .run(
-        updatedAsset.pathD,
-        JSON.stringify(updatedAsset.bezierPath),
-        updatedAsset.updatedAt,
-        projectId,
-        assetId,
-      );
+        )
+        .run(
+          updatedAsset.pathD,
+          JSON.stringify(updatedAsset.bezierPath),
+          updatedAsset.updatedAt,
+          projectId,
+          assetId,
+        );
+    });
 
     return updatedAsset;
   }
@@ -444,10 +465,11 @@ export function createDataStore(dataDir: string): DataStore {
     };
 
     await mkdir(dirname(sourcePath), { recursive: true });
-    await writeFile(sourcePath, normalized.svgText, "utf8");
-    database
-      .prepare(
-        `
+    await writeTextFileAtomic(sourcePath, normalized.svgText);
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
         INSERT INTO primitive_assets (
           id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
           pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d, createdAt,
@@ -455,25 +477,26 @@ export function createDataStore(dataDir: string): DataStore {
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      )
-      .run(
-        asset.id,
-        asset.projectId,
-        asset.name,
-        asset.sourceFilename,
-        asset.sourcePath,
-        asset.assetKind,
-        JSON.stringify(asset.viewBox),
-        asset.pathD,
-        asset.fill,
-        asset.fillRule,
-        asset.stroke,
-        asset.strokeWidth,
-        JSON.stringify(asset.bezierPath),
-        JSON.stringify(asset.bezierPath3d),
-        asset.createdAt,
-        asset.updatedAt,
-      );
+        )
+        .run(
+          asset.id,
+          asset.projectId,
+          asset.name,
+          asset.sourceFilename,
+          asset.sourcePath,
+          asset.assetKind,
+          JSON.stringify(asset.viewBox),
+          asset.pathD,
+          asset.fill,
+          asset.fillRule,
+          asset.stroke,
+          asset.strokeWidth,
+          JSON.stringify(asset.bezierPath),
+          JSON.stringify(asset.bezierPath3d),
+          asset.createdAt,
+          asset.updatedAt,
+        );
+    });
 
     return asset;
   }
@@ -510,27 +533,28 @@ export function createDataStore(dataDir: string): DataStore {
       updatedAt: timestamp,
     };
 
-    await writeFile(
+    await writeTextFileAtomic(
       join(resolvedDataDir, existingAsset.sourcePath),
       normalized.svgText,
-      "utf8",
     );
-    database
-      .prepare(
-        `
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
         UPDATE primitive_assets
         SET pathD = ?, bezierPath = ?, bezierPath3d = ?, updatedAt = ?
         WHERE projectId = ? AND id = ?
       `,
-      )
-      .run(
-        updatedAsset.pathD,
-        JSON.stringify(updatedAsset.bezierPath),
-        JSON.stringify(updatedAsset.bezierPath3d),
-        updatedAsset.updatedAt,
-        projectId,
-        assetId,
-      );
+        )
+        .run(
+          updatedAsset.pathD,
+          JSON.stringify(updatedAsset.bezierPath),
+          JSON.stringify(updatedAsset.bezierPath3d),
+          updatedAsset.updatedAt,
+          projectId,
+          assetId,
+        );
+    });
 
     return updatedAsset;
   }
@@ -547,9 +571,11 @@ export function createDataStore(dataDir: string): DataStore {
       )
       .get(projectId, assetId) as { sourcePath: string } | undefined;
 
-    database
-      .prepare("DELETE FROM primitive_assets WHERE projectId = ? AND id = ?")
-      .run(projectId, assetId);
+    runDatabaseTransaction(() => {
+      database
+        .prepare("DELETE FROM primitive_assets WHERE projectId = ? AND id = ?")
+        .run(projectId, assetId);
+    });
 
     if (row) {
       await rm(join(resolvedDataDir, row.sourcePath), { force: true });
@@ -588,21 +614,23 @@ export function createDataStore(dataDir: string): DataStore {
     };
 
     await writePrefabDocument(dataPath, input.document);
-    database
-      .prepare(
-        `
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
         INSERT INTO prefabs (id, projectId, name, dataPath, createdAt, updatedAt)
         VALUES (?, ?, ?, ?, ?, ?)
       `,
-      )
-      .run(
-        prefab.id,
-        prefab.projectId,
-        prefab.name,
-        prefab.dataPath,
-        prefab.createdAt,
-        prefab.updatedAt,
-      );
+        )
+        .run(
+          prefab.id,
+          prefab.projectId,
+          prefab.name,
+          prefab.dataPath,
+          prefab.createdAt,
+          prefab.updatedAt,
+        );
+    });
 
     return prefab;
   }
@@ -631,11 +659,13 @@ export function createDataStore(dataDir: string): DataStore {
     const timestamp = new Date().toISOString();
 
     await writePrefabDocument(join(resolvedDataDir, prefab.dataPath), document);
-    database
-      .prepare(
-        "UPDATE prefabs SET updatedAt = ? WHERE projectId = ? AND id = ?",
-      )
-      .run(timestamp, projectId, prefabId);
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          "UPDATE prefabs SET updatedAt = ? WHERE projectId = ? AND id = ?",
+        )
+        .run(timestamp, projectId, prefabId);
+    });
 
     return {
       ...prefab,
@@ -646,9 +676,11 @@ export function createDataStore(dataDir: string): DataStore {
   async function deletePrefab(projectId: string, prefabId: string): Promise<void> {
     const prefab = getPrefabRecord(projectId, prefabId);
 
-    database
-      .prepare("DELETE FROM prefabs WHERE projectId = ? AND id = ?")
-      .run(projectId, prefabId);
+    runDatabaseTransaction(() => {
+      database
+        .prepare("DELETE FROM prefabs WHERE projectId = ? AND id = ?")
+        .run(projectId, prefabId);
+    });
     await rm(join(resolvedDataDir, prefab.dataPath), { force: true });
   }
 
@@ -684,21 +716,23 @@ export function createDataStore(dataDir: string): DataStore {
     };
 
     await writeSceneDocument(dataPath, input.document);
-    database
-      .prepare(
-        `
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
         INSERT INTO scenes (id, projectId, name, dataPath, createdAt, updatedAt)
         VALUES (?, ?, ?, ?, ?, ?)
       `,
-      )
-      .run(
-        scene.id,
-        scene.projectId,
-        scene.name,
-        scene.dataPath,
-        scene.createdAt,
-        scene.updatedAt,
-      );
+        )
+        .run(
+          scene.id,
+          scene.projectId,
+          scene.name,
+          scene.dataPath,
+          scene.createdAt,
+          scene.updatedAt,
+        );
+    });
 
     return scene;
   }
@@ -727,11 +761,13 @@ export function createDataStore(dataDir: string): DataStore {
     const timestamp = new Date().toISOString();
 
     await writeSceneDocument(join(resolvedDataDir, scene.dataPath), document);
-    database
-      .prepare(
-        "UPDATE scenes SET updatedAt = ? WHERE projectId = ? AND id = ?",
-      )
-      .run(timestamp, projectId, sceneId);
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          "UPDATE scenes SET updatedAt = ? WHERE projectId = ? AND id = ?",
+        )
+        .run(timestamp, projectId, sceneId);
+    });
 
     return {
       ...scene,
@@ -742,9 +778,11 @@ export function createDataStore(dataDir: string): DataStore {
   async function deleteScene(projectId: string, sceneId: string): Promise<void> {
     const scene = getSceneRecord(projectId, sceneId);
 
-    database
-      .prepare("DELETE FROM scenes WHERE projectId = ? AND id = ?")
-      .run(projectId, sceneId);
+    runDatabaseTransaction(() => {
+      database
+        .prepare("DELETE FROM scenes WHERE projectId = ? AND id = ?")
+        .run(projectId, sceneId);
+    });
     await rm(join(resolvedDataDir, scene.dataPath), { force: true });
   }
 
@@ -870,7 +908,7 @@ export function createDataStore(dataDir: string): DataStore {
     document: SceneDocument,
   ): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    await writeTextFileAtomic(path, `${JSON.stringify(document, null, 2)}\n`);
   }
 
   async function writePrefabDocument(
@@ -878,7 +916,7 @@ export function createDataStore(dataDir: string): DataStore {
     document: PrefabDocument,
   ): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    await writeTextFileAtomic(path, `${JSON.stringify(document, null, 2)}\n`);
   }
 
   function toDataRelativePath(path: string): string {
