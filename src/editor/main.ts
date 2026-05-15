@@ -233,11 +233,6 @@ import {
 } from "./controllers/prefabAssemblyController";
 import {
   createEmptyProjectWorkspaceState,
-  loadPrefabDocuments,
-  reconcileAssetSelection,
-  reconcilePrefabSelection,
-  reconcileProjectSelection,
-  reconcileSceneSelection,
 } from "./controllers/projectDataController";
 import {
   applyDeletedAsset,
@@ -312,6 +307,12 @@ import {
   upsertPrefabPathKeyframe,
   upsertPrefabVectorKeyframe,
 } from "./controllers/timelineController";
+import {
+  loadAssetRecords,
+  loadPrefabRecords,
+  loadProjectRecords,
+  loadSceneRecords,
+} from "./workflows/projectWorkspaceWorkflow";
 
 type SceneCreateSource = "empty" | "current";
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
@@ -520,8 +521,11 @@ function scheduleCameraInspectorRender(): void {
 
 async function refreshProjects(): Promise<void> {
   try {
-    editorState.projects = await listProjects();
-    const nextProject = reconcileProjectSelection(editorState.selectedProjectId, editorState.projects);
+    const nextProject = await loadProjectRecords({
+      selectedProjectId: editorState.selectedProjectId,
+      listProjects,
+    });
+    editorState.projects = nextProject.projects;
 
     if (nextProject.shouldClearWorkspace) {
       clearProjectWorkspace();
@@ -547,14 +551,15 @@ async function refreshAssets(): Promise<void> {
     return;
   }
 
-  editorState.assets = await listAssets(editorState.selectedProjectId);
-  const nextAsset = reconcileAssetSelection(
-    editorState.selectedAssetId,
-    editorState.assets,
-    editorState.pathEditSession?.assetId ?? null,
-    editorState.pathEdit3DSession?.assetId ?? null,
-  );
+  const nextAsset = await loadAssetRecords({
+    projectId: editorState.selectedProjectId,
+    selectedAssetId: editorState.selectedAssetId,
+    pathEditAssetId: editorState.pathEditSession?.assetId ?? null,
+    pathEdit3DAssetId: editorState.pathEdit3DSession?.assetId ?? null,
+    listAssets,
+  });
 
+  editorState.assets = nextAsset.assets;
   editorState.selectedAssetId = nextAsset.nextSelectedAssetId;
 
   if (nextAsset.missingPathEditAssetId) {
@@ -587,18 +592,17 @@ async function refreshPrefabs(): Promise<void> {
     return;
   }
 
-  editorState.prefabs = await listPrefabs(editorState.selectedProjectId);
-  editorState.prefabDocuments = await loadPrefabDocuments({
+  const nextPrefab = await loadPrefabRecords({
     projectId: editorState.selectedProjectId,
-    prefabs: editorState.prefabs,
+    selectedPrefabId: editorState.selectedPrefabId,
+    loadedPrefabId: editorState.loadedPrefabId,
+    listPrefabs,
     getPrefab,
-    onError: (error) => console.error(error),
+    onDocumentLoadError: (error) => console.error(error),
   });
-  const nextPrefab = reconcilePrefabSelection(
-    editorState.selectedPrefabId,
-    editorState.loadedPrefabId,
-    editorState.prefabs,
-  );
+
+  editorState.prefabs = nextPrefab.prefabs;
+  editorState.prefabDocuments = nextPrefab.prefabDocuments;
   editorState.selectedPrefabId = nextPrefab.nextSelectedPrefabId;
 
   if (nextPrefab.missingLoadedPrefabId) {
@@ -627,12 +631,14 @@ async function refreshScenes(): Promise<void> {
     return;
   }
 
-  editorState.scenes = await listScenes(editorState.selectedProjectId);
-  const nextScene = reconcileSceneSelection(
-    editorState.selectedSceneId,
-    editorState.loadedSceneId,
-    editorState.scenes,
-  );
+  const nextScene = await loadSceneRecords({
+    projectId: editorState.selectedProjectId,
+    selectedSceneId: editorState.selectedSceneId,
+    loadedSceneId: editorState.loadedSceneId,
+    listScenes,
+  });
+
+  editorState.scenes = nextScene.scenes;
   editorState.selectedSceneId = nextScene.nextSelectedSceneId;
 
   if (nextScene.missingLoadedSceneId) {
