@@ -59,13 +59,10 @@ import {
   type SceneRecord,
 } from "./api";
 import {
-  dragPathEditControl as dragPathEditCoreControl,
-  findNearestPathEditControl,
   getPathEditComponentPoint,
   getPathEditSegment,
   getSelectedPathEditSegment,
   roundBezierValue,
-  selectPathEditControl as selectPathEditCoreControl,
   setPathEditComponentAxisValue,
   type PathEditComponent,
   type PathEditControl,
@@ -229,12 +226,17 @@ import {
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
   createSourcePathEditDebugState,
   createSourcePathEditSession,
+  dragPathEditSessionAtPoint,
+  findPathEditControlAtPoint,
   getInPlacePathEditScreenControls as getInPlacePathEditScreenControlsForState,
   getRestoredPathEditSelection,
   getSourcePathEdit3DControls as getSourcePathEdit3DControlsForState,
   getSourcePathEdit3DHandleLines as getSourcePathEdit3DHandleLinesForState,
   getSourcePathEditScreenControls,
   isInPlacePathEditSessionValid,
+  pathEditSelectionsEqual,
+  selectPathEditSessionControl,
+  toPathEditSelection,
   type InPlacePathEditSession,
   type SourcePathEditSession,
 } from "./controllers/pathEditController";
@@ -3416,27 +3418,23 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
     return;
   }
 
-  const control = findNearestPathEditControl(
-    getCanvasPointerPoint(event),
-    pathEditSession,
+  const control = findPathEditControlAtPoint({
+    point: getCanvasPointerPoint(event),
+    session: pathEditSession,
     adapter,
-    PATH_EDIT_HIT_RADIUS,
-  );
+    hitRadius: PATH_EDIT_HIT_RADIUS,
+  });
 
   if (!control) {
     updatePathEditHoveredControl(null);
     return;
   }
 
-  pathEditHoveredControl = {
-    segmentId: control.segmentId,
-    component: control.component,
-  };
-  pathEditSession.selected = {
-    segmentId: control.segmentId,
-    component: control.component,
-  };
-  pathEditDragState = selectPathEditCoreControl(pathEditSession, control);
+  pathEditHoveredControl = toPathEditSelection(control);
+  pathEditDragState = selectPathEditSessionControl({
+    session: pathEditSession,
+    control,
+  });
   event.preventDefault();
   renderInvalidation.markPaperDirty();
   renderSourcePathEditPanel();
@@ -3455,24 +3453,19 @@ function updatePathEditHover(event: PointerEvent | MouseEvent): void {
   const adapter = asset ? getSourcePathEditAdapter(asset) : null;
   const hoveredControl =
     asset && adapter
-      ? findNearestPathEditControl(
-          getCanvasPointerPoint(event),
-          pathEditSession,
+      ? findPathEditControlAtPoint({
+          point: getCanvasPointerPoint(event),
+          session: pathEditSession,
           adapter,
-          PATH_EDIT_HIT_RADIUS,
-        )
+          hitRadius: PATH_EDIT_HIT_RADIUS,
+        })
       : null;
 
   updatePathEditHoveredControl(hoveredControl);
 }
 
 function updatePathEditHoveredControl(control: PathEditControl | null): void {
-  const nextHover = control
-    ? {
-        segmentId: control.segmentId,
-        component: control.component,
-      }
-    : null;
+  const nextHover = toPathEditSelection(control);
 
   if (pathEditSelectionsEqual(pathEditHoveredControl, nextHover)) {
     return;
@@ -3506,7 +3499,10 @@ function dragPathEditControl(event: PointerEvent | MouseEvent): void {
     return;
   }
 
-  dragPathEditCoreControl(pathEditSession, pathEditDragState, pathPoint, {
+  dragPathEditSessionAtPoint({
+    session: pathEditSession,
+    dragState: pathEditDragState,
+    point: pathPoint,
     altKey: event.altKey,
     shiftKey: event.shiftKey,
   });
@@ -3698,23 +3694,23 @@ function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean
     return false;
   }
 
-  const control = findNearestPathEditControl(
-    getCanvasPointerPoint(event),
+  const control = findPathEditControlAtPoint({
+    point: getCanvasPointerPoint(event),
     session,
     adapter,
-    PATH_EDIT_HIT_RADIUS,
-  );
+    hitRadius: PATH_EDIT_HIT_RADIUS,
+  });
 
   if (!control) {
     updateInPlacePathEditHoveredControl(null);
     return false;
   }
 
-  inPlacePathEditHoveredControl = {
-    segmentId: control.segmentId,
-    component: control.component,
-  };
-  inPlacePathEditDragState = selectPathEditCoreControl(session, control);
+  inPlacePathEditHoveredControl = toPathEditSelection(control);
+  inPlacePathEditDragState = selectPathEditSessionControl({
+    session,
+    control,
+  });
   event.preventDefault();
   event.stopPropagation();
   if ("stopImmediatePropagation" in event) {
@@ -3744,12 +3740,7 @@ function updateInPlacePathEditHover(event: PointerEvent | MouseEvent): void {
 }
 
 function updateInPlacePathEditHoveredControl(control: PathEditControl | null): void {
-  const nextHover = control
-    ? {
-        segmentId: control.segmentId,
-        component: control.component,
-      }
-    : null;
+  const nextHover = toPathEditSelection(control);
 
   if (pathEditSelectionsEqual(inPlacePathEditHoveredControl, nextHover)) {
     return;
@@ -3764,16 +3755,6 @@ function clearInPlacePathEditHover(): void {
   updateInPlacePathEditHoveredControl(null);
 }
 
-function pathEditSelectionsEqual(
-  left: PathEditDragState | null,
-  right: PathEditDragState | null,
-): boolean {
-  return (
-    left?.segmentId === right?.segmentId &&
-    left?.component === right?.component
-  );
-}
-
 function findInPlacePathEditControl(
   event: PointerEvent | MouseEvent,
 ): PathEditControl | null {
@@ -3784,12 +3765,12 @@ function findInPlacePathEditControl(
     return null;
   }
 
-  return findNearestPathEditControl(
-    getCanvasPointerPoint(event),
+  return findPathEditControlAtPoint({
+    point: getCanvasPointerPoint(event),
     session,
     adapter,
-    PATH_EDIT_HIT_RADIUS,
-  );
+    hitRadius: PATH_EDIT_HIT_RADIUS,
+  });
 }
 
 function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
@@ -3806,7 +3787,10 @@ function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
     return;
   }
 
-  dragPathEditCoreControl(session, inPlacePathEditDragState, pathPoint, {
+  dragPathEditSessionAtPoint({
+    session,
+    dragState: inPlacePathEditDragState,
+    point: pathPoint,
     altKey: event.altKey,
     shiftKey: event.shiftKey,
   });
