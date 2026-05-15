@@ -1,14 +1,13 @@
 import type { BezierPoint, StructuredBezierPath } from "../../core/assets/structuredBezierPath";
 import {
-  dragPathEditControl,
   findNearestPathEditControl,
-  selectPathEditControl,
   type PathEditControl,
   type PathEditDragState,
   type PathEditSelection,
   type PathEditSession,
   type PathEditViewportAdapter,
 } from "../tools/pathEditCore";
+import { applyPathEditCommand } from "../tools/pathEditCommands";
 
 export function toPathEditSelection(
   control: PathEditControl | null,
@@ -51,7 +50,16 @@ export function selectPathEditSessionControl(input: {
   session: PathEditSession;
   control: PathEditControl;
 }): PathEditDragState {
-  return selectPathEditControl(input.session, input.control);
+  const result = applyPathEditCommand(input.session, {
+    type: "selectControl",
+    control: input.control,
+  });
+
+  if (!result.ok || !result.dragState) {
+    throw new Error("Could not select path edit control.");
+  }
+
+  return result.dragState;
 }
 
 export function dragPathEditSessionAtPoint(input: {
@@ -61,9 +69,14 @@ export function dragPathEditSessionAtPoint(input: {
   altKey?: boolean;
   shiftKey?: boolean;
 }): void {
-  dragPathEditControl(input.session, input.dragState, input.point, {
-    altKey: input.altKey,
-    shiftKey: input.shiftKey,
+  applyPathEditCommand(input.session, {
+    type: "dragControl",
+    dragState: input.dragState,
+    point: input.point,
+    modifiers: {
+      altKey: input.altKey,
+      shiftKey: input.shiftKey,
+    },
   });
 }
 

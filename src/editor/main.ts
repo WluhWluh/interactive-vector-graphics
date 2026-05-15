@@ -68,13 +68,13 @@ import {
   getPathEditSegment,
   getSelectedPathEditSegment,
   roundBezierValue,
-  setPathEditComponentAxisValue,
   type PathEditComponent,
   type PathEditControl,
   type PathEditScreenControl,
   type PathEditSession,
   type PathEditViewportAdapter,
 } from "./tools/pathEditCore";
+import { applyPathEditCommand } from "./tools/pathEditCommands";
 import {
   ThreeEditorViewport,
   tupleToVector,
@@ -3035,7 +3035,15 @@ function applyPathEditPointInput(
     return;
   }
 
-  if (!setPathEditComponentAxisValue(session, segmentId, component, axisIndex, parsedValue)) {
+  if (
+    !applyPathEditCommand(session, {
+      type: "setComponentAxisValue",
+      segmentId,
+      component,
+      axisIndex,
+      value: parsedValue,
+    }).ok
+  ) {
     restorePathEditPointInput(input, segment, component, axisIndex);
     return;
   }
