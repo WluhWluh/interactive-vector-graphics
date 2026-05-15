@@ -102,18 +102,12 @@ import {
   clonePrefabAnimationClip,
   clonePrefabAnimationTrack,
   clampTimelineTimeMs,
-  evaluatePrefabPathTrack,
-  evaluatePrefabTrack,
-  isPrefabPathTrack,
   isPrefabVectorTrack,
   isPrefabVectorTrackProperty,
   snapAndClampTimelineTimeMs as snapAndClampTimelineTimeMsWithFps,
 } from "./timeline/prefabTimelineCore";
 import {
   TimelineStagingPoseStore,
-  cloneTimelineStagingTransform,
-  getPrefabNodesWithTimelineStagingPose as getPrefabNodesWithTimelineStagingPoseForNodes,
-  getTimelineStagingWorldTransform as getTimelineStagingWorldTransformForNodes,
   type TimelineStagingPose,
   type TimelineStagingPruneOptions,
 } from "./timeline/stagingPose";
@@ -146,6 +140,14 @@ import {
   createPathEdit3DPointInputRow as createPathEdit3DPointInputRowForUi,
   createPathEditPointInputRow as createPathEditPointInputRowForUi,
 } from "./ui/inspector";
+import {
+  clonePathOverrideForNode,
+  evaluatePrefabPose,
+  getPrefabNodesWithStagingPose,
+  getSelectedTimelineStagingPose as getSelectedTimelineStagingPoseFromLayers,
+  getSelectedTimelineStagingTransform as getSelectedTimelineStagingTransformFromLayers,
+  getStagingWorldTransform,
+} from "./pose/prefabPose";
 import {
   clonePrefabNode,
   cloneSceneNode,
@@ -1802,60 +1804,19 @@ function updateTimelinePlayback(deltaSeconds: number): void {
 }
 
 function getEvaluatedPrefabNodes(): PrefabNode[] {
-  const nodes = prefabNodes.map(clonePrefabNode);
-  const activeClip = getActiveTimelineClip();
-
-  if (!activeClip) {
-    return nodes;
-  }
-
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const timeMs = clampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
-
-  for (const track of activeClip.tracks) {
-    if (!isPrefabVectorTrack(track)) {
-      continue;
-    }
-
-    const node = nodeById.get(track.target.nodeId);
-
-    if (!node) {
-      continue;
-    }
-
-    const value = evaluatePrefabTrack(track, timeMs);
-
-    if (value) {
-      node[track.target.property] = value;
-    }
-  }
-
-  return nodes;
+  return getCurrentPrefabPoseSnapshot().nodes;
 }
 
 function getEvaluatedPrefabPathOverrides(): Map<string, StructuredBezierPath> {
-  const overrides = new Map<string, StructuredBezierPath>();
-  const activeClip = getActiveTimelineClip();
+  return getCurrentPrefabPoseSnapshot().pathOverrides;
+}
 
-  if (!activeClip) {
-    return overrides;
-  }
-
-  const timeMs = clampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
-
-  for (const track of activeClip.tracks) {
-    if (!isPrefabPathTrack(track)) {
-      continue;
-    }
-
-    const path = evaluatePrefabPathTrack(track, timeMs);
-
-    if (path) {
-      overrides.set(track.target.nodeId, path);
-    }
-  }
-
-  return overrides;
+function getCurrentPrefabPoseSnapshot(): ReturnType<typeof evaluatePrefabPose> {
+  return evaluatePrefabPose({
+    nodes: prefabNodes,
+    activeClip: getActiveTimelineClip(),
+    currentTimeMs: timelineCurrentTimeMs,
+  });
 }
 
 function createTimelineClipFromInput(): void {
@@ -2299,8 +2260,11 @@ function snapSelectedPrefabBaseToTimeline(): void {
   stagingPose.scale = [...evaluatedNode.scale];
 
   if (selectedNode.kind === "primitive" && asset) {
-    const evaluatedPathForSnap =
-      getEvaluatedPrefabPathOverrides().get(selectedNode.id) ?? asset.bezierPath;
+    const evaluatedPathForSnap = clonePathOverrideForNode(
+      getCurrentPrefabPoseSnapshot(),
+      selectedNode.id,
+      asset.bezierPath,
+    );
 
     stagingPose.pathDraft = cloneStructuredBezierPath(evaluatedPathForSnap);
 
@@ -3474,7 +3438,10 @@ function getSelectedPrefabTimelineGhostBillboards(): DrawableBillboard[] {
     activeClip,
     selectedAsset,
   );
-  const stagedNodes = getPrefabNodesWithTimelineStagingPose(stagingPose);
+  const stagedNodes = getPrefabNodesWithStagingPose({
+    nodes: prefabNodes,
+    stagingPose,
+  });
   const stagedWorldTransforms = getPrefabWorldTransforms(stagedNodes);
   const selectedNodeIds =
     selectedNode.kind === "group"
@@ -4330,6 +4297,10 @@ function getAssetById(assetId: string): PrimitiveSvgAsset | null {
   return findRecordById(assets, assetId);
 }
 
+function getAssetsById(): Map<string, PrimitiveSvgAsset> {
+  return new Map(assets.map((asset) => [asset.id, asset]));
+}
+
 function getPrefabRecordById(prefabId: string): PrefabRecord | null {
   return findRecordById(prefabs, prefabId);
 }
@@ -4450,38 +4421,31 @@ function getOrCreateTimelineStagingPose(
   return timelineStagingPoses.getOrCreate(node, clip, asset);
 }
 
-function getPrefabNodesWithTimelineStagingPose(
-  pose: TimelineStagingPose,
-): PrefabNode[] {
-  return getPrefabNodesWithTimelineStagingPoseForNodes(prefabNodes, pose);
-}
-
 function getTimelineStagingWorldTransform(
   pose: TimelineStagingPose,
 ): TransformSnapshot {
-  return getTimelineStagingWorldTransformForNodes(prefabNodes, pose);
+  return getStagingWorldTransform({
+    nodes: prefabNodes,
+    stagingPose: pose,
+  });
 }
 
 function getSelectedTimelineStagingPose(): TimelineStagingPose | null {
-  const activeClip = getActiveTimelineClip();
-  const selectedNode = getSelectedPrefabNode();
-
-  if (!activeClip || !selectedNode) {
-    return null;
-  }
-
-  const asset =
-    selectedNode.kind === "primitive" && selectedNode.assetId
-      ? getAssetById(selectedNode.assetId)
-      : null;
-
-  return getOrCreateTimelineStagingPose(selectedNode, activeClip, asset);
+  return getSelectedTimelineStagingPoseFromLayers({
+    selectedNode: getSelectedPrefabNode(),
+    activeClip: getActiveTimelineClip(),
+    assetsById: getAssetsById(),
+    stagingPoses: timelineStagingPoses,
+  });
 }
 
 function getSelectedTimelineStagingTransform(): TransformSnapshot | null {
-  const pose = getSelectedTimelineStagingPose();
-
-  return pose ? cloneTimelineStagingTransform(pose) : null;
+  return getSelectedTimelineStagingTransformFromLayers({
+    selectedNode: getSelectedPrefabNode(),
+    activeClip: getActiveTimelineClip(),
+    assetsById: getAssetsById(),
+    stagingPoses: timelineStagingPoses,
+  });
 }
 
 function syncInPlacePathSessionToStagingPose(): void {
