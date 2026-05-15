@@ -4,17 +4,23 @@ import {
   type StructuredBezierPath,
 } from "../../core/assets/structuredBezierPath";
 import type {
-  PrefabAnimation,
   PrefabAnimationClip,
-  PrefabAnimationTrack,
-  PrefabPathAnimationKeyframe,
   PrefabPathAnimationTrack,
   PrefabTrackProperty,
-  PrefabVectorAnimationKeyframe,
   PrefabVectorAnimationTrack,
-  PrefabVectorTrackProperty,
-} from "../api";
-import type { Vector3Tuple } from "../threeEditorViewport";
+  Vector3Tuple,
+} from "../../core/documents/prefabDocument";
+
+export {
+  clonePrefabAnimation,
+  clonePrefabAnimationClip,
+  clonePrefabAnimationKeyframe,
+  clonePrefabAnimationTrack,
+  clonePrefabPathAnimationKeyframe,
+  isPrefabPathTrack,
+  isPrefabVectorTrack,
+  isPrefabVectorTrackProperty,
+} from "../../core/documents/prefabDocument";
 
 export function evaluatePrefabTrack(
   track: PrefabVectorAnimationTrack,
@@ -152,96 +158,6 @@ export function interpolateBezierPaths(
       };
     }),
   };
-}
-
-export function clonePrefabAnimation(animation: PrefabAnimation): PrefabAnimation {
-  const clips = animation.clips.map(clonePrefabAnimationClip);
-  const activeClipId =
-    animation.activeClipId && clips.some((clip) => clip.id === animation.activeClipId)
-      ? animation.activeClipId
-      : null;
-
-  return {
-    snapFps: animation.snapFps,
-    activeClipId,
-    clips,
-  };
-}
-
-export function clonePrefabAnimationClip(
-  clip: PrefabAnimationClip,
-): PrefabAnimationClip {
-  return {
-    id: clip.id,
-    name: clip.name,
-    durationMs: clip.durationMs,
-    loop: clip.loop,
-    tracks: clip.tracks.map(clonePrefabAnimationTrack),
-  };
-}
-
-export function clonePrefabAnimationTrack(
-  track: PrefabAnimationTrack,
-): PrefabAnimationTrack {
-  if (isPrefabPathTrack(track)) {
-    return {
-      id: track.id,
-      target: {
-        nodeId: track.target.nodeId,
-        property: "path",
-      },
-      keyframes: track.keyframes.map(clonePrefabPathAnimationKeyframe),
-    };
-  }
-
-  return {
-    id: track.id,
-    target: {
-      nodeId: track.target.nodeId,
-      property: track.target.property,
-    },
-    keyframes: track.keyframes.map(clonePrefabAnimationKeyframe),
-  };
-}
-
-export function clonePrefabAnimationKeyframe(
-  keyframe: PrefabVectorAnimationKeyframe,
-): PrefabVectorAnimationKeyframe {
-  return {
-    id: keyframe.id,
-    timeMs: keyframe.timeMs,
-    value: [...keyframe.value],
-    easing: keyframe.easing,
-  };
-}
-
-export function clonePrefabPathAnimationKeyframe(
-  keyframe: PrefabPathAnimationKeyframe,
-): PrefabPathAnimationKeyframe {
-  return {
-    id: keyframe.id,
-    timeMs: keyframe.timeMs,
-    value: cloneStructuredBezierPath(keyframe.value),
-    easing: keyframe.easing,
-  };
-}
-
-export function isPrefabVectorTrack(
-  track: PrefabAnimationTrack,
-): track is PrefabVectorAnimationTrack {
-  return track.target.property !== "path";
-}
-
-export function isPrefabPathTrack(
-  track: PrefabAnimationTrack,
-): track is PrefabPathAnimationTrack {
-  return track.target.property === "path";
-}
-
-export function isPrefabVectorTrackProperty(
-  property: PrefabTrackProperty,
-): property is PrefabVectorTrackProperty {
-  return property !== "path";
 }
 
 export function getTimelinePropertyLabel(property: PrefabTrackProperty): string {

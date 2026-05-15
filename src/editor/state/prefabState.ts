@@ -1,7 +1,13 @@
-import type { PrefabAnimation, PrefabDocument, PrefabNode } from "../api";
-import { clonePrefabAnimation } from "../timeline/prefabTimelineCore";
+import {
+  createEmptyPrefabAnimation,
+  createPrefabDocument,
+  clonePrefabAnimation,
+  clonePrefabNode,
+  type PrefabAnimation,
+  type PrefabDocument,
+  type PrefabNode,
+} from "../../core/documents/prefabDocument";
 import { getNextNodeNumber } from "../tools/editorUtils";
-import { clonePrefabNode } from "./documentNodes";
 
 export type PrefabSelectionId = string;
 
@@ -12,24 +18,7 @@ export type AppliedPrefabDocumentState = {
   nextNodeNumber: number;
 };
 
-export function createEmptyPrefabAnimation(snapFps: number): PrefabAnimation {
-  return {
-    snapFps,
-    activeClipId: null,
-    clips: [],
-  };
-}
-
-export function createPrefabDocument(
-  nodes: PrefabNode[],
-  animation: PrefabAnimation,
-): PrefabDocument {
-  return {
-    version: 4,
-    nodes: nodes.map(clonePrefabNode),
-    animation: clonePrefabAnimation(animation),
-  };
-}
+export { createEmptyPrefabAnimation, createPrefabDocument };
 
 export function applyPrefabDocumentState(
   document: PrefabDocument,

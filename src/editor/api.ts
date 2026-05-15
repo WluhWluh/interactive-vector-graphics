@@ -16,6 +16,24 @@ import type {
   EditorViewportCameraSnapshot,
   Vector3Tuple,
 } from "./threeEditorViewport";
+import type { PrefabDocument } from "../core/documents/prefabDocument";
+
+export type {
+  PrefabAnimation,
+  PrefabAnimationClip,
+  PrefabAnimationKeyframe,
+  PrefabAnimationTrack,
+  PrefabDocument,
+  PrefabNode,
+  PrefabPathAnimationKeyframe,
+  PrefabPathAnimationTrack,
+  PrefabPathTrackProperty,
+  PrefabTrackEasing,
+  PrefabTrackProperty,
+  PrefabVectorAnimationKeyframe,
+  PrefabVectorAnimationTrack,
+  PrefabVectorTrackProperty,
+} from "../core/documents/prefabDocument";
 
 export type ProjectRecord = {
   id: string;
@@ -41,83 +59,6 @@ export type StoredPrimitiveAssetDto = {
   bezierPath3d: StructuredBezierPath3D | null;
   createdAt: string;
   updatedAt: string;
-};
-
-export type PrefabNode = {
-  id: string;
-  kind: "group" | "primitive";
-  parentId: string | null;
-  assetId?: string;
-  name: string;
-  position: Vector3Tuple;
-  rotation: Vector3Tuple;
-  scale: Vector3Tuple;
-  billboardMode: "spherical";
-};
-
-export type PrefabTrackEasing = "linear" | "step" | "easeInOut";
-export type PrefabVectorTrackProperty = "position" | "rotation" | "scale";
-export type PrefabPathTrackProperty = "path";
-export type PrefabTrackProperty = PrefabVectorTrackProperty | PrefabPathTrackProperty;
-
-export type PrefabAnimation = {
-  snapFps: number;
-  activeClipId: string | null;
-  clips: PrefabAnimationClip[];
-};
-
-export type PrefabAnimationClip = {
-  id: string;
-  name: string;
-  durationMs: number;
-  loop: boolean;
-  tracks: PrefabAnimationTrack[];
-};
-
-export type PrefabVectorAnimationTrack = {
-  id: string;
-  target: {
-    nodeId: string;
-    property: PrefabVectorTrackProperty;
-  };
-  keyframes: PrefabVectorAnimationKeyframe[];
-};
-
-export type PrefabPathAnimationTrack = {
-  id: string;
-  target: {
-    nodeId: string;
-    property: PrefabPathTrackProperty;
-  };
-  keyframes: PrefabPathAnimationKeyframe[];
-};
-
-export type PrefabAnimationTrack =
-  | PrefabVectorAnimationTrack
-  | PrefabPathAnimationTrack;
-
-export type PrefabVectorAnimationKeyframe = {
-  id: string;
-  timeMs: number;
-  value: Vector3Tuple;
-  easing: PrefabTrackEasing;
-};
-
-export type PrefabPathAnimationKeyframe = {
-  id: string;
-  timeMs: number;
-  value: StructuredBezierPath;
-  easing: PrefabTrackEasing;
-};
-
-export type PrefabAnimationKeyframe =
-  | PrefabVectorAnimationKeyframe
-  | PrefabPathAnimationKeyframe;
-
-export type PrefabDocument = {
-  version: 4;
-  nodes: PrefabNode[];
-  animation: PrefabAnimation;
 };
 
 export type PrefabRecord = {

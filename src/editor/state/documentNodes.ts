@@ -1,4 +1,5 @@
-import type { PrefabNode, SceneNode } from "../api";
+import { clonePrefabNode, type PrefabNode } from "../../core/documents/prefabDocument";
+import type { SceneNode } from "../api";
 
 export type PrefabNodeTreeEntry = {
   node: PrefabNode;
@@ -49,32 +50,7 @@ export function getPrefabNodeAndDescendantIds(
   return ids;
 }
 
-export function clonePrefabNode(node: PrefabNode): PrefabNode {
-  if (node.kind === "group") {
-    return {
-      id: node.id,
-      kind: "group",
-      parentId: node.parentId,
-      name: node.name,
-      position: [...node.position],
-      rotation: [...node.rotation],
-      scale: [...node.scale],
-      billboardMode: node.billboardMode,
-    };
-  }
-
-  return {
-    id: node.id,
-    kind: "primitive",
-    parentId: node.parentId,
-    assetId: node.assetId,
-    name: node.name,
-    position: [...node.position],
-    rotation: [...node.rotation],
-    scale: [...node.scale],
-    billboardMode: node.billboardMode,
-  };
-}
+export { clonePrefabNode };
 
 export function cloneSceneNode(node: SceneNode): SceneNode {
   if (node.kind === "primitive") {
