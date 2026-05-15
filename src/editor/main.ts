@@ -212,6 +212,9 @@ import {
 } from "./tools/toolController";
 import {
   addPrimitiveAssetToPrefab,
+  applyDeletedPrefabDocument,
+  applyLoadedPrefabDocument,
+  applySavedPrefabDocument,
   clearInvalidPrefabClipboard as clearInvalidPrefabClipboardForState,
   createPrefabGroupNode,
   deletePrefabNodeSubtree,
@@ -1150,12 +1153,16 @@ async function createPrefabFromInput(): Promise<void> {
       nameResult.value,
       createCurrentPrefabDocument(),
     );
+    const nextPrefabState = applyLoadedPrefabDocument(
+      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      result,
+    );
 
     elements.prefabNameInput.value = "";
-    selectedPrefabId = result.prefab.id;
-    loadedPrefabId = result.prefab.id;
+    selectedPrefabId = nextPrefabState.selectedPrefabId;
+    loadedPrefabId = nextPrefabState.loadedPrefabId;
+    prefabDocuments = nextPrefabState.prefabDocuments;
     applyPrefabDocument(result.document);
-    prefabDocuments.set(result.prefab.id, result.document);
     lastImportError = null;
     hideError();
     await refreshPrefabs();
@@ -1186,9 +1193,13 @@ async function loadSelectedPrefab(): Promise<void> {
 
   try {
     const result = await getPrefab(projectResult.value, prefabResult.value);
-    selectedPrefabId = result.prefab.id;
-    loadedPrefabId = result.prefab.id;
-    prefabDocuments.set(result.prefab.id, result.document);
+    const nextPrefabState = applyLoadedPrefabDocument(
+      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      result,
+    );
+    selectedPrefabId = nextPrefabState.selectedPrefabId;
+    loadedPrefabId = nextPrefabState.loadedPrefabId;
+    prefabDocuments = nextPrefabState.prefabDocuments;
     applyPrefabDocument(result.document);
     setEditorMode("asset");
     lastImportError = null;
@@ -1224,10 +1235,14 @@ async function saveSelectedPrefab(): Promise<void> {
       prefabResult.value,
       createCurrentPrefabDocument(),
     );
+    const nextPrefabState = applySavedPrefabDocument(
+      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      result,
+    );
 
-    selectedPrefabId = result.prefab.id;
-    loadedPrefabId = result.prefab.id;
-    prefabDocuments.set(result.prefab.id, result.document);
+    selectedPrefabId = nextPrefabState.selectedPrefabId;
+    loadedPrefabId = nextPrefabState.loadedPrefabId;
+    prefabDocuments = nextPrefabState.prefabDocuments;
     lastImportError = null;
     hideError();
     await refreshPrefabs();
@@ -1244,17 +1259,21 @@ async function deleteSelectedPrefab(): Promise<void> {
   try {
     const deletedPrefabId = selectedPrefabId;
     await deletePrefab(selectedProjectId, deletedPrefabId);
-    prefabDocuments.delete(deletedPrefabId);
+    const nextPrefabState = applyDeletedPrefabDocument(
+      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      deletedPrefabId,
+    );
+    selectedPrefabId = nextPrefabState.selectedPrefabId;
+    loadedPrefabId = nextPrefabState.loadedPrefabId;
+    prefabDocuments = nextPrefabState.prefabDocuments;
 
-    if (loadedPrefabId === deletedPrefabId) {
+    if (nextPrefabState.deletedLoadedPrefab) {
       prefabNodes = [];
       resetPrefabTimelineState();
       selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
       pendingPrefabClipboard = null;
-      loadedPrefabId = null;
     }
 
-    selectedPrefabId = null;
     lastImportError = null;
     hideError();
     await refreshPrefabs();

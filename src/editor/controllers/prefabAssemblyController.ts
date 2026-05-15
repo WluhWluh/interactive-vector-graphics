@@ -1,5 +1,5 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
-import type { PrefabNode } from "../api";
+import type { PrefabDocument, PrefabNode, PrefabRecord } from "../api";
 import { clonePrefabNode, getPrefabNodeAndDescendantIds } from "../state/documentNodes";
 import type { PrefabSelectionId } from "../state/prefabState";
 
@@ -16,6 +16,55 @@ export type PrefabAssemblyMutation = {
   nodes: PrefabNode[];
   selectedNodeId: PrefabSelectionId;
 };
+
+export type PrefabDocumentCacheState = {
+  selectedPrefabId: string | null;
+  loadedPrefabId: string | null;
+  prefabDocuments: Map<string, PrefabDocument>;
+};
+
+export type PrefabDocumentDetail = {
+  prefab: PrefabRecord;
+  document: PrefabDocument;
+};
+
+export function applyLoadedPrefabDocument(
+  state: PrefabDocumentCacheState,
+  detail: PrefabDocumentDetail,
+): PrefabDocumentCacheState {
+  const prefabDocuments = new Map(state.prefabDocuments);
+  prefabDocuments.set(detail.prefab.id, detail.document);
+
+  return {
+    selectedPrefabId: detail.prefab.id,
+    loadedPrefabId: detail.prefab.id,
+    prefabDocuments,
+  };
+}
+
+export function applySavedPrefabDocument(
+  state: PrefabDocumentCacheState,
+  detail: PrefabDocumentDetail,
+): PrefabDocumentCacheState {
+  return applyLoadedPrefabDocument(state, detail);
+}
+
+export function applyDeletedPrefabDocument(
+  state: PrefabDocumentCacheState,
+  deletedPrefabId: string,
+): PrefabDocumentCacheState & { deletedLoadedPrefab: boolean } {
+  const prefabDocuments = new Map(state.prefabDocuments);
+  prefabDocuments.delete(deletedPrefabId);
+  const deletedLoadedPrefab = state.loadedPrefabId === deletedPrefabId;
+
+  return {
+    selectedPrefabId:
+      state.selectedPrefabId === deletedPrefabId ? null : state.selectedPrefabId,
+    loadedPrefabId: deletedLoadedPrefab ? null : state.loadedPrefabId,
+    prefabDocuments,
+    deletedLoadedPrefab,
+  };
+}
 
 export function getParentIdForNewPrefabNode(
   nodes: PrefabNode[],
