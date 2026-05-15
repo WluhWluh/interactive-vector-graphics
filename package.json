@@ -9,6 +9,7 @@
     "dev:all": "concurrently -k -n server,client -c cyan,magenta \"npm run server:dev\" \"npm run dev\"",
     "check": "tsc --noEmit",
     "build": "tsc && vite build",
+    "test:unit": "tsx tests/unit/run-unit-tests.ts",
     "test:server": "tsx tests/server-smoke.ts",
     "test:visual": "playwright test",
     "preview": "vite preview"
