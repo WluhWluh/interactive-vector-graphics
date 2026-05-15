@@ -227,6 +227,10 @@ import {
   reconcileSceneSelection,
 } from "./controllers/projectDataController";
 import {
+  readRequiredInputValue,
+  requireCommandValue,
+} from "./controllers/editorCommandController";
+import {
   createInPlacePathEditDebugState,
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
   createSourcePathEditDebugState,
@@ -895,15 +899,18 @@ async function refreshScenes(): Promise<void> {
 }
 
 async function createProjectFromInput(): Promise<void> {
-  const name = elements.projectNameInput.value.trim();
+  const nameResult = readRequiredInputValue(
+    elements.projectNameInput,
+    "Project name is required.",
+  );
 
-  if (!name) {
-    setImportError(new Error("Project name is required."));
+  if (!nameResult.ok) {
+    setImportError(nameResult.error);
     return;
   }
 
   try {
-    const project = await createProject(name);
+    const project = await createProject(nameResult.value);
     elements.projectNameInput.value = "";
     clearProjectWorkspace();
     selectedProjectId = project.id;
@@ -1088,22 +1095,30 @@ async function deleteSelectedAsset(): Promise<void> {
 }
 
 async function createPrefabFromInput(): Promise<void> {
-  if (!selectedProjectId) {
-    setImportError(new Error("Create or select a project before creating a prefab."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Create or select a project before creating a prefab.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
     return;
   }
 
-  const name = elements.prefabNameInput.value.trim();
+  const nameResult = readRequiredInputValue(
+    elements.prefabNameInput,
+    "Prefab name is required.",
+  );
 
-  if (!name) {
-    setImportError(new Error("Prefab name is required."));
+  if (!nameResult.ok) {
+    setImportError(nameResult.error);
     return;
   }
 
   try {
     const result = await createPrefab(
-      selectedProjectId,
-      name,
+      projectResult.value,
+      nameResult.value,
       createCurrentPrefabDocument(),
     );
 
@@ -1121,13 +1136,27 @@ async function createPrefabFromInput(): Promise<void> {
 }
 
 async function loadSelectedPrefab(): Promise<void> {
-  if (!selectedProjectId || !selectedPrefabId) {
-    setImportError(new Error("Select a saved prefab before loading."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Select a saved prefab before loading.",
+  );
+  const prefabResult = requireCommandValue(
+    selectedPrefabId,
+    "Select a saved prefab before loading.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
+    return;
+  }
+
+  if (!prefabResult.ok) {
+    setImportError(prefabResult.error);
     return;
   }
 
   try {
-    const result = await getPrefab(selectedProjectId, selectedPrefabId);
+    const result = await getPrefab(projectResult.value, prefabResult.value);
     selectedPrefabId = result.prefab.id;
     loadedPrefabId = result.prefab.id;
     prefabDocuments.set(result.prefab.id, result.document);
@@ -1141,15 +1170,29 @@ async function loadSelectedPrefab(): Promise<void> {
 }
 
 async function saveSelectedPrefab(): Promise<void> {
-  if (!selectedProjectId || !selectedPrefabId) {
-    setImportError(new Error("Select a saved prefab before saving."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Select a saved prefab before saving.",
+  );
+  const prefabResult = requireCommandValue(
+    selectedPrefabId,
+    "Select a saved prefab before saving.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
+    return;
+  }
+
+  if (!prefabResult.ok) {
+    setImportError(prefabResult.error);
     return;
   }
 
   try {
     const result = await savePrefab(
-      selectedProjectId,
-      selectedPrefabId,
+      projectResult.value,
+      prefabResult.value,
       createCurrentPrefabDocument(),
     );
 
@@ -1274,20 +1317,34 @@ function deleteSelectedPrefabNode(): void {
 }
 
 async function addSelectedPrefabToScene(): Promise<void> {
-  if (!selectedProjectId || !selectedPrefabId) {
-    setImportError(new Error("Select a prefab before adding a scene instance."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Select a prefab before adding a scene instance.",
+  );
+  const prefabResult = requireCommandValue(
+    selectedPrefabId,
+    "Select a prefab before adding a scene instance.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
     return;
   }
 
-  if (!prefabDocuments.has(selectedPrefabId)) {
-    const result = await getPrefab(selectedProjectId, selectedPrefabId);
+  if (!prefabResult.ok) {
+    setImportError(prefabResult.error);
+    return;
+  }
+
+  if (!prefabDocuments.has(prefabResult.value)) {
+    const result = await getPrefab(projectResult.value, prefabResult.value);
     prefabDocuments.set(result.prefab.id, result.document);
   }
 
   const node: ScenePrefabInstanceNode = {
     id: `node-${nextSceneNodeNumber}`,
     kind: "prefabInstance",
-    prefabId: selectedPrefabId,
+    prefabId: prefabResult.value,
     position: [0, 1, 0],
     rotation: [0, 0, 0],
     scale: [1, 1, 1],
@@ -1303,22 +1360,30 @@ async function addSelectedPrefabToScene(): Promise<void> {
 }
 
 async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
-  if (!selectedProjectId) {
-    setImportError(new Error("Create or select a project before creating a scene."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Create or select a project before creating a scene.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
     return;
   }
 
-  const name = elements.sceneNameInput.value.trim();
+  const nameResult = readRequiredInputValue(
+    elements.sceneNameInput,
+    "Scene name is required.",
+  );
 
-  if (!name) {
-    setImportError(new Error("Scene name is required."));
+  if (!nameResult.ok) {
+    setImportError(nameResult.error);
     return;
   }
 
   try {
     const result = await createScene(
-      selectedProjectId,
-      name,
+      projectResult.value,
+      nameResult.value,
       source === "empty" ? createEmptySceneDocument() : createCurrentSceneDocument(),
     );
 
@@ -1336,15 +1401,29 @@ async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
 }
 
 async function saveSelectedScene(): Promise<void> {
-  if (!selectedProjectId || !selectedSceneId) {
-    setImportError(new Error("Select a saved scene before saving."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Select a saved scene before saving.",
+  );
+  const sceneResult = requireCommandValue(
+    selectedSceneId,
+    "Select a saved scene before saving.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
+    return;
+  }
+
+  if (!sceneResult.ok) {
+    setImportError(sceneResult.error);
     return;
   }
 
   try {
     const result = await saveScene(
-      selectedProjectId,
-      selectedSceneId,
+      projectResult.value,
+      sceneResult.value,
       createCurrentSceneDocument(),
     );
 
@@ -1359,13 +1438,27 @@ async function saveSelectedScene(): Promise<void> {
 }
 
 async function loadSelectedScene(): Promise<void> {
-  if (!selectedProjectId || !selectedSceneId) {
-    setImportError(new Error("Select a saved scene before loading."));
+  const projectResult = requireCommandValue(
+    selectedProjectId,
+    "Select a saved scene before loading.",
+  );
+  const sceneResult = requireCommandValue(
+    selectedSceneId,
+    "Select a saved scene before loading.",
+  );
+
+  if (!projectResult.ok) {
+    setImportError(projectResult.error);
+    return;
+  }
+
+  if (!sceneResult.ok) {
+    setImportError(sceneResult.error);
     return;
   }
 
   try {
-    const result = await getScene(selectedProjectId, selectedSceneId);
+    const result = await getScene(projectResult.value, sceneResult.value);
     applySceneDocument(result.document);
     selectedSceneId = result.scene.id;
     loadedSceneId = result.scene.id;
