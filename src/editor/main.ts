@@ -251,6 +251,10 @@ import {
   applySavedSceneDocument,
   cachePrefabDocumentForScene,
   deleteSceneNodeById,
+  runCreateSceneCommand,
+  runDeleteSceneCommand,
+  runLoadSceneCommand,
+  runSaveSceneCommand,
 } from "./controllers/sceneCommandController";
 import {
   readRequiredInputValue,
@@ -1491,11 +1495,13 @@ async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
   }
 
   try {
-    const result = await createScene(
-      projectResult.value,
-      nameResult.value,
-      source === "empty" ? createEmptySceneDocument() : createCurrentSceneDocument(),
-    );
+    const result = await runCreateSceneCommand({
+      projectId: projectResult.value,
+      name: nameResult.value,
+      document:
+        source === "empty" ? createEmptySceneDocument() : createCurrentSceneDocument(),
+      createScene,
+    });
     const nextSceneState = applyLoadedSceneDocument(result);
 
     elements.sceneNameInput.value = "";
@@ -1532,11 +1538,12 @@ async function saveSelectedScene(): Promise<void> {
   }
 
   try {
-    const result = await saveScene(
-      projectResult.value,
-      sceneResult.value,
-      createCurrentSceneDocument(),
-    );
+    const result = await runSaveSceneCommand({
+      projectId: projectResult.value,
+      sceneId: sceneResult.value,
+      document: createCurrentSceneDocument(),
+      saveScene,
+    });
     const nextSceneState = applySavedSceneDocument(result);
 
     selectedSceneId = nextSceneState.selectedSceneId;
@@ -1570,7 +1577,11 @@ async function loadSelectedScene(): Promise<void> {
   }
 
   try {
-    const result = await getScene(projectResult.value, sceneResult.value);
+    const result = await runLoadSceneCommand({
+      projectId: projectResult.value,
+      sceneId: sceneResult.value,
+      getScene,
+    });
     const nextSceneState = applyLoadedSceneDocument(result);
     applySceneDocument(result.document);
     selectedSceneId = nextSceneState.selectedSceneId;
@@ -1589,8 +1600,11 @@ async function deleteSelectedScene(): Promise<void> {
   }
 
   try {
-    const deletedSceneId = selectedSceneId;
-    await deleteScene(selectedProjectId, deletedSceneId);
+    const deletedSceneId = await runDeleteSceneCommand({
+      projectId: selectedProjectId,
+      sceneId: selectedSceneId,
+      deleteScene,
+    });
     const nextSceneState = applyDeletedSceneDocument(
       { selectedSceneId, loadedSceneId },
       deletedSceneId,

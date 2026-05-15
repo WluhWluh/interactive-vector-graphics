@@ -29,6 +29,53 @@ export function applyLoadedSceneDocument(
   };
 }
 
+export async function runCreateSceneCommand(input: {
+  projectId: string;
+  name: string;
+  document: SceneDocument;
+  createScene: (
+    projectId: string,
+    name: string,
+    document: SceneDocument,
+  ) => Promise<SceneDocumentDetail>;
+}): Promise<SceneDocumentDetail> {
+  return input.createScene(input.projectId, input.name, input.document);
+}
+
+export async function runLoadSceneCommand(input: {
+  projectId: string;
+  sceneId: string;
+  getScene: (
+    projectId: string,
+    sceneId: string,
+  ) => Promise<SceneDocumentDetail>;
+}): Promise<SceneDocumentDetail> {
+  return input.getScene(input.projectId, input.sceneId);
+}
+
+export async function runSaveSceneCommand(input: {
+  projectId: string;
+  sceneId: string;
+  document: SceneDocument;
+  saveScene: (
+    projectId: string,
+    sceneId: string,
+    document: SceneDocument,
+  ) => Promise<SceneDocumentDetail>;
+}): Promise<SceneDocumentDetail> {
+  return input.saveScene(input.projectId, input.sceneId, input.document);
+}
+
+export async function runDeleteSceneCommand(input: {
+  projectId: string;
+  sceneId: string;
+  deleteScene: (projectId: string, sceneId: string) => Promise<void>;
+}): Promise<string> {
+  await input.deleteScene(input.projectId, input.sceneId);
+
+  return input.sceneId;
+}
+
 export function applySavedSceneDocument(
   detail: SceneDocumentDetail,
 ): SceneDocumentState {
