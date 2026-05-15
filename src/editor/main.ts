@@ -168,6 +168,7 @@ import {
   createSceneDocument,
 } from "./state/sceneState";
 import {
+  createEditorAppStateStore,
   createInitialEditorAppState,
   type EditorMode,
 } from "./state/editorAppState";
@@ -311,6 +312,7 @@ const initialAppState = createInitialEditorAppState({
   rootPrefabNodeId: PREFAB_ROOT_NODE_ID,
   defaultPrefabSnapFps: DEFAULT_PREFAB_SNAP_FPS,
 });
+const appStateStore = createEditorAppStateStore(initialAppState);
 
 let projects: ProjectRecord[] = initialAppState.projects;
 let assets: PrimitiveSvgAsset[] = initialAppState.assets;
@@ -352,6 +354,37 @@ let lastFrameTime = performance.now();
 let nextSceneNodeNumber = initialAppState.nextSceneNodeNumber;
 let nextPrefabNodeNumber = initialAppState.nextPrefabNodeNumber;
 let pendingCameraInspectorRender = false;
+
+function syncAppStateStore(): void {
+  appStateStore.patch({
+    projects,
+    assets,
+    prefabs,
+    prefabNodes,
+    prefabDocuments,
+    scenes,
+    sceneNodes,
+    editorMode,
+    selectedProjectId,
+    selectedAssetId,
+    selectedPrefabId,
+    loadedPrefabId,
+    selectedPrefabNodeId,
+    prefabAnimation,
+    timelineStagingPoses,
+    timelineCurrentTimeMs,
+    isTimelinePlaying,
+    selectedTimelineKeyframeId,
+    activeEditorTool,
+    selectedSceneId,
+    loadedSceneId,
+    selectedSceneNodeId,
+    pendingPrefabClipboard,
+    lastImportError,
+    nextSceneNodeNumber,
+    nextPrefabNodeNumber,
+  });
+}
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
@@ -466,6 +499,7 @@ declare global {
       getLoadedSceneId: () => string | null;
       getLastImportError: () => string | null;
       getCollapsedModules: () => CollapsibleModuleId[];
+      getAppStateSnapshot: () => ReturnType<typeof appStateStore.getSnapshot>;
     };
   }
 }
@@ -2559,6 +2593,7 @@ function renderCollapsibleModules(): void {
 }
 
 function renderEditorShell(): void {
+  syncAppStateStore();
   renderCache.markAllDirty();
   const activeTimelineClip = getActiveTimelineClip();
   const validInPlacePathEditSession =
@@ -4384,6 +4419,7 @@ function hideError(): void {
 }
 
 function exposeEditorDebugHooks(): void {
+  syncAppStateStore();
   window.__vectorEditorDebug = {
     getProjects: () => [...projects],
     getAssets: () =>
@@ -4505,5 +4541,6 @@ function exposeEditorDebugHooks(): void {
       COLLAPSIBLE_MODULE_IDS.filter((moduleId) =>
         collapsedModuleIds.has(moduleId),
       ),
+    getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }

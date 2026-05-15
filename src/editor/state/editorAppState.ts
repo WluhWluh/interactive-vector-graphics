@@ -47,6 +47,11 @@ export type EditorAppState = {
   nextPrefabNodeNumber: number;
 };
 
+export type EditorAppStateStore = {
+  getSnapshot: () => EditorAppState;
+  patch: (patch: Partial<EditorAppState>) => EditorAppState;
+};
+
 export function createInitialEditorAppState(input: {
   rootPrefabNodeId: string;
   defaultPrefabSnapFps: number;
@@ -78,5 +83,36 @@ export function createInitialEditorAppState(input: {
     lastImportError: null,
     nextSceneNodeNumber: 1,
     nextPrefabNodeNumber: 1,
+  };
+}
+
+export function createEditorAppStateStore(
+  initialState: EditorAppState,
+): EditorAppStateStore {
+  let state = cloneEditorAppState(initialState);
+
+  return {
+    getSnapshot: () => cloneEditorAppState(state),
+    patch: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return cloneEditorAppState(state);
+    },
+  };
+}
+
+export function cloneEditorAppState(state: EditorAppState): EditorAppState {
+  return {
+    ...state,
+    projects: [...state.projects],
+    assets: [...state.assets],
+    prefabs: [...state.prefabs],
+    prefabNodes: [...state.prefabNodes],
+    prefabDocuments: new Map(state.prefabDocuments),
+    scenes: [...state.scenes],
+    sceneNodes: [...state.sceneNodes],
   };
 }
