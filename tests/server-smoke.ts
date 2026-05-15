@@ -9,12 +9,17 @@ import { validateSceneDocument } from "../server/sceneDocument";
 import {
   parsePathDToStructuredBezier,
   structuredBezierToPathD,
-  validateStructuredBezierPath,
-  type StructuredBezierPath,
 } from "../src/core/assets/structuredBezierPath";
-import { validateStructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
-import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 import type { PrefabDocument, SceneDocument } from "../server/types";
+import {
+  assertInvalidPrefabDocument,
+  assertInvalidSceneDocument,
+  assertInvalidStructuredBezierPath,
+  assertInvalidStructuredBezierPath3D,
+  cloneStructuredBezierPath3DForTest,
+  cloneStructuredBezierPathForTest,
+  createBezierSegment,
+} from "./helpers/serverSmokeAssertions";
 
 const tempDataDir = await mkdtemp(join(tmpdir(), "ivg-server-smoke-"));
 const store = createDataStore(tempDataDir);
@@ -1147,89 +1152,4 @@ try {
 } finally {
   store.close();
   await rm(tempDataDir, { recursive: true, force: true });
-}
-
-function assertInvalidSceneDocument(
-  document: unknown,
-  expectedMessage: RegExp,
-  projectId: string,
-): void {
-  assert.throws(
-    () => validateSceneDocument(document, { projectId }),
-    expectedMessage,
-  );
-}
-
-function assertInvalidPrefabDocument(
-  document: unknown,
-  expectedMessage: RegExp,
-  projectId: string,
-): void {
-  assert.throws(
-    () => validatePrefabDocument(document, { projectId }),
-    expectedMessage,
-  );
-}
-
-function assertInvalidStructuredBezierPath(
-  path: StructuredBezierPath,
-  options: { expectedClosed: boolean },
-  expectedMessage: RegExp,
-): void {
-  assert.throws(
-    () => validateStructuredBezierPath(path, options),
-    expectedMessage,
-  );
-}
-
-function assertInvalidStructuredBezierPath3D(
-  path: StructuredBezierPath3D,
-  expectedMessage: RegExp,
-): void {
-  assert.throws(
-    () => validateStructuredBezierPath3D(path),
-    expectedMessage,
-  );
-}
-
-function createBezierSegment(
-  id: string,
-  anchor: [number, number],
-): StructuredBezierPath["segments"][number] {
-  return {
-    id,
-    anchor,
-    handleIn: [0, 0],
-    handleOut: [0, 0],
-  };
-}
-
-function cloneStructuredBezierPathForTest(
-  path: StructuredBezierPath,
-): StructuredBezierPath {
-  return {
-    version: 1,
-    closed: path.closed,
-    segments: path.segments.map((segment) => ({
-      id: segment.id,
-      anchor: [...segment.anchor],
-      handleIn: [...segment.handleIn],
-      handleOut: [...segment.handleOut],
-    })),
-  };
-}
-
-function cloneStructuredBezierPath3DForTest(
-  path: StructuredBezierPath3D,
-): StructuredBezierPath3D {
-  return {
-    version: 1,
-    closed: false,
-    segments: path.segments.map((segment) => ({
-      id: segment.id,
-      anchor: [...segment.anchor],
-      handleIn: [...segment.handleIn],
-      handleOut: [...segment.handleOut],
-    })),
-  };
 }

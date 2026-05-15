@@ -5,20 +5,15 @@ import {
   openEditor,
   uploadPrimitiveSvg,
 } from "./helpers/editorActions";
+import { createTealStrokeSvg } from "./helpers/svgFixtures";
 
 test("imports and previews an open strokePath primitive", async ({ page }) => {
   await openEditor(page);
   await createEditorProject(page, "Stroke Project");
 
-  const strokeSvg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
-    '<path fill="none" stroke="#5bc4bf" stroke-width="12" d="M 10 80 C 30 20 70 20 90 80" />',
-    "</svg>",
-  ].join("");
-
   await uploadPrimitiveSvg(page, {
     filename: "leg-stroke.svg",
-    svgText: strokeSvg,
+    svgText: createTealStrokeSvg(),
   });
 
   await expect(page.getByRole("button", { name: "Stroke: leg-stroke" })).toBeVisible();

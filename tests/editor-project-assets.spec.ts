@@ -5,6 +5,10 @@ import {
   openEditor,
   uploadPrimitiveSvg,
 } from "./helpers/editorActions";
+import {
+  createFilledFaceSvg,
+  createInvalidMultiPathSvg,
+} from "./helpers/svgFixtures";
 
 test("creates a project, imports a primitive SVG, and deletes data", async ({
   page,
@@ -65,15 +69,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   ).toEqual([]);
   await createEditorProject(page, "Playwright Project");
 
-  const validSvg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">',
-    '<path fill="#ffcf4a" d="M -50 0 C -50 -33 -21 -50 0 -50 C 21 -50 50 -33 50 0 C 50 33 21 50 0 50 C -21 50 -50 33 -50 0 Z" />',
-    "</svg>",
-  ].join("");
-
   await uploadPrimitiveSvg(page, {
     filename: "uploaded-face.svg",
-    svgText: validSvg,
+    svgText: createFilledFaceSvg(),
   });
 
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
@@ -956,16 +954,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   await page.getByRole("button", { name: "Asset Assembly" }).click();
 
-  const invalidSvg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
-    '<path fill="#ffcf4a" d="M 0 0 L 50 0 L 50 50 Z" />',
-    '<path fill="#ffcf4a" stroke="#111827" d="M 10 10 L 20 10 L 20 20 Z" />',
-    "</svg>",
-  ].join("");
-
   await uploadPrimitiveSvg(page, {
     filename: "bad-asset.svg",
-    svgText: invalidSvg,
+    svgText: createInvalidMultiPathSvg(),
   });
 
   await expect(page.locator("#import-error")).toBeVisible();
