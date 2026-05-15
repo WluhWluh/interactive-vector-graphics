@@ -15,7 +15,8 @@ export type PrimitiveAssetWith3DSourcePath = Extract<
 
 export type PrimitiveAssetRenderStyle = "fill" | "stroke" | "projectedStroke3d";
 
-export type PrimitiveAssetCapabilities = {
+export type PrimitiveAssetCapabilityDefinition = {
+  readonly kind: PrimitiveAssetKind;
   readonly listLabel: string;
   readonly renderStyle: PrimitiveAssetRenderStyle;
   readonly expectedStructuredPathClosed: boolean;
@@ -29,48 +30,76 @@ export type PrimitiveAssetCapabilities = {
   readonly canConvertTo3DCurve: boolean;
 };
 
-const PRIMITIVE_ASSET_CAPABILITIES: Record<
+export type PrimitiveAssetCapabilities = Omit<
+  PrimitiveAssetCapabilityDefinition,
+  "kind"
+>;
+
+const PRIMITIVE_ASSET_CAPABILITY_DEFINITIONS: readonly PrimitiveAssetCapabilityDefinition[] =
+  [
+    {
+      kind: "filledPath",
+      listLabel: "Fill",
+      renderStyle: "fill",
+      expectedStructuredPathClosed: true,
+      usesFillStyle: true,
+      usesStrokeStyle: false,
+      has3DSourcePath: false,
+      canUpdate2DSourcePath: true,
+      canSourcePathEdit: true,
+      canInPlacePathEdit: true,
+      canPathKeyframe: true,
+      canConvertTo3DCurve: false,
+    },
+    {
+      kind: "strokePath",
+      listLabel: "Stroke",
+      renderStyle: "stroke",
+      expectedStructuredPathClosed: false,
+      usesFillStyle: false,
+      usesStrokeStyle: true,
+      has3DSourcePath: false,
+      canUpdate2DSourcePath: true,
+      canSourcePathEdit: true,
+      canInPlacePathEdit: true,
+      canPathKeyframe: true,
+      canConvertTo3DCurve: true,
+    },
+    {
+      kind: "bezierCurve3d",
+      listLabel: "3D Curve",
+      renderStyle: "projectedStroke3d",
+      expectedStructuredPathClosed: false,
+      usesFillStyle: false,
+      usesStrokeStyle: true,
+      has3DSourcePath: true,
+      canUpdate2DSourcePath: false,
+      canSourcePathEdit: true,
+      canInPlacePathEdit: false,
+      canPathKeyframe: false,
+      canConvertTo3DCurve: false,
+    },
+  ];
+
+export const PRIMITIVE_ASSET_CAPABILITY_REGISTRY: ReadonlyMap<
   PrimitiveAssetKind,
-  PrimitiveAssetCapabilities
-> = {
+  PrimitiveAssetCapabilityDefinition
+> = new Map(
+  PRIMITIVE_ASSET_CAPABILITY_DEFINITIONS.map((definition) => [
+    definition.kind,
+    definition,
+  ]),
+);
+
+const PRIMITIVE_ASSET_CAPABILITIES: Record<PrimitiveAssetKind, PrimitiveAssetCapabilities> = {
   filledPath: {
-    listLabel: "Fill",
-    renderStyle: "fill",
-    expectedStructuredPathClosed: true,
-    usesFillStyle: true,
-    usesStrokeStyle: false,
-    has3DSourcePath: false,
-    canUpdate2DSourcePath: true,
-    canSourcePathEdit: true,
-    canInPlacePathEdit: true,
-    canPathKeyframe: true,
-    canConvertTo3DCurve: false,
+    ...getPrimitiveAssetCapabilityDefinition("filledPath"),
   },
   strokePath: {
-    listLabel: "Stroke",
-    renderStyle: "stroke",
-    expectedStructuredPathClosed: false,
-    usesFillStyle: false,
-    usesStrokeStyle: true,
-    has3DSourcePath: false,
-    canUpdate2DSourcePath: true,
-    canSourcePathEdit: true,
-    canInPlacePathEdit: true,
-    canPathKeyframe: true,
-    canConvertTo3DCurve: true,
+    ...getPrimitiveAssetCapabilityDefinition("strokePath"),
   },
   bezierCurve3d: {
-    listLabel: "3D Curve",
-    renderStyle: "projectedStroke3d",
-    expectedStructuredPathClosed: false,
-    usesFillStyle: false,
-    usesStrokeStyle: true,
-    has3DSourcePath: true,
-    canUpdate2DSourcePath: false,
-    canSourcePathEdit: true,
-    canInPlacePathEdit: false,
-    canPathKeyframe: false,
-    canConvertTo3DCurve: false,
+    ...getPrimitiveAssetCapabilityDefinition("bezierCurve3d"),
   },
 };
 
@@ -78,6 +107,23 @@ export function getPrimitiveAssetCapabilities(
   assetOrKind: PrimitiveSvgAsset | PrimitiveAssetKind,
 ): PrimitiveAssetCapabilities {
   return PRIMITIVE_ASSET_CAPABILITIES[getPrimitiveAssetKind(assetOrKind)];
+}
+
+export function getPrimitiveAssetCapabilityDefinition(
+  assetOrKind: PrimitiveSvgAsset | PrimitiveAssetKind,
+): PrimitiveAssetCapabilityDefinition {
+  const kind = getPrimitiveAssetKind(assetOrKind);
+  const definition = PRIMITIVE_ASSET_CAPABILITY_REGISTRY.get(kind);
+
+  if (!definition) {
+    throw new Error(`Unknown primitive asset kind "${kind}".`);
+  }
+
+  return definition;
+}
+
+export function getPrimitiveAssetCapabilityDefinitions(): PrimitiveAssetCapabilityDefinition[] {
+  return [...PRIMITIVE_ASSET_CAPABILITY_REGISTRY.values()];
 }
 
 export function primitiveAssetUsesFillStyle(
