@@ -221,15 +221,19 @@ import {
   type PrefabClipboardMode,
 } from "./controllers/prefabAssemblyController";
 import {
-  appendAsset,
   createEmptyProjectWorkspaceState,
   loadPrefabDocuments,
-  replaceAssetById,
   reconcileAssetSelection,
   reconcilePrefabSelection,
   reconcileProjectSelection,
   reconcileSceneSelection,
 } from "./controllers/projectDataController";
+import {
+  applyDeletedAsset,
+  applyImportedAsset,
+  applyUpdatedAsset,
+  canConvertAssetTo3DCurve,
+} from "./controllers/assetCommandController";
 import {
   readRequiredInputValue,
   requireCommandValue,
@@ -966,8 +970,12 @@ async function savePathEditSession(): Promise<void> {
           pathEditSession!.assetId,
           pathEditSession!.draft,
         );
-    assets = replaceAssetById(assets, updatedAsset);
-    selectedAssetId = updatedAsset.id;
+    const nextAssetState = applyUpdatedAsset(
+      { assets, selectedAssetId },
+      updatedAsset,
+    );
+    assets = nextAssetState.assets;
+    selectedAssetId = nextAssetState.selectedAssetId;
     pathEditSession = null;
     pathEdit3DSession = null;
     pathEditDragState = null;
@@ -1022,7 +1030,7 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
 
   const asset = getSelectedAsset();
 
-  if (asset?.assetKind !== "strokePath") {
+  if (!canConvertAssetTo3DCurve(asset)) {
     setImportError(new Error("Only strokePath assets can be converted to 3D curves."));
     return;
   }
@@ -1032,8 +1040,12 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
       selectedProjectId,
       selectedAssetId,
     );
-    assets = appendAsset(assets, convertedAsset);
-    selectedAssetId = convertedAsset.id;
+    const nextAssetState = applyImportedAsset(
+      { assets, selectedAssetId },
+      convertedAsset,
+    );
+    assets = nextAssetState.assets;
+    selectedAssetId = nextAssetState.selectedAssetId;
     lastImportError = null;
     hideError();
     startPathEditSession(convertedAsset);
@@ -1058,7 +1070,9 @@ async function importSelectedFile(): Promise<void> {
 
   try {
     const asset = await uploadAsset(selectedProjectId, file);
-    selectedAssetId = asset.id;
+    const nextAssetState = applyImportedAsset({ assets, selectedAssetId }, asset);
+    assets = nextAssetState.assets;
+    selectedAssetId = nextAssetState.selectedAssetId;
     if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
       selectedPrefabNodeId = null;
     }
@@ -1094,7 +1108,12 @@ async function deleteSelectedAsset(): Promise<void> {
       exitPathTool();
     }
     pruneTimelineStagingPoses({ assetIds: new Set([deletedAssetId]) });
-    selectedAssetId = null;
+    const nextAssetState = applyDeletedAsset(
+      { assets, selectedAssetId },
+      deletedAssetId,
+    );
+    assets = nextAssetState.assets;
+    selectedAssetId = nextAssetState.selectedAssetId;
     lastImportError = null;
     hideError();
     await refreshAssets();
