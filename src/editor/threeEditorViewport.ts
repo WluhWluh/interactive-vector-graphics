@@ -1,38 +1,54 @@
 import {
   AmbientLight,
-  BoxGeometry,
-  AxesHelper,
   BufferGeometry,
-  Color,
-  DoubleSide,
-  EdgesGeometry,
-  Euler,
-  GridHelper,
   LineBasicMaterial,
   LineSegments,
-  Mesh,
-  MeshBasicMaterial,
   OrthographicCamera,
   PerspectiveCamera,
-  PlaneGeometry,
   Raycaster,
   Scene,
-  SphereGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
   type Camera,
-  type Object3D,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
 import type { StageSize } from "../core/stage/canvasStage";
+import {
+  eulerToTuple,
+  largestAbsoluteScaleRatio,
+  tupleToVector,
+  vectorToTuple,
+  type Vector3Tuple,
+} from "./three/viewportMath";
+import {
+  applyNodeTransform,
+  createAxesHelper,
+  createCurve3DControlProxy,
+  createGridHelper,
+  createNodeProxy,
+  createTransparentRenderer,
+  disposeObject,
+  updateCurve3DControlMaterial,
+  type Curve3DControlDescriptor,
+  type Curve3DControlProxy,
+  type Curve3DHandleLineDescriptor,
+  type NodeProxy,
+} from "./three/viewportObjects";
+
+export { eulerToTuple, tupleToVector, vectorToTuple } from "./three/viewportMath";
+export type { Vector3Tuple } from "./three/viewportMath";
+export type {
+  Curve3DControlComponent,
+  Curve3DControlDescriptor,
+  Curve3DHandleLineDescriptor,
+} from "./three/viewportObjects";
 
 export type CameraProjection = "perspective" | "orthographic";
 export type TransformMode = "translate" | "rotate" | "scale";
 export type BillboardMode = "spherical";
-export type Vector3Tuple = [number, number, number];
 
 export type EditorSceneNode = {
   id: string;
@@ -60,43 +76,12 @@ export type EditorViewportCameraSnapshot = {
   far: number;
 };
 
-type NodeProxy = {
-  nodeId: string;
-  root: Object3D;
-  hitMesh: Mesh;
-  edgeLines: LineSegments;
-};
-
-export type Curve3DControlComponent = "anchor" | "handleIn" | "handleOut";
-
-export type Curve3DControlDescriptor = {
-  id: string;
-  segmentId: string;
-  component: Curve3DControlComponent;
-  position: Vector3Tuple;
-  selected: boolean;
-};
-
-export type Curve3DHandleLineDescriptor = {
-  start: Vector3Tuple;
-  end: Vector3Tuple;
-};
-
-type Curve3DControlProxy = {
-  id: string;
-  segmentId: string;
-  component: Curve3DControlComponent;
-  mesh: Mesh;
-};
-
 const DEFAULT_CAMERA_POSITION = new Vector3(4.5, 3.2, 5.2);
 const DEFAULT_CAMERA_TARGET = new Vector3(0, 0.8, 0);
 const PERSPECTIVE_FOV = 45;
 const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 120;
 const ORTHOGRAPHIC_HALF_HEIGHT = 3.5;
-const CURVE_3D_ANCHOR_GEOMETRY = new SphereGeometry(0.035, 16, 10);
-const CURVE_3D_HANDLE_GEOMETRY = new BoxGeometry(0.07, 0.07, 0.07);
 
 export class ThreeEditorViewport {
   private readonly backgroundCanvas: HTMLCanvasElement;
@@ -823,149 +808,6 @@ export class ThreeEditorViewport {
   }
 }
 
-export function tupleToVector(value: Vector3Tuple): Vector3 {
-  return new Vector3(value[0], value[1], value[2]);
-}
-
-export function vectorToTuple(value: Vector3): Vector3Tuple {
-  return [roundNumber(value.x), roundNumber(value.y), roundNumber(value.z)];
-}
-
-export function eulerToTuple(value: Euler): Vector3Tuple {
-  return [roundNumber(value.x), roundNumber(value.y), roundNumber(value.z)];
-}
-
-function createTransparentRenderer(canvas: HTMLCanvasElement): WebGLRenderer {
-  const renderer = new WebGLRenderer({
-    alpha: true,
-    antialias: true,
-    canvas,
-  });
-
-  renderer.setClearColor(new Color(0x000000), 0);
-  renderer.autoClear = true;
-  return renderer;
-}
-
-function createGridHelper(): GridHelper {
-  const grid = new GridHelper(12, 12, 0x5bc4bf, 0x334155);
-  grid.material.opacity = 0.44;
-  grid.material.transparent = true;
-  return grid;
-}
-
-function createAxesHelper(): AxesHelper {
-  const axes = new AxesHelper(2.4);
-  axes.position.y = 0.01;
-  return axes;
-}
-
-function createNodeProxy(
-  node: EditorTransformNode,
-  asset?: PrimitiveSvgAsset,
-): NodeProxy {
-  const [, , viewBoxWidth, viewBoxHeight] = asset?.viewBox ?? [0, 0, 100, 100];
-  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
-  const width = viewBoxWidth / largestDimension;
-  const height = viewBoxHeight / largestDimension;
-  const root = new Mesh(
-    new PlaneGeometry(width, height),
-    new MeshBasicMaterial({
-      color: 0x5bc4bf,
-      opacity: 0.06,
-      transparent: true,
-      side: DoubleSide,
-      depthWrite: false,
-    }),
-  );
-  const edgeGeometry = new EdgesGeometry(root.geometry);
-  const edgeLines = new LineSegments(
-    edgeGeometry,
-    new LineBasicMaterial({
-      color: 0x5bc4bf,
-      transparent: true,
-      opacity: 0.95,
-    }),
-  );
-
-  edgeLines.renderOrder = 10;
-  root.add(edgeLines);
-  root.userData.nodeId = node.id;
-  if (asset) {
-    root.userData.assetId = asset.id;
-  }
-  root.userData.proxyKind = "primitive-billboard";
-  applyNodeTransform(root, node);
-
-  return {
-    nodeId: node.id,
-    root,
-    hitMesh: root,
-    edgeLines,
-  };
-}
-
-function createCurve3DControlProxy(
-  control: Curve3DControlDescriptor,
-): Curve3DControlProxy {
-  const mesh = new Mesh(
-    control.component === "anchor"
-      ? CURVE_3D_ANCHOR_GEOMETRY.clone()
-      : CURVE_3D_HANDLE_GEOMETRY.clone(),
-    new MeshBasicMaterial({
-      color: control.selected ? 0xffcf4a : 0x5bc4bf,
-      depthTest: false,
-      depthWrite: false,
-    }),
-  );
-
-  mesh.renderOrder = 15;
-  mesh.userData.curveControlId = control.id;
-  mesh.userData.segmentId = control.segmentId;
-  mesh.userData.component = control.component;
-
-  return {
-    id: control.id,
-    segmentId: control.segmentId,
-    component: control.component,
-    mesh,
-  };
-}
-
-function updateCurve3DControlMaterial(
-  proxy: Curve3DControlProxy,
-  selected: boolean,
-): void {
-  const material = proxy.mesh.material as MeshBasicMaterial;
-  material.color.set(selected ? 0xffcf4a : 0x5bc4bf);
-}
-
-function applyNodeTransform(root: Object3D, node: EditorTransformNode): void {
-  root.position.fromArray(node.position);
-  root.rotation.fromArray([...node.rotation, "XYZ"]);
-  root.scale.fromArray(node.scale);
-  root.updateMatrixWorld();
-}
-
-function disposeObject(object: Object3D): void {
-  object.traverse((child) => {
-    const maybeGeometry = child as Object3D & { geometry?: BufferGeometry };
-    const maybeMaterial = child as Object3D & {
-      material?: { dispose?: () => void } | Array<{ dispose?: () => void }>;
-    };
-
-    maybeGeometry.geometry?.dispose();
-
-    if (Array.isArray(maybeMaterial.material)) {
-      for (const material of maybeMaterial.material) {
-        material.dispose?.();
-      }
-    } else {
-      maybeMaterial.material?.dispose?.();
-    }
-  });
-}
-
 function getRequiredCanvas(id: string): HTMLCanvasElement {
   const canvas = document.getElementById(id);
 
@@ -974,24 +816,4 @@ function getRequiredCanvas(id: string): HTMLCanvasElement {
   }
 
   return canvas;
-}
-
-function roundNumber(value: number): number {
-  return Number(value.toFixed(4));
-}
-
-function largestAbsoluteScaleRatio(current: Vector3, start: Vector3): number {
-  const ratios = [
-    current.x / safeScaleBase(start.x),
-    current.y / safeScaleBase(start.y),
-    current.z / safeScaleBase(start.z),
-  ];
-
-  return ratios.reduce((best, candidate) =>
-    Math.abs(candidate - 1) > Math.abs(best - 1) ? candidate : best,
-  );
-}
-
-function safeScaleBase(value: number): number {
-  return Math.abs(value) < 0.0001 ? 0.0001 : value;
 }
