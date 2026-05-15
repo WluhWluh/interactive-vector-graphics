@@ -1,8 +1,6 @@
 import {
   AmbientLight,
-  BufferGeometry,
   LineBasicMaterial,
-  LineSegments,
   OrthographicCamera,
   PerspectiveCamera,
   Raycaster,
@@ -18,7 +16,6 @@ import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
 import type { StageSize } from "../core/stage/canvasStage";
 import {
   eulerToTuple,
-  largestAbsoluteScaleRatio,
   tupleToVector,
   vectorToTuple,
   type Vector3Tuple,
@@ -26,17 +23,28 @@ import {
 import {
   applyNodeTransform,
   createAxesHelper,
-  createCurve3DControlProxy,
   createGridHelper,
   createNodeProxy,
   createTransparentRenderer,
   disposeObject,
-  updateCurve3DControlMaterial,
   type Curve3DControlDescriptor,
   type Curve3DControlProxy,
   type Curve3DHandleLineDescriptor,
   type NodeProxy,
 } from "./three/viewportObjects";
+import {
+  bindOrbitTransformInteraction,
+  configureOrbitCameraControls,
+} from "./three/orbitCameraController";
+import {
+  createTransformControlsController,
+  didPointerMoveBeyondClickThreshold,
+  type TransformControlsController,
+} from "./three/transformControlsController";
+import {
+  createCurve3DControlsController,
+  type Curve3DControlsController,
+} from "./three/curve3DControlsController";
 
 export { eulerToTuple, tupleToVector, vectorToTuple } from "./three/viewportMath";
 export type { Vector3Tuple } from "./three/viewportMath";
@@ -111,9 +119,8 @@ export class ThreeEditorViewport {
   private readonly proxies = new Map<string, NodeProxy>();
   private readonly curve3DControls = new Map<string, Curve3DControlProxy>();
   private readonly pointerDownPosition = new Vector2();
-  private readonly scaleDragStart = new Vector3(1, 1, 1);
-  private curve3DHandleLines: LineSegments | null = null;
-  private shiftKeyPressed = false;
+  private readonly transformControlsController: TransformControlsController;
+  private readonly curve3DControlsController: Curve3DControlsController;
   private transformControlsVisible = true;
   private orbitDisabledForTransformPointer = false;
   private orbitInteractionActive = false;
@@ -161,73 +168,69 @@ export class ThreeEditorViewport {
     this.transformControls.setMode(this.transformMode);
     this.transformControls.detach();
     this.overlayScene.add(this.transformControls.getHelper());
-    window.addEventListener("keydown", (event) => {
-      if (event.key === "Shift") {
-        this.shiftKeyPressed = true;
-      }
-    });
-    window.addEventListener("keyup", (event) => {
-      if (event.key === "Shift") {
-        this.shiftKeyPressed = false;
-      }
-    });
-    this.transformControls.addEventListener("dragging-changed", (event) => {
-      const isTransformDragging = Boolean(event.value);
-      this.orbitInteractionActive = false;
-      this.orbitControls.enabled = !isTransformDragging;
-    });
-    this.transformControls.addEventListener("mouseDown", () => {
-      const proxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
 
-      if (proxy) {
-        this.scaleDragStart.copy(proxy.root.scale);
-      }
+    this.transformControlsController = createTransformControlsController({
+      overlayCanvas: this.overlayCanvas,
+      orbitControls: this.orbitControls,
+      transformControls: this.transformControls,
+      proxies: this.proxies,
+      curve3DControls: this.curve3DControls,
+      getTransformMode: () => this.transformMode,
+      getSelectedNodeId: () => this.selectedNodeId,
+      setSelectedNodeId: (nodeId) => {
+        this.selectedNodeId = nodeId;
+      },
+      getSelectedCurve3DControlId: () => this.selectedCurve3DControlId,
+      setSelectedCurve3DControlId: (controlId) => {
+        this.selectedCurve3DControlId = controlId;
+      },
+      getTransformControlsVisible: () => this.transformControlsVisible,
+      setTransformControlsVisibleFlag: (visible) => {
+        this.transformControlsVisible = visible;
+      },
+      setOrbitInteractionActive: (active) => {
+        this.orbitInteractionActive = active;
+      },
+      getOrbitDisabledForTransformPointer: () =>
+        this.orbitDisabledForTransformPointer,
+      setOrbitDisabledForTransformPointer: (disabled) => {
+        this.orbitDisabledForTransformPointer = disabled;
+      },
+      onObjectTransform: (nodeId) => {
+        this.onObjectTransform?.(nodeId);
+      },
+      onCurve3DControlTransform: (controlId, position) => {
+        this.onCurve3DControlTransform?.(controlId, position);
+      },
     });
-    this.transformControls.addEventListener("objectChange", () => {
-      if (this.selectedCurve3DControlId) {
-        const proxy = this.curve3DControls.get(this.selectedCurve3DControlId);
+    this.transformControlsController.bindKeyboardModifiers();
+    this.transformControlsController.bindTransformEvents();
+    this.transformControlsController.bindPointerGuards();
+    bindOrbitTransformInteraction({
+      orbitControls: this.orbitControls,
+      transformControls: this.transformControls,
+      getTransformControlsVisible: () => this.transformControlsVisible,
+      setOrbitInteractionActive: (active) => {
+        this.orbitInteractionActive = active;
+      },
+    });
 
-        if (proxy) {
-          proxy.mesh.updateMatrixWorld();
-          this.onCurve3DControlTransform?.(
-            this.selectedCurve3DControlId,
-            vectorToTuple(proxy.mesh.position),
-          );
-        }
-        return;
-      }
-
-      if (this.selectedNodeId) {
-        this.applyShiftUniformScale();
-        this.onObjectTransform?.(this.selectedNodeId);
-      }
-    });
-    this.orbitControls.addEventListener("start", () => {
-      this.orbitInteractionActive = true;
-      this.transformControls.enabled = false;
-      this.transformControls.axis = null;
-    });
-    this.orbitControls.addEventListener("end", () => {
-      this.orbitInteractionActive = false;
-      this.transformControls.enabled = this.transformControlsVisible;
-      this.transformControls.axis = null;
+    this.curve3DControlsController = createCurve3DControlsController({
+      overlayScene: this.overlayScene,
+      transformControls: this.transformControls,
+      curve3DControls: this.curve3DControls,
+      getSelectedCurve3DControlId: () => this.selectedCurve3DControlId,
+      setSelectedCurve3DControlId: (controlId) => {
+        this.selectedCurve3DControlId = controlId;
+      },
+      getTransformControlsVisible: () => this.transformControlsVisible,
+      attachCurrentTransformTarget: () => this.attachCurrentTransformTarget(),
     });
 
     this.overlayCanvas.addEventListener(
       "pointerdown",
       (event) => {
         this.pointerDownPosition.set(event.clientX, event.clientY);
-
-        if (!this.transformControlsVisible || event.button !== 0) {
-          return;
-        }
-
-        this.transformControls.pointerHover(this.getTransformControlsPointer(event));
-
-        if (this.transformControls.axis !== null) {
-          this.orbitDisabledForTransformPointer = true;
-          this.orbitControls.enabled = false;
-        }
       },
       { capture: true },
     );
@@ -354,68 +357,11 @@ export class ThreeEditorViewport {
     controls: Curve3DControlDescriptor[],
     handleLines: Curve3DHandleLineDescriptor[],
   ): void {
-    const nextIds = new Set(controls.map((control) => control.id));
-
-    for (const [controlId, proxy] of [...this.curve3DControls]) {
-      if (nextIds.has(controlId)) {
-        continue;
-      }
-
-      this.overlayScene.remove(proxy.mesh);
-      disposeObject(proxy.mesh);
-      this.curve3DControls.delete(controlId);
-
-      if (this.selectedCurve3DControlId === controlId) {
-        this.selectedCurve3DControlId = null;
-        this.transformControls.detach();
-      }
-    }
-
-    for (const control of controls) {
-      const existing = this.curve3DControls.get(control.id);
-      const proxy = existing ?? createCurve3DControlProxy(control);
-
-      proxy.segmentId = control.segmentId;
-      proxy.component = control.component;
-      proxy.mesh.position.fromArray(control.position);
-      proxy.mesh.userData.curveControlId = control.id;
-      proxy.mesh.userData.segmentId = control.segmentId;
-      proxy.mesh.userData.component = control.component;
-      updateCurve3DControlMaterial(proxy, control.selected);
-
-      if (!existing) {
-        this.curve3DControls.set(control.id, proxy);
-        this.overlayScene.add(proxy.mesh);
-      }
-    }
-
-    this.setCurve3DHandleLines(handleLines);
-
-    if (
-      this.selectedCurve3DControlId &&
-      !this.curve3DControls.has(this.selectedCurve3DControlId)
-    ) {
-      this.setSelectedCurve3DControl(null);
-    } else if (this.selectedCurve3DControlId && this.transformControlsVisible) {
-      const proxy = this.curve3DControls.get(this.selectedCurve3DControlId);
-
-      if (proxy) {
-        this.transformControls.attach(proxy.mesh);
-      }
-    }
+    this.curve3DControlsController.setControls(controls, handleLines);
   }
 
   clearCurve3DControls(): void {
-    this.setSelectedCurve3DControl(null);
-
-    for (const proxy of this.curve3DControls.values()) {
-      this.overlayScene.remove(proxy.mesh);
-      disposeObject(proxy.mesh);
-    }
-
-    this.curve3DControls.clear();
-    this.setCurve3DHandleLines([]);
-    this.attachCurrentTransformTarget();
+    this.curve3DControlsController.clear();
   }
 
   setSelectedCurve3DControl(controlId: string | null): void {
@@ -492,18 +438,7 @@ export class ThreeEditorViewport {
   }
 
   setTransformControlsVisible(visible: boolean): void {
-    if (visible === this.transformControlsVisible) {
-      return;
-    }
-
-    this.transformControlsVisible = visible;
-    this.transformControls.enabled = visible;
-
-    if (visible) {
-      this.attachCurrentTransformTarget();
-    } else {
-      this.transformControls.detach();
-    }
+    this.transformControlsController.setVisible(visible);
   }
 
   setOrbitControlsEnabled(enabled: boolean): void {
@@ -643,11 +578,12 @@ export class ThreeEditorViewport {
       return;
     }
 
-    const moved = this.pointerDownPosition.distanceTo(
-      new Vector2(event.clientX, event.clientY),
-    );
-
-    if (moved > 4) {
+    if (
+      didPointerMoveBeyondClickThreshold({
+        pointerDownPosition: this.pointerDownPosition,
+        event,
+      })
+    ) {
       return;
     }
 
@@ -694,64 +630,15 @@ export class ThreeEditorViewport {
   }
 
   private configureOrbitControls(target: Vector3): void {
-    this.orbitControls.object = this.activeCamera;
-    this.orbitControls.target.copy(target);
-    this.orbitControls.enableDamping = true;
-    this.orbitControls.dampingFactor = 0.08;
-    this.orbitControls.update();
-  }
-
-  private applyShiftUniformScale(): void {
-    if (
-      this.transformMode !== "scale" ||
-      !this.shiftKeyPressed ||
-      !this.selectedNodeId
-    ) {
-      return;
-    }
-
-    const proxy = this.proxies.get(this.selectedNodeId);
-
-    if (!proxy) {
-      return;
-    }
-
-    const scaleRatio = largestAbsoluteScaleRatio(
-      proxy.root.scale,
-      this.scaleDragStart,
-    );
-
-    proxy.root.scale.set(
-      this.scaleDragStart.x * scaleRatio,
-      this.scaleDragStart.y * scaleRatio,
-      this.scaleDragStart.z * scaleRatio,
-    );
-    proxy.root.updateMatrixWorld();
+    configureOrbitCameraControls({
+      orbitControls: this.orbitControls,
+      camera: this.activeCamera,
+      target,
+    });
   }
 
   private attachCurrentTransformTarget(): void {
-    if (!this.transformControlsVisible) {
-      this.transformControls.detach();
-      return;
-    }
-
-    const curveProxy = this.selectedCurve3DControlId
-      ? this.curve3DControls.get(this.selectedCurve3DControlId)
-      : null;
-
-    if (curveProxy) {
-      this.transformControls.attach(curveProxy.mesh);
-      return;
-    }
-
-    const nodeProxy = this.selectedNodeId ? this.proxies.get(this.selectedNodeId) : null;
-
-    if (nodeProxy) {
-      this.transformControls.attach(nodeProxy.root);
-      return;
-    }
-
-    this.transformControls.detach();
+    this.transformControlsController.attachCurrentTarget();
   }
 
   private updateActiveProjectionMatrix(): void {
@@ -769,43 +656,6 @@ export class ThreeEditorViewport {
     material.color.set(selected ? "#ffcf4a" : "#5bc4bf");
   }
 
-  private getTransformControlsPointer(event: PointerEvent): PointerEvent {
-    const rect = this.overlayCanvas.getBoundingClientRect();
-
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
-      button: event.button,
-    } as unknown as PointerEvent;
-  }
-
-  private setCurve3DHandleLines(lines: Curve3DHandleLineDescriptor[]): void {
-    if (this.curve3DHandleLines) {
-      this.overlayScene.remove(this.curve3DHandleLines);
-      disposeObject(this.curve3DHandleLines);
-      this.curve3DHandleLines = null;
-    }
-
-    if (lines.length === 0) {
-      return;
-    }
-
-    const points = lines.flatMap((line) => [
-      tupleToVector(line.start),
-      tupleToVector(line.end),
-    ]);
-    const geometry = new BufferGeometry().setFromPoints(points);
-    const material = new LineBasicMaterial({
-      color: 0xeef4ff,
-      transparent: true,
-      opacity: 0.58,
-      depthTest: false,
-    });
-
-    this.curve3DHandleLines = new LineSegments(geometry, material);
-    this.curve3DHandleLines.renderOrder = 14;
-    this.overlayScene.add(this.curve3DHandleLines);
-  }
 }
 
 function getRequiredCanvas(id: string): HTMLCanvasElement {
