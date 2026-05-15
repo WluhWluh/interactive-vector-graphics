@@ -142,6 +142,7 @@ import {
   createPathEdit3DPointInputRow as createPathEdit3DPointInputRowForUi,
   createPathEditPointInputRow as createPathEditPointInputRowForUi,
 } from "./ui/inspector";
+import { renderEditorShellFrame } from "./ui/editorShell";
 import {
   clonePathOverrideForNode,
   evaluatePrefabPose,
@@ -2403,107 +2404,48 @@ function renderCollapsibleModules(): void {
 
 function renderEditorShell(): void {
   renderInvalidation.markAllDirty();
-  renderProjectList();
-  renderAssetList();
-  renderPathAssetList();
-  renderPrefabList();
-  renderPrefabNodeList();
-  renderPrefabTimeline();
-  renderSceneList();
-  renderSceneNodeList();
-  renderSourcePathEditPanel();
-  renderInspector();
-  renderCollapsibleModules();
-  elements.assetModePanel.hidden = editorMode !== "asset";
-  elements.pathModePanel.hidden = editorMode !== "path";
-  elements.sceneModePanel.hidden = editorMode !== "scene";
-  elements.assetModeButton.dataset.selected = String(editorMode === "asset");
-  elements.pathModeButton.dataset.selected = String(editorMode === "path");
-  elements.sceneModeButton.dataset.selected = String(editorMode === "scene");
-  document.body.dataset.pathEditActive = String(
-    editorMode === "path" && Boolean(pathEditSession),
-  );
-  document.body.dataset.pathEdit3dActive = String(
-    editorMode === "path" && Boolean(pathEdit3DSession),
-  );
+  const activeTimelineClip = getActiveTimelineClip();
   const validInPlacePathEditSession =
     editorMode === "asset" &&
     activeEditorTool === "path" &&
     inPlacePathEditSession
       ? inPlacePathEditSession
       : null;
-  document.body.dataset.inPlacePathEditActive = String(
-    Boolean(validInPlacePathEditSession),
-  );
-  elements.fileInput.disabled = !selectedProjectId;
-  elements.deleteProjectButton.disabled = !selectedProjectId;
-  elements.prefabNameInput.disabled = !selectedProjectId;
-  elements.createPrefabButton.disabled = !selectedProjectId;
-  elements.loadPrefabButton.disabled = !selectedProjectId || !selectedPrefabId;
-  elements.savePrefabButton.disabled = !selectedProjectId || !selectedPrefabId;
-  elements.deletePrefabButton.disabled = !selectedProjectId || !selectedPrefabId;
-  elements.createPrefabGroupButton.disabled = !selectedProjectId;
-  const selectedRealPrefabNode =
-    selectedPrefabNodeId !== null && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID;
-  elements.deletePrefabNodeButton.disabled = !selectedRealPrefabNode;
-  elements.prefabCopyButton.textContent = pendingPrefabClipboard ? "Paste" : "Copy";
-  elements.prefabCutButton.textContent = pendingPrefabClipboard ? "Cancel" : "Cut";
-  elements.prefabCopyButton.disabled = pendingPrefabClipboard
-    ? !selectedPrefabNodeId
-    : !selectedRealPrefabNode;
-  elements.prefabCutButton.disabled = pendingPrefabClipboard
-    ? false
-    : !selectedRealPrefabNode;
-  const activeTimelineClip = getActiveTimelineClip();
-  elements.prefabTimelinePanel.hidden = editorMode !== "asset";
-  elements.timelineClipNameInput.disabled = !selectedProjectId;
-  elements.timelineCreateClipButton.disabled = !selectedProjectId;
-  elements.timelineDeleteClipButton.disabled = !activeTimelineClip;
-  elements.timelinePlayButton.disabled =
-    !activeTimelineClip || activeTimelineClip.durationMs <= 0;
-  elements.timelinePauseButton.disabled = !isTimelinePlaying;
-  elements.timelineStopButton.disabled =
-    !activeTimelineClip && timelineCurrentTimeMs === 0;
-  elements.timelineTimeInput.disabled = !activeTimelineClip;
-  elements.timelineDurationInput.disabled = !activeTimelineClip;
-  elements.timelineSnapFpsInput.disabled = !selectedProjectId;
-  elements.timelineLoopInput.disabled = !activeTimelineClip;
-  elements.timelineScrubInput.disabled = !activeTimelineClip;
-  const activeTimelineProperty = getActiveTimelineProperty();
-  elements.timelineAddKeyframeButton.disabled =
-    !activeTimelineClip ||
-    !selectedRealPrefabNode ||
-    (activeTimelineProperty === "path" && !validInPlacePathEditSession);
-  elements.timelineSnapBaseButton.disabled =
-    !activeTimelineClip || !selectedRealPrefabNode;
-  elements.sceneNameInput.disabled = !selectedProjectId;
-  elements.createSceneButton.disabled = !selectedProjectId;
-  elements.cloneSceneButton.disabled = !selectedProjectId;
-  elements.loadSceneButton.disabled = !selectedProjectId || !selectedSceneId;
-  elements.saveSceneButton.disabled = !selectedProjectId || !selectedSceneId;
-  elements.deleteSceneButton.disabled = !selectedProjectId || !selectedSceneId;
-  elements.addNodeButton.disabled = !selectedProjectId || !selectedAssetId;
-  elements.addPrefabInstanceButton.disabled = !selectedProjectId || !selectedPrefabId;
-  elements.deleteAssetButton.disabled = !selectedProjectId || !selectedAssetId;
-  elements.deleteSceneNodeButton.disabled = !selectedSceneNodeId;
-  elements.editPathButton.disabled = !selectedProjectId || !selectedAssetId;
-  elements.create3DCurveButton.disabled =
-    !selectedProjectId || getSelectedAsset()?.assetKind !== "strokePath";
-  elements.savePathButton.disabled = !pathEditSession && !pathEdit3DSession;
-  elements.cancelPathButton.disabled = !pathEditSession && !pathEdit3DSession;
-  elements.projectionToggleButton.textContent =
-    threeViewport.currentProjection === "perspective"
-      ? "Perspective"
-      : "Orthographic";
-  syncToolButtonState(elements.transformTranslateButton, "translate");
-  syncToolButtonState(elements.transformRotateButton, "rotate");
-  syncToolButtonState(elements.transformScaleButton, "scale");
-  syncToolButtonState(elements.transformPathButton, "path");
-}
 
-function syncToolButtonState(button: HTMLButtonElement, tool: EditorTool): void {
-  button.disabled = !canUseTool(tool);
-  button.dataset.selected = String(activeEditorTool === tool);
+  renderEditorShellFrame({
+    elements,
+    mode: editorMode,
+    selectedProjectId,
+    selectedAssetId,
+    selectedPrefabId,
+    selectedSceneId,
+    selectedSceneNodeId,
+    selectedPrefabNodeId,
+    prefabRootNodeId: PREFAB_ROOT_NODE_ID,
+    pendingPrefabClipboard: Boolean(pendingPrefabClipboard),
+    hasPathEditSession: Boolean(pathEditSession),
+    hasPathEdit3DSession: Boolean(pathEdit3DSession),
+    hasValidInPlacePathEditSession: Boolean(validInPlacePathEditSession),
+    activeTimelineClip,
+    timelineCurrentTimeMs,
+    isTimelinePlaying,
+    activeTimelineProperty: getActiveTimelineProperty(),
+    currentProjection: threeViewport.currentProjection,
+    selectedAssetKind: getSelectedAsset()?.assetKind ?? null,
+    activeEditorTool,
+    canUseTool,
+    renderProjectList,
+    renderAssetList,
+    renderPathAssetList,
+    renderPrefabList,
+    renderPrefabNodeList,
+    renderPrefabTimeline,
+    renderSceneList,
+    renderSceneNodeList,
+    renderSourcePathEditPanel,
+    renderInspector,
+    renderCollapsibleModules,
+  });
 }
 
 function renderProjectList(): void {
