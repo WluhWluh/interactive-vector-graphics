@@ -94,7 +94,6 @@ import {
   clonePrefabAnimationTrack,
   clampTimelineTimeMs,
   isPrefabVectorTrack,
-  isPrefabVectorTrackProperty,
   snapAndClampTimelineTimeMs as snapAndClampTimelineTimeMsWithFps,
 } from "./timeline/prefabTimelineCore";
 import {
@@ -156,6 +155,11 @@ import {
   getSelectedTimelineStagingTransform as getSelectedTimelineStagingTransformFromLayers,
   getStagingWorldTransform,
 } from "./pose/prefabPose";
+import {
+  getPrefabPosePropertyAdapter,
+  isPathPosePropertyAdapter,
+  isVectorPosePropertyAdapter,
+} from "./pose/prefabPoseProperties";
 import {
   clonePrefabNode,
   cloneSceneNode,
@@ -2153,6 +2157,7 @@ function addKeyframeForSelectedPrefabNode(): void {
   }
 
   const property = getActiveTimelineProperty();
+  const propertyAdapter = getPrefabPosePropertyAdapter(property);
   const timeMs = snapAndClampTimelineTimeMs(editorState.timelineCurrentTimeMs, activeClip);
   const stagingPose = getOrCreateTimelineStagingPose(
     selectedNode,
@@ -2162,11 +2167,11 @@ function addKeyframeForSelectedPrefabNode(): void {
       : null,
   );
 
-  if (property === "path") {
+  if (isPathPosePropertyAdapter(propertyAdapter)) {
     const pathDraft =
       editorState.inPlacePathEditSession?.nodeId === selectedNode.id
         ? editorState.inPlacePathEditSession.draft
-        : stagingPose.pathDraft;
+        : propertyAdapter.readStagingValue(stagingPose);
 
     if (!pathDraft || selectedNode.kind !== "primitive") {
       setImportError(new Error("Use the Path tool to edit a primitive path before adding a keyframe."));
@@ -2193,15 +2198,15 @@ function addKeyframeForSelectedPrefabNode(): void {
     return;
   }
 
-  if (!isPrefabVectorTrackProperty(property)) {
+  if (!isVectorPosePropertyAdapter(propertyAdapter)) {
     return;
   }
 
   const result = upsertPrefabVectorKeyframe(clonePrefabAnimationClip(activeClip), {
     nodeId: selectedNode.id,
-    property,
+    property: propertyAdapter.property,
     timeMs,
-    value: [...stagingPose[property]],
+    value: propertyAdapter.readStagingValue(stagingPose),
     easing: "linear",
     snapFps: editorState.prefabAnimation.snapFps,
   });
