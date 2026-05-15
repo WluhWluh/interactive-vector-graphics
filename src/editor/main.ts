@@ -322,15 +322,8 @@ const initialAppState = createInitialEditorAppState({
 const appStateStore = createEditorAppStateStore(initialAppState);
 const editorState = appStateStore.getMutableState();
 
-let editorMode: EditorMode = initialAppState.editorMode;
 let lastFrameTime = performance.now();
 let pendingCameraInspectorRender = false;
-
-function syncAppStateStore(): void {
-  appStateStore.patch({
-    editorMode,
-  });
-}
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
@@ -708,7 +701,7 @@ function bindEditorEvents(): void {
   });
   elements.resetViewButton.addEventListener("click", () => {
     threeViewport.resetView();
-    if (editorMode === "scene") {
+    if (editorState.editorMode === "scene") {
       editorState.loadedSceneId = null;
     }
     renderCache.markAllDirty();
@@ -717,12 +710,12 @@ function bindEditorEvents(): void {
   });
   threeViewport.setCallbacks({
     onSelectionChange: (nodeId) => {
-      if (editorMode === "asset") {
+      if (editorState.editorMode === "asset") {
         editorState.selectedPrefabNodeId = nodeId;
         syncSelectionFromPrefabNode();
         syncActiveToolAfterSelectionChange();
         rebuildViewportProxies();
-      } else if (editorMode === "scene") {
+      } else if (editorState.editorMode === "scene") {
         editorState.selectedSceneNodeId = nodeId;
         syncSelectionFromSceneNode();
         renderCache.markSceneBillboardsDirty();
@@ -732,7 +725,7 @@ function bindEditorEvents(): void {
       exposeEditorDebugHooks();
     },
     onObjectTransform: (nodeId) => {
-      if (editorMode === "path") {
+      if (editorState.editorMode === "path") {
         return;
       }
       syncNodeFromViewport(nodeId);
@@ -746,7 +739,7 @@ function bindEditorEvents(): void {
       updateSourcePathEdit3DControlPosition(controlId, position);
     },
     onCameraChange: () => {
-      if (editorMode === "scene") {
+      if (editorState.editorMode === "scene") {
         editorState.loadedSceneId = null;
       }
       renderCache.markAllDirty();
@@ -869,7 +862,7 @@ async function refreshPrefabs(): Promise<void> {
     resetPrefabTimelineState();
   }
 
-  if (editorMode === "asset") {
+  if (editorState.editorMode === "asset") {
     rebuildViewportProxies();
   }
 
@@ -984,7 +977,7 @@ async function savePathEditSession(): Promise<void> {
 
 function startPathEditSession(asset: PrimitiveSvgAsset): void {
   editorState.selectedAssetId = asset.id;
-  editorMode = "path";
+  editorState.editorMode = "path";
   threeViewport.clearCurve3DControls();
   const nextPathEditState = startSourcePathEditState(asset);
   editorState.pathEditSession = nextPathEditState.pathEditSession;
@@ -1597,7 +1590,7 @@ function deleteSelectedSceneNode(): void {
 
 function toggleProjection(): void {
   threeViewport.toggleProjection();
-  if (editorMode === "scene") {
+  if (editorState.editorMode === "scene") {
     editorState.loadedSceneId = null;
   }
   renderEditorShell();
@@ -1635,7 +1628,7 @@ function setActiveEditorTool(tool: EditorTool): void {
 function startInPlacePathEditSession(): boolean {
   const activeClip = getActiveTimelineClip();
   const selectedNode =
-    editorMode === "asset" &&
+    editorState.editorMode === "asset" &&
     editorState.selectedPrefabNodeId &&
     editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
       ? getPrefabNode(editorState.selectedPrefabNodeId)
@@ -1727,7 +1720,7 @@ function syncActiveToolAfterSelectionChange(): void {
 }
 
 function setEditorMode(mode: EditorMode): void {
-  if (mode !== "asset" || editorMode !== "asset") {
+  if (mode !== "asset" || editorState.editorMode !== "asset") {
     exitPathTool();
   }
   if (mode !== "path") {
@@ -1737,7 +1730,7 @@ function setEditorMode(mode: EditorMode): void {
     editorState.pathEditHoveredControl = null;
     threeViewport.clearCurve3DControls();
   }
-  editorMode = mode;
+  editorState.editorMode = mode;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1775,12 +1768,12 @@ function clearSceneLayout(): void {
   editorState.selectedSceneNodeId = null;
   editorState.loadedSceneId = null;
   editorState.pathEditDragState = null;
-  if (editorMode !== "path") {
+  if (editorState.editorMode !== "path") {
     threeViewport.clearCurve3DControls();
   }
   editorState.nextSceneNodeNumber = 1;
 
-  if (editorMode === "scene") {
+  if (editorState.editorMode === "scene") {
     rebuildViewportProxies();
   }
 }
@@ -1835,11 +1828,11 @@ function rebuildViewportProxies(): void {
     return;
   }
 
-  if (editorMode === "path") {
+  if (editorState.editorMode === "path") {
     return;
   }
 
-  if (editorMode === "asset") {
+  if (editorState.editorMode === "asset") {
     for (const proxy of createAssetViewportProxyNodes({
       nodes: editorState.prefabNodes,
       selectedNodeId: editorState.selectedPrefabNodeId,
@@ -1867,7 +1860,7 @@ function rebuildViewportProxies(): void {
 }
 
 function syncNodeFromViewport(nodeId: string): void {
-  if (editorMode === "asset") {
+  if (editorState.editorMode === "asset") {
     pauseTimeline();
     const node = getPrefabNode(nodeId);
 
@@ -2603,11 +2596,10 @@ function renderCollapsibleModules(): void {
 }
 
 function renderEditorShell(): void {
-  syncAppStateStore();
   renderCache.markAllDirty();
   const activeTimelineClip = getActiveTimelineClip();
   const validInPlacePathEditSession =
-    editorMode === "asset" &&
+    editorState.editorMode === "asset" &&
     editorState.activeEditorTool === "path" &&
     editorState.inPlacePathEditSession
       ? editorState.inPlacePathEditSession
@@ -2615,7 +2607,7 @@ function renderEditorShell(): void {
 
   renderEditorShellFrame({
     elements,
-    mode: editorMode,
+    mode: editorState.editorMode,
     selectedProjectId: editorState.selectedProjectId,
     selectedAssetId: editorState.selectedAssetId,
     selectedPrefabId: editorState.selectedPrefabId,
@@ -2799,7 +2791,7 @@ function renderPrefabNodeList(): void {
         editorState.selectedPrefabNodeId = node.id;
         syncSelectionFromPrefabNode();
         syncActiveToolAfterSelectionChange();
-        if (editorMode === "asset") {
+        if (editorState.editorMode === "asset") {
           rebuildViewportProxies();
         }
         renderEditorShell();
@@ -2940,7 +2932,7 @@ function renderSceneNodeList(): void {
       button.addEventListener("click", () => {
         editorState.selectedSceneNodeId = node.id;
         syncSelectionFromSceneNode();
-        if (editorMode === "scene") {
+        if (editorState.editorMode === "scene") {
           threeViewport.setSelectedNode(node.id);
         }
         renderEditorShell();
@@ -3034,14 +3026,14 @@ function renderInspector(): void {
     return;
   }
 
-  appendInspectorRow("Mode", getEditorModeLabel(editorMode));
+  appendInspectorRow("Mode", getEditorModeLabel(editorState.editorMode));
   appendInspectorRow("Project", model.project.name);
   appendInspectorRow("Project ID", model.project.id);
   appendInspectorRow("Projection", model.camera.projection);
   appendInspectorRow("Camera Pos", model.camera.position.join(", "));
   appendInspectorRow("Camera Target", model.camera.target.join(", "));
 
-  if (editorMode === "asset" || editorMode === "path") {
+  if (editorState.editorMode === "asset" || editorState.editorMode === "path") {
     renderAssetModeInspector();
   } else {
     renderSceneModeInspector();
@@ -3147,7 +3139,7 @@ function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
 }
 
 function renderInPlacePathEditInspector(node: PrefabNode): void {
-  if (editorMode !== "asset" || node.kind !== "primitive") {
+  if (editorState.editorMode !== "asset" || node.kind !== "primitive") {
     return;
   }
 
@@ -3316,14 +3308,14 @@ function applyTransformInput(
   property: TransformProperty,
   axisIndex: number,
 ): void {
-  const node = editorMode === "asset" ? getPrefabNode(nodeId) : getSceneNode(nodeId);
+  const node = editorState.editorMode === "asset" ? getPrefabNode(nodeId) : getSceneNode(nodeId);
   const parsedValue = Number(input.value.trim());
   const stagingTransform =
-    editorMode === "asset" && getActiveTimelineClip()
+    editorState.editorMode === "asset" && getActiveTimelineClip()
       ? getSelectedTimelineStagingTransform()
       : null;
   const editableNode =
-    editorMode === "asset" && node
+    editorState.editorMode === "asset" && node
       ? {
           id: node.id,
           position: stagingTransform?.position ?? [...node.position],
@@ -3345,7 +3337,7 @@ function applyTransformInput(
   const nextValue = [...editableNode[property]] as Vector3Tuple;
   nextValue[axisIndex] = roundTransformValue(parsedValue);
 
-  if (editorMode === "asset") {
+  if (editorState.editorMode === "asset") {
     const activeClip = getActiveTimelineClip();
 
     if (activeClip) {
@@ -3395,13 +3387,13 @@ function tick(now: DOMHighResTimeStamp): void {
 
 function renderPreviewFrame(): void {
   const assetAssemblyBillboards =
-    editorMode === "asset" ? getCachedAssetAssemblyBillboards() : [];
+    editorState.editorMode === "asset" ? getCachedAssetAssemblyBillboards() : [];
   const sceneLayoutBillboards =
-    editorMode === "scene" ? getCachedSceneLayoutBillboards() : [];
+    editorState.editorMode === "scene" ? getCachedSceneLayoutBillboards() : [];
 
   renderEditorFrame({
     stage,
-    mode: editorMode,
+    mode: editorState.editorMode,
     hasSelectedProject: Boolean(editorState.selectedProjectId),
     selectedAsset: getSelectedAsset(),
     assetAssemblyBillboards,
@@ -3613,7 +3605,7 @@ function transformPoint3DFromWorldUnit(
 }
 
 function selectPathEditControl(event: PointerEvent | MouseEvent): void {
-  if (editorMode !== "path" || !editorState.pathEditSession) {
+  if (editorState.editorMode !== "path" || !editorState.pathEditSession) {
     return;
   }
 
@@ -3648,7 +3640,7 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
 }
 
 function updatePathEditHover(event: PointerEvent | MouseEvent): void {
-  if (editorMode !== "path" || !editorState.pathEditSession || editorState.pathEditDragState) {
+  if (editorState.editorMode !== "path" || !editorState.pathEditSession || editorState.pathEditDragState) {
     if (editorState.pathEditHoveredControl) {
       clearPathEditHover();
     }
@@ -3687,7 +3679,7 @@ function clearPathEditHover(): void {
 }
 
 function dragPathEditControl(event: PointerEvent | MouseEvent): void {
-  if (editorMode !== "path" || !editorState.pathEditSession || !editorState.pathEditDragState) {
+  if (editorState.editorMode !== "path" || !editorState.pathEditSession || !editorState.pathEditDragState) {
     return;
   }
 
@@ -3841,7 +3833,7 @@ function getSourcePathEdit3DHandleLines(
 }
 
 function selectSourcePathEdit3DControlById(controlId: string | null): void {
-  if (editorMode !== "path" || !editorState.pathEdit3DSession) {
+  if (editorState.editorMode !== "path" || !editorState.pathEdit3DSession) {
     return;
   }
 
@@ -3858,7 +3850,7 @@ function updateSourcePathEdit3DControlPosition(
   controlId: string,
   position: Vector3Tuple,
 ): void {
-  if (editorMode !== "path" || !editorState.pathEdit3DSession) {
+  if (editorState.editorMode !== "path" || !editorState.pathEdit3DSession) {
     return;
   }
 
@@ -4040,7 +4032,7 @@ function getInPlacePathEditScreenControls(): PathEditScreenControl[] {
 }
 
 function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
-  if (editorMode !== "asset" || editorState.activeEditorTool !== "path" || !editorState.inPlacePathEditSession) {
+  if (editorState.editorMode !== "asset" || editorState.activeEditorTool !== "path" || !editorState.inPlacePathEditSession) {
     return null;
   }
 
@@ -4080,7 +4072,7 @@ function getSelectedInPlacePathNodeAndAsset(): {
   asset: PrimitiveSvgAsset;
 } | null {
   const node =
-    editorMode === "asset" &&
+    editorState.editorMode === "asset" &&
     editorState.selectedPrefabNodeId &&
     editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
       ? getPrefabNode(editorState.selectedPrefabNodeId)
@@ -4288,7 +4280,7 @@ function canUseTool(tool: EditorTool): boolean {
   const selection = getSelectedInPlacePathNodeAndAsset();
 
   return canUsePathToolForSelection({
-    editorMode,
+    editorMode: editorState.editorMode,
     hasActiveClip: Boolean(getActiveTimelineClip()),
     hasPrimitiveSelection: Boolean(selection),
     assetKind: selection?.asset.assetKind ?? null,
@@ -4429,7 +4421,6 @@ function hideError(): void {
 }
 
 function exposeEditorDebugHooks(): void {
-  syncAppStateStore();
   window.__vectorEditorDebug = {
     getProjects: () => [...editorState.projects],
     getAssets: () =>
@@ -4539,7 +4530,7 @@ function exposeEditorDebugHooks(): void {
     }),
     getActiveEditorTool: () => editorState.activeEditorTool,
     getScenes: () => [...editorState.scenes],
-    getEditorMode: () => editorMode,
+    getEditorMode: () => editorState.editorMode,
     getSelectedProjectId: () => editorState.selectedProjectId,
     getSelectedAssetId: () => editorState.selectedAssetId,
     getSelectedPrefabId: () => editorState.selectedPrefabId,
@@ -4554,6 +4545,7 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }
+
 
 
 
