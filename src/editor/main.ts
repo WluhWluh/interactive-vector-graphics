@@ -63,7 +63,6 @@ import {
   dragPathEditControl as dragPathEditCoreControl,
   findNearestPathEditControl,
   getPathEditComponentPoint,
-  getPathEditScreenControls as getCorePathEditScreenControls,
   getPathEditSegment,
   getSelectedPathEditSegment,
   roundBezierValue,
@@ -81,9 +80,7 @@ import {
   tupleToVector,
   vectorToTuple,
   type CameraProjection,
-  type Curve3DControlComponent,
   type Curve3DControlDescriptor,
-  type Curve3DHandleLineDescriptor,
   type EditorTransformNode,
   type TransformMode,
   type Vector3Tuple,
@@ -188,13 +185,11 @@ import {
   type CollapsibleModuleId,
 } from "./ui/collapsibleModules";
 import {
-  addBezierPoints3D,
   getPathEdit3DComponentPoint,
   getPathEdit3DSegment,
   getSelectedPathEdit3DSegment,
   getSourcePathEdit3DControlId,
   parseSourcePathEdit3DControlId,
-  sourcePathEdit3DSelectionMatches,
   subtractBezierPoints3D,
   type SourcePathEdit3DSession,
 } from "./tools/pathEdit3dCore";
@@ -226,9 +221,15 @@ import {
   reconcileSceneSelection,
 } from "./controllers/projectDataController";
 import {
+  createInPlacePathEditDebugState,
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
+  createSourcePathEditDebugState,
   createSourcePathEditSession,
+  getInPlacePathEditScreenControls as getInPlacePathEditScreenControlsForState,
   getRestoredPathEditSelection,
+  getSourcePathEdit3DControls as getSourcePathEdit3DControlsForState,
+  getSourcePathEdit3DHandleLines as getSourcePathEdit3DHandleLinesForState,
+  getSourcePathEditScreenControls,
   isInPlacePathEditSessionValid,
   type InPlacePathEditSession,
   type SourcePathEditSession,
@@ -3634,20 +3635,12 @@ function getPathEditScreenControls(): Array<{
   x: number;
   y: number;
 }> {
-  if (!pathEditSession) {
-    return [];
-  }
+  const asset = pathEditSession ? getAssetById(pathEditSession.assetId) : null;
 
-  const asset = getAssetById(pathEditSession.assetId);
-
-  if (!asset) {
-    return [];
-  }
-
-  return getCorePathEditScreenControls(
-    pathEditSession,
-    getSourcePathEditAdapter(asset),
-  );
+  return getSourcePathEditScreenControls({
+    session: pathEditSession,
+    adapter: asset ? getSourcePathEditAdapter(asset) : null,
+  });
 }
 
 function syncSourcePathEdit3DControls(): void {
@@ -3673,62 +3666,10 @@ function syncSourcePathEdit3DControls(): void {
 function getSourcePathEdit3DControls(
   session: SourcePathEdit3DSession | null = pathEdit3DSession,
 ): Curve3DControlDescriptor[] {
-  if (!session) {
-    return [];
-  }
-
-  const asset = getAssetById(session.assetId);
-
-  if (!asset) {
-    return [];
-  }
-
-  return session.draft.segments.flatMap((segment) => {
-    const anchorSelected = sourcePathEdit3DSelectionMatches(
-      session.selected,
-      segment.id,
-      "anchor",
-    );
-    const handleInSelected = sourcePathEdit3DSelectionMatches(
-      session.selected,
-      segment.id,
-      "handleIn",
-    );
-    const handleOutSelected = sourcePathEdit3DSelectionMatches(
-      session.selected,
-      segment.id,
-      "handleOut",
-    );
-
-    return [
-      {
-        id: getSourcePathEdit3DControlId(segment.id, "handleIn"),
-        segmentId: segment.id,
-        component: "handleIn" as Curve3DControlComponent,
-        position: transformPoint3DToWorldUnit(
-          addBezierPoints3D(segment.anchor, segment.handleIn),
-          asset,
-        ),
-        selected: handleInSelected,
-      },
-      {
-        id: getSourcePathEdit3DControlId(segment.id, "handleOut"),
-        segmentId: segment.id,
-        component: "handleOut" as Curve3DControlComponent,
-        position: transformPoint3DToWorldUnit(
-          addBezierPoints3D(segment.anchor, segment.handleOut),
-          asset,
-        ),
-        selected: handleOutSelected,
-      },
-      {
-        id: getSourcePathEdit3DControlId(segment.id, "anchor"),
-        segmentId: segment.id,
-        component: "anchor" as Curve3DControlComponent,
-        position: transformPoint3DToWorldUnit(segment.anchor, asset),
-        selected: anchorSelected,
-      },
-    ];
+  return getSourcePathEdit3DControlsForState({
+    session,
+    getAssetById,
+    transformPoint3DToWorldUnit,
   });
 }
 
@@ -3756,33 +3697,12 @@ function getSourcePathEdit3DProjectedCommands(): ProjectedCurveCommand[] {
 
 function getSourcePathEdit3DHandleLines(
   session: SourcePathEdit3DSession | null = pathEdit3DSession,
-): Curve3DHandleLineDescriptor[] {
-  if (!session) {
-    return [];
-  }
-
-  const asset = getAssetById(session.assetId);
-
-  if (!asset) {
-    return [];
-  }
-
-  return session.draft.segments.flatMap((segment) => [
-    {
-      start: transformPoint3DToWorldUnit(segment.anchor, asset),
-      end: transformPoint3DToWorldUnit(
-        addBezierPoints3D(segment.anchor, segment.handleIn),
-        asset,
-      ),
-    },
-    {
-      start: transformPoint3DToWorldUnit(segment.anchor, asset),
-      end: transformPoint3DToWorldUnit(
-        addBezierPoints3D(segment.anchor, segment.handleOut),
-        asset,
-      ),
-    },
-  ]);
+): ReturnType<typeof getSourcePathEdit3DHandleLinesForState> {
+  return getSourcePathEdit3DHandleLinesForState({
+    session,
+    getAssetById,
+    transformPoint3DToWorldUnit,
+  });
 }
 
 function selectSourcePathEdit3DControlById(controlId: string | null): void {
@@ -3990,10 +3910,10 @@ function getInPlacePathEditAdapter(): PathEditViewportAdapter | null {
 }
 
 function getInPlacePathEditScreenControls(): PathEditScreenControl[] {
-  return getCorePathEditScreenControls(
-    getValidInPlacePathEditSession(),
-    getInPlacePathEditAdapter(),
-  );
+  return getInPlacePathEditScreenControlsForState({
+    session: getValidInPlacePathEditSession(),
+    adapter: getInPlacePathEditAdapter(),
+  });
 }
 
 function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
@@ -4452,44 +4372,22 @@ function exposeEditorDebugHooks(): void {
           : null,
       };
     },
-    getPathEditState: () => ({
-      is3d: Boolean(pathEdit3DSession),
-      assetId: pathEdit3DSession?.assetId ?? pathEditSession?.assetId ?? null,
-      selectedSegmentId:
-        pathEdit3DSession?.selected?.segmentId ??
-        pathEditSession?.selected?.segmentId ??
-        null,
-      selectedComponent:
-        pathEdit3DSession?.selected?.component ??
-        pathEditSession?.selected?.component ??
-        null,
-      hoveredSegmentId: pathEditHoveredControl?.segmentId ?? null,
-      hoveredComponent: pathEditHoveredControl?.component ?? null,
-      hasDraft: Boolean(pathEditSession || pathEdit3DSession),
-      draftBezierPath: pathEditSession
-        ? cloneStructuredBezierPath(pathEditSession.draft)
-        : null,
-      draftBezierPath3d: pathEdit3DSession
-        ? cloneStructuredBezierPath3D(pathEdit3DSession.draft)
-        : null,
-      controls: getPathEditScreenControls(),
-      controls3d: getSourcePathEdit3DControls(),
-      projectedCommandCount: getSourcePathEdit3DProjectedCommands().length,
-    }),
-    getInPlacePathEditState: () => ({
-      nodeId: inPlacePathEditSession?.nodeId ?? null,
-      assetId: inPlacePathEditSession?.assetId ?? null,
-      active: Boolean(getValidInPlacePathEditSession()),
-      hasDraft: Boolean(inPlacePathEditSession),
-      selectedSegmentId: inPlacePathEditSession?.selected?.segmentId ?? null,
-      selectedComponent: inPlacePathEditSession?.selected?.component ?? null,
-      hoveredSegmentId: inPlacePathEditHoveredControl?.segmentId ?? null,
-      hoveredComponent: inPlacePathEditHoveredControl?.component ?? null,
-      draftBezierPath: inPlacePathEditSession
-        ? cloneStructuredBezierPath(inPlacePathEditSession.draft)
-        : null,
-      controls: getInPlacePathEditScreenControls(),
-    }),
+    getPathEditState: () =>
+      createSourcePathEditDebugState({
+        pathEditSession,
+        pathEdit3DSession,
+        hoveredControl: pathEditHoveredControl,
+        controls: getPathEditScreenControls(),
+        controls3d: getSourcePathEdit3DControls(),
+        projectedCommandCount: getSourcePathEdit3DProjectedCommands().length,
+      }),
+    getInPlacePathEditState: () =>
+      createInPlacePathEditDebugState({
+        session: inPlacePathEditSession,
+        active: Boolean(getValidInPlacePathEditSession()),
+        hoveredControl: inPlacePathEditHoveredControl,
+        controls: getInPlacePathEditScreenControls(),
+      }),
     getExperimentScene: () => {
       const camera = threeViewport.getCameraSnapshot();
 

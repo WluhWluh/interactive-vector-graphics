@@ -2,16 +2,33 @@ import {
   cloneStructuredBezierPath,
   type StructuredBezierPath,
 } from "../../core/assets/structuredBezierPath";
-import { cloneStructuredBezierPath3D } from "../../core/assets/structuredBezierPath3d";
+import {
+  cloneStructuredBezierPath3D,
+  type StructuredBezierPath3D,
+} from "../../core/assets/structuredBezierPath3d";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
 import type { PrefabNode } from "../api";
 import {
   createPathEditSession,
+  getPathEditScreenControls,
   type PathEditSelection,
+  type PathEditScreenControl,
   type PathEditSession,
+  type PathEditViewportAdapter,
 } from "../tools/pathEditCore";
-import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
+import {
+  addBezierPoints3D,
+  getSourcePathEdit3DControlId,
+  sourcePathEdit3DSelectionMatches,
+  type SourcePathEdit3DSession,
+} from "../tools/pathEdit3dCore";
 import type { TimelineStagingPose } from "../timeline/stagingPose";
+import type {
+  Curve3DControlComponent,
+  Curve3DControlDescriptor,
+  Curve3DHandleLineDescriptor,
+  Vector3Tuple,
+} from "../threeEditorViewport";
 
 export type SourcePathEditSession = PathEditSession & {
   assetId: string;
@@ -130,6 +147,213 @@ export function isInPlacePathEditSessionValid(input: {
       node.assetId === asset.id &&
       stagingPose,
   );
+}
+
+export function getSourcePathEditScreenControls(input: {
+  session: SourcePathEditSession | null;
+  adapter: PathEditViewportAdapter | null;
+}): PathEditScreenControl[] {
+  return getPathEditScreenControls(input.session, input.adapter);
+}
+
+export function getInPlacePathEditScreenControls(input: {
+  session: InPlacePathEditSession | null;
+  adapter: PathEditViewportAdapter | null;
+}): PathEditScreenControl[] {
+  return getPathEditScreenControls(input.session, input.adapter);
+}
+
+export function getSourcePathEdit3DControls(input: {
+  session: SourcePathEdit3DSession | null;
+  getAssetById: (assetId: string) => PrimitiveSvgAsset | null;
+  transformPoint3DToWorldUnit: (
+    point: Vector3Tuple,
+    asset: PrimitiveSvgAsset,
+  ) => Vector3Tuple;
+}): Curve3DControlDescriptor[] {
+  const { session, getAssetById, transformPoint3DToWorldUnit } = input;
+
+  if (!session) {
+    return [];
+  }
+
+  const asset = getAssetById(session.assetId);
+
+  if (!asset) {
+    return [];
+  }
+
+  return session.draft.segments.flatMap((segment) => {
+    const anchorSelected = sourcePathEdit3DSelectionMatches(
+      session.selected,
+      segment.id,
+      "anchor",
+    );
+    const handleInSelected = sourcePathEdit3DSelectionMatches(
+      session.selected,
+      segment.id,
+      "handleIn",
+    );
+    const handleOutSelected = sourcePathEdit3DSelectionMatches(
+      session.selected,
+      segment.id,
+      "handleOut",
+    );
+
+    return [
+      {
+        id: getSourcePathEdit3DControlId(segment.id, "handleIn"),
+        segmentId: segment.id,
+        component: "handleIn" as Curve3DControlComponent,
+        position: transformPoint3DToWorldUnit(
+          addBezierPoints3D(segment.anchor, segment.handleIn),
+          asset,
+        ),
+        selected: handleInSelected,
+      },
+      {
+        id: getSourcePathEdit3DControlId(segment.id, "handleOut"),
+        segmentId: segment.id,
+        component: "handleOut" as Curve3DControlComponent,
+        position: transformPoint3DToWorldUnit(
+          addBezierPoints3D(segment.anchor, segment.handleOut),
+          asset,
+        ),
+        selected: handleOutSelected,
+      },
+      {
+        id: getSourcePathEdit3DControlId(segment.id, "anchor"),
+        segmentId: segment.id,
+        component: "anchor" as Curve3DControlComponent,
+        position: transformPoint3DToWorldUnit(segment.anchor, asset),
+        selected: anchorSelected,
+      },
+    ];
+  });
+}
+
+export function getSourcePathEdit3DHandleLines(input: {
+  session: SourcePathEdit3DSession | null;
+  getAssetById: (assetId: string) => PrimitiveSvgAsset | null;
+  transformPoint3DToWorldUnit: (
+    point: Vector3Tuple,
+    asset: PrimitiveSvgAsset,
+  ) => Vector3Tuple;
+}): Curve3DHandleLineDescriptor[] {
+  const { session, getAssetById, transformPoint3DToWorldUnit } = input;
+
+  if (!session) {
+    return [];
+  }
+
+  const asset = getAssetById(session.assetId);
+
+  if (!asset) {
+    return [];
+  }
+
+  return session.draft.segments.flatMap((segment) => [
+    {
+      start: transformPoint3DToWorldUnit(segment.anchor, asset),
+      end: transformPoint3DToWorldUnit(
+        addBezierPoints3D(segment.anchor, segment.handleIn),
+        asset,
+      ),
+    },
+    {
+      start: transformPoint3DToWorldUnit(segment.anchor, asset),
+      end: transformPoint3DToWorldUnit(
+        addBezierPoints3D(segment.anchor, segment.handleOut),
+        asset,
+      ),
+    },
+  ]);
+}
+
+export type SourcePathEditDebugState = {
+  is3d: boolean;
+  assetId: string | null;
+  selectedSegmentId: string | null;
+  selectedComponent: PathEditSelection["component"] | null;
+  hoveredSegmentId: string | null;
+  hoveredComponent: PathEditSelection["component"] | null;
+  hasDraft: boolean;
+  draftBezierPath: StructuredBezierPath | null;
+  draftBezierPath3d: StructuredBezierPath3D | null;
+  controls: PathEditScreenControl[];
+  controls3d: Curve3DControlDescriptor[];
+  projectedCommandCount: number;
+};
+
+export function createSourcePathEditDebugState(input: {
+  pathEditSession: SourcePathEditSession | null;
+  pathEdit3DSession: SourcePathEdit3DSession | null;
+  hoveredControl: PathEditSelection | null;
+  controls: PathEditScreenControl[];
+  controls3d: Curve3DControlDescriptor[];
+  projectedCommandCount: number;
+}): SourcePathEditDebugState {
+  const { pathEditSession, pathEdit3DSession } = input;
+
+  return {
+    is3d: Boolean(pathEdit3DSession),
+    assetId: pathEdit3DSession?.assetId ?? pathEditSession?.assetId ?? null,
+    selectedSegmentId:
+      pathEdit3DSession?.selected?.segmentId ??
+      pathEditSession?.selected?.segmentId ??
+      null,
+    selectedComponent:
+      pathEdit3DSession?.selected?.component ??
+      pathEditSession?.selected?.component ??
+      null,
+    hoveredSegmentId: input.hoveredControl?.segmentId ?? null,
+    hoveredComponent: input.hoveredControl?.component ?? null,
+    hasDraft: Boolean(pathEditSession || pathEdit3DSession),
+    draftBezierPath: pathEditSession
+      ? cloneStructuredBezierPath(pathEditSession.draft)
+      : null,
+    draftBezierPath3d: pathEdit3DSession
+      ? cloneStructuredBezierPath3D(pathEdit3DSession.draft)
+      : null,
+    controls: input.controls,
+    controls3d: input.controls3d,
+    projectedCommandCount: input.projectedCommandCount,
+  };
+}
+
+export type InPlacePathEditDebugState = {
+  nodeId: string | null;
+  assetId: string | null;
+  active: boolean;
+  hasDraft: boolean;
+  selectedSegmentId: string | null;
+  selectedComponent: PathEditSelection["component"] | null;
+  hoveredSegmentId: string | null;
+  hoveredComponent: PathEditSelection["component"] | null;
+  draftBezierPath: StructuredBezierPath | null;
+  controls: PathEditScreenControl[];
+};
+
+export function createInPlacePathEditDebugState(input: {
+  session: InPlacePathEditSession | null;
+  active: boolean;
+  hoveredControl: PathEditSelection | null;
+  controls: PathEditScreenControl[];
+}): InPlacePathEditDebugState {
+  return {
+    nodeId: input.session?.nodeId ?? null,
+    assetId: input.session?.assetId ?? null,
+    active: input.active,
+    hasDraft: Boolean(input.session),
+    selectedSegmentId: input.session?.selected?.segmentId ?? null,
+    selectedComponent: input.session?.selected?.component ?? null,
+    hoveredSegmentId: input.hoveredControl?.segmentId ?? null,
+    hoveredComponent: input.hoveredControl?.component ?? null,
+    draftBezierPath: input.session
+      ? cloneStructuredBezierPath(input.session.draft)
+      : null,
+    controls: input.controls,
+  };
 }
 
 export function getRestoredPathEditSelection(
