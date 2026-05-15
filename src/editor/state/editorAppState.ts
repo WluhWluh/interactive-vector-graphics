@@ -47,9 +47,64 @@ export type EditorAppState = {
   nextPrefabNodeNumber: number;
 };
 
+export type ProjectDomainState = Pick<
+  EditorAppState,
+  "projects" | "selectedProjectId" | "lastImportError"
+>;
+
+export type AssetDomainState = Pick<
+  EditorAppState,
+  "assets" | "selectedAssetId"
+>;
+
+export type PrefabDomainState = Pick<
+  EditorAppState,
+  | "prefabs"
+  | "prefabNodes"
+  | "prefabDocuments"
+  | "selectedPrefabId"
+  | "loadedPrefabId"
+  | "selectedPrefabNodeId"
+  | "pendingPrefabClipboard"
+  | "nextPrefabNodeNumber"
+>;
+
+export type SceneDomainState = Pick<
+  EditorAppState,
+  | "scenes"
+  | "sceneNodes"
+  | "selectedSceneId"
+  | "loadedSceneId"
+  | "selectedSceneNodeId"
+  | "nextSceneNodeNumber"
+>;
+
+export type TimelineDomainState = Pick<
+  EditorAppState,
+  | "prefabAnimation"
+  | "timelineStagingPoses"
+  | "timelineCurrentTimeMs"
+  | "isTimelinePlaying"
+  | "selectedTimelineKeyframeId"
+>;
+
+export type ToolDomainState = Pick<EditorAppState, "activeEditorTool" | "editorMode">;
+
 export type EditorAppStateStore = {
   getSnapshot: () => EditorAppState;
   patch: (patch: Partial<EditorAppState>) => EditorAppState;
+  getProjectState: () => ProjectDomainState;
+  patchProjectState: (patch: Partial<ProjectDomainState>) => ProjectDomainState;
+  getAssetState: () => AssetDomainState;
+  patchAssetState: (patch: Partial<AssetDomainState>) => AssetDomainState;
+  getPrefabState: () => PrefabDomainState;
+  patchPrefabState: (patch: Partial<PrefabDomainState>) => PrefabDomainState;
+  getSceneState: () => SceneDomainState;
+  patchSceneState: (patch: Partial<SceneDomainState>) => SceneDomainState;
+  getTimelineState: () => TimelineDomainState;
+  patchTimelineState: (patch: Partial<TimelineDomainState>) => TimelineDomainState;
+  getToolState: () => ToolDomainState;
+  patchToolState: (patch: Partial<ToolDomainState>) => ToolDomainState;
 };
 
 export function createInitialEditorAppState(input: {
@@ -101,6 +156,60 @@ export function createEditorAppStateStore(
 
       return cloneEditorAppState(state);
     },
+    getProjectState: () => cloneProjectDomainState(state),
+    patchProjectState: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return cloneProjectDomainState(state);
+    },
+    getAssetState: () => cloneAssetDomainState(state),
+    patchAssetState: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return cloneAssetDomainState(state);
+    },
+    getPrefabState: () => clonePrefabDomainState(state),
+    patchPrefabState: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return clonePrefabDomainState(state);
+    },
+    getSceneState: () => cloneSceneDomainState(state),
+    patchSceneState: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return cloneSceneDomainState(state);
+    },
+    getTimelineState: () => cloneTimelineDomainState(state),
+    patchTimelineState: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return cloneTimelineDomainState(state);
+    },
+    getToolState: () => cloneToolDomainState(state),
+    patchToolState: (patch) => {
+      state = cloneEditorAppState({
+        ...state,
+        ...patch,
+      });
+
+      return cloneToolDomainState(state);
+    },
   };
 }
 
@@ -114,5 +223,63 @@ export function cloneEditorAppState(state: EditorAppState): EditorAppState {
     prefabDocuments: new Map(state.prefabDocuments),
     scenes: [...state.scenes],
     sceneNodes: [...state.sceneNodes],
+  };
+}
+
+function cloneProjectDomainState(state: EditorAppState): ProjectDomainState {
+  return {
+    projects: [...state.projects],
+    selectedProjectId: state.selectedProjectId,
+    lastImportError: state.lastImportError,
+  };
+}
+
+function cloneAssetDomainState(state: EditorAppState): AssetDomainState {
+  return {
+    assets: [...state.assets],
+    selectedAssetId: state.selectedAssetId,
+  };
+}
+
+function clonePrefabDomainState(state: EditorAppState): PrefabDomainState {
+  return {
+    prefabs: [...state.prefabs],
+    prefabNodes: [...state.prefabNodes],
+    prefabDocuments: new Map(state.prefabDocuments),
+    selectedPrefabId: state.selectedPrefabId,
+    loadedPrefabId: state.loadedPrefabId,
+    selectedPrefabNodeId: state.selectedPrefabNodeId,
+    pendingPrefabClipboard: state.pendingPrefabClipboard
+      ? { ...state.pendingPrefabClipboard }
+      : null,
+    nextPrefabNodeNumber: state.nextPrefabNodeNumber,
+  };
+}
+
+function cloneSceneDomainState(state: EditorAppState): SceneDomainState {
+  return {
+    scenes: [...state.scenes],
+    sceneNodes: [...state.sceneNodes],
+    selectedSceneId: state.selectedSceneId,
+    loadedSceneId: state.loadedSceneId,
+    selectedSceneNodeId: state.selectedSceneNodeId,
+    nextSceneNodeNumber: state.nextSceneNodeNumber,
+  };
+}
+
+function cloneTimelineDomainState(state: EditorAppState): TimelineDomainState {
+  return {
+    prefabAnimation: state.prefabAnimation,
+    timelineStagingPoses: state.timelineStagingPoses,
+    timelineCurrentTimeMs: state.timelineCurrentTimeMs,
+    isTimelinePlaying: state.isTimelinePlaying,
+    selectedTimelineKeyframeId: state.selectedTimelineKeyframeId,
+  };
+}
+
+function cloneToolDomainState(state: EditorAppState): ToolDomainState {
+  return {
+    activeEditorTool: state.activeEditorTool,
+    editorMode: state.editorMode,
   };
 }
