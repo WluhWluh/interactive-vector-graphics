@@ -169,6 +169,10 @@ import {
   createSceneDocument,
 } from "./state/sceneState";
 import {
+  createInitialEditorAppState,
+  type EditorMode,
+} from "./state/editorAppState";
+import {
   findRecordById,
   getNodeById,
   getPrefabDocumentById as getPrefabDocumentByIdFromState,
@@ -268,7 +272,6 @@ import {
   upsertPrefabVectorKeyframe,
 } from "./controllers/timelineController";
 
-type EditorMode = "asset" | "path" | "scene";
 type TimelinePointerDrag = {
   keyframeId: string;
   property: PrefabTrackProperty;
@@ -289,31 +292,38 @@ const billboardFrameDataCache = new BillboardFrameDataCache({
   getPrefabDocumentById,
   getOrCreateTimelineStagingPose,
 });
+const initialAppState = createInitialEditorAppState({
+  rootPrefabNodeId: PREFAB_ROOT_NODE_ID,
+  defaultPrefabSnapFps: DEFAULT_PREFAB_SNAP_FPS,
+});
 
-let projects: ProjectRecord[] = [];
-let assets: PrimitiveSvgAsset[] = [];
-let prefabs: PrefabRecord[] = [];
-let prefabNodes: PrefabNode[] = [];
-let prefabDocuments = new Map<string, PrefabDocument>();
-let scenes: SceneRecord[] = [];
-let sceneNodes: SceneNode[] = [];
-let editorMode: EditorMode = "asset";
-let selectedProjectId: string | null = null;
-let selectedAssetId: string | null = null;
-let selectedPrefabId: string | null = null;
-let loadedPrefabId: string | null = null;
-let selectedPrefabNodeId: PrefabSelectionId | null = PREFAB_ROOT_NODE_ID;
-let prefabAnimation: PrefabAnimation = createEmptyPrefabAnimation();
-let timelineStagingPoses = new TimelineStagingPoseStore();
-let timelineCurrentTimeMs = 0;
-let isTimelinePlaying = false;
-let selectedTimelineKeyframeId: string | null = null;
+let projects: ProjectRecord[] = initialAppState.projects;
+let assets: PrimitiveSvgAsset[] = initialAppState.assets;
+let prefabs: PrefabRecord[] = initialAppState.prefabs;
+let prefabNodes: PrefabNode[] = initialAppState.prefabNodes;
+let prefabDocuments = initialAppState.prefabDocuments;
+let scenes: SceneRecord[] = initialAppState.scenes;
+let sceneNodes: SceneNode[] = initialAppState.sceneNodes;
+let editorMode: EditorMode = initialAppState.editorMode;
+let selectedProjectId: string | null = initialAppState.selectedProjectId;
+let selectedAssetId: string | null = initialAppState.selectedAssetId;
+let selectedPrefabId: string | null = initialAppState.selectedPrefabId;
+let loadedPrefabId: string | null = initialAppState.loadedPrefabId;
+let selectedPrefabNodeId: PrefabSelectionId | null =
+  initialAppState.selectedPrefabNodeId;
+let prefabAnimation: PrefabAnimation = initialAppState.prefabAnimation;
+let timelineStagingPoses = initialAppState.timelineStagingPoses;
+let timelineCurrentTimeMs = initialAppState.timelineCurrentTimeMs;
+let isTimelinePlaying = initialAppState.isTimelinePlaying;
+let selectedTimelineKeyframeId: string | null =
+  initialAppState.selectedTimelineKeyframeId;
 let timelinePointerDrag: TimelinePointerDrag | null = null;
-let activeEditorTool: EditorTool = "translate";
-let selectedSceneId: string | null = null;
-let loadedSceneId: string | null = null;
-let selectedSceneNodeId: string | null = null;
-let pendingPrefabClipboard: PendingPrefabClipboard | null = null;
+let activeEditorTool: EditorTool = initialAppState.activeEditorTool;
+let selectedSceneId: string | null = initialAppState.selectedSceneId;
+let loadedSceneId: string | null = initialAppState.loadedSceneId;
+let selectedSceneNodeId: string | null = initialAppState.selectedSceneNodeId;
+let pendingPrefabClipboard: PendingPrefabClipboard | null =
+  initialAppState.pendingPrefabClipboard;
 let pathEditSession: SourcePathEditSession | null = null;
 let pathEdit3DSession: SourcePathEdit3DSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
@@ -322,10 +332,10 @@ let inPlacePathEditSession: InPlacePathEditSession | null = null;
 let inPlacePathEditDragState: PathEditDragState | null = null;
 let inPlacePathEditHoveredControl: PathEditDragState | null = null;
 let inPlacePathEditCameraDragActive = false;
-let lastImportError: string | null = null;
+let lastImportError: string | null = initialAppState.lastImportError;
 let lastFrameTime = performance.now();
-let nextSceneNodeNumber = 1;
-let nextPrefabNodeNumber = 1;
+let nextSceneNodeNumber = initialAppState.nextSceneNodeNumber;
+let nextPrefabNodeNumber = initialAppState.nextPrefabNodeNumber;
 let pendingCameraInspectorRender = false;
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
