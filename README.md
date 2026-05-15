@@ -3,9 +3,11 @@
 An SVG-first playground for interactive vector graphics experiments inspired by
 clean science-explainer motion graphics.
 
-The current milestone is still deliberately compact: a Vite + TypeScript
-frontend, a Fastify API server, SQLite-backed project metadata, and uploaded SVG
-primitive files stored in a Git-ignored runtime data directory.
+The current milestone is still deliberately compact, but it now includes a
+usable authoring loop: a Vite + TypeScript frontend, a Fastify API server,
+SQLite-backed project metadata, normalized primitive SVG files, prefab-local
+timeline animation, source path editing, and scene layout data stored in a
+Git-ignored runtime data directory.
 
 ## Scripts
 
@@ -21,9 +23,9 @@ primitive files stored in a Git-ignored runtime data directory.
 ## Entrypoints
 
 - `/index.html` is the clean stage runtime for embedding or presentation.
-- `/editor.html` is the early editor shell with project/asset management, SVG
-  import, project-level prefab assembly, scene layout, a camera/transform
-  experiment viewport, and Inspector.
+- `/editor.html` is the editor shell with project/asset management, SVG import,
+  source path editing, project-level prefab assembly, prefab-local timeline
+  editing, scene layout, a camera/transform viewport, and Inspector.
 
 The editor now works against the backend API. Projects and imported primitive
 assets persist in the runtime data directory until you delete them from the UI or
@@ -40,6 +42,9 @@ and scene document data:
 - `DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/assets`
 - `POST /api/projects/:projectId/assets` as `multipart/form-data`
+- `PUT /api/projects/:projectId/assets/:assetId/path`
+- `POST /api/projects/:projectId/assets/:assetId/convert-to-3d-curve`
+- `PUT /api/projects/:projectId/assets/:assetId/curve3d`
 - `DELETE /api/projects/:projectId/assets/:assetId`
 - `GET /api/projects/:projectId/prefabs`
 - `POST /api/projects/:projectId/prefabs`
@@ -58,15 +63,16 @@ is ignored by Git. Set `IVG_DATA_DIR` to use another folder, and
 proxy reads the same port value.
 
 Project, primitive, prefab, and scene metadata is stored in `data/ivg.sqlite`.
-Uploaded SVG source files are stored under
-`data/projects/<project-id>/primitives/`. Prefab documents live under
+Imported primitive SVGs are validated and rewritten as normalized project-native
+SVG files under `data/projects/<project-id>/primitives/`. Prefab documents live under
 `data/projects/<project-id>/prefabs/`, and scene documents live under
 `data/projects/<project-id>/scenes/` as JSON files. Project assets, prefabs,
-scenes, and future animation data are intentionally separate from source code.
+scenes, and animation data are intentionally separate from source code.
 Only code, fixtures, and built-in demos should enter Git.
-Each primitive asset also stores normalized structured Bezier path data in
-SQLite beside the original `pathD`. This is authoring data for future path edit
-and deformation tools; current Canvas rendering still uses `Path2D(pathD)`.
+Each primitive asset stores normalized structured Bezier path data in SQLite
+beside `pathD`. Source Path Edit can update the asset source path and regenerate
+both values. Prefab path keyframes store structured Bezier snapshots and render
+through temporary `Path2D` previews during timeline playback.
 
 For local development, run both servers:
 
@@ -82,31 +88,36 @@ Then open:
 ## Architecture Direction
 
 - SVG/path assets remain the source of truth for authored graphics.
-- Canvas Path2D will become the main lightweight runtime for key vector actors.
-- Paper.js will be used for local vector geometry experiments and deformation.
-- Three.js/WebGL will be reserved for optional background, depth, or high-volume
-  simple objects such as particles or boids.
+- Canvas Path2D is the main lightweight runtime for key vector actors in the
+  stage and editor preview layers.
+- Paper.js is used at authoring/import boundaries for SVG path parsing and
+  structured Bezier data preparation.
+- Three.js/WebGL is reserved for optional background, depth, editor camera math,
+  selection proxies, transform handles, and 3D curve source editing.
 - In the editor, Three.js also provides camera math, grid/axes helpers,
   selection proxies, OrbitControls, and TransformControls. SVG primitives still
   render through Canvas Path2D so this does not change the visual runtime target.
-- `/editor.html` has two early authoring modes. `Asset Assembly` builds
+- `/editor.html` has three authoring modes. `Asset Assembly` builds
   project-level prefabs from primitive SVG parts and optional transform groups,
-  and includes the first prefab-local timeline for transform keyframes.
-  `Scene Layout` places prefab reference instances in the spatial scene.
+  and includes a prefab-local timeline. `Source Path Edit` edits primitive asset
+  source curves, including 3D curve source control points. `Scene Layout` places
+  prefab reference instances in the spatial scene.
 - Scene documents store prefab instance references instead of unpacking prefab
   contents. This keeps reusable character/prop assemblies editable at the
   project level.
-- Prefab documents use v3 and store local animation clips/tracks/keyframes for
-  `position`, `rotation`, and `scale` preview. Prefab keyframe times are saved
-  as integer milliseconds, and each prefab stores its own `snapFps` editing
-  helper. Scene document v2 still stores its animation structure but does not
-  yet expose a scene-level timeline UI.
+- Prefab documents use v4 and store local animation clips/tracks/keyframes for
+  `position`, `rotation`, `scale`, and 2D structured `path` deformation.
+  Prefab keyframe times are saved as integer milliseconds, and each prefab
+  stores its own `snapFps` editing helper. The timeline also has a `Base Pose`
+  editing state for prefab defaults outside animation. Scene document v2 still
+  stores its animation structure but does not yet expose a scene-level timeline
+  UI.
 
-## Primitive SVG Assets
+## Primitive Assets
 
-The import pipeline is deliberately strict. Each primitive SVG should be either
-a single solid-color closed filled path or a single open stroke path exported
-from Illustrator:
+The SVG import pipeline is deliberately strict. Directly imported SVG files
+should be either a single solid-color closed filled path or a single open stroke
+path exported from Illustrator:
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="-100 -100 200 200">
@@ -142,3 +153,19 @@ During import, the path `d` is parsed into stable Bezier segments with anchors
 and relative handles. Filled primitives must produce a closed structured path
 with at least three segments; stroked primitives must produce an open structured
 path with at least two segments.
+
+Imported assets currently support three asset kinds:
+
+- `filledPath`: closed filled 2D paths.
+- `strokePath`: open 2D strokes with fixed solid round cap/join rendering.
+- `bezierCurve3d`: an open 3D Bezier curve copy created from an existing
+  `strokePath`. It keeps real 3D anchors and handles, preserves stroke color and
+  width, and projects to Canvas as a 2D stroke for preview and scene/prefab
+  rendering. It cannot be imported directly and does not yet participate in path
+  deformation keyframes.
+
+`Source Path Edit` edits the project-level asset source and saves it back through
+the API. In `Asset Assembly`, the timeline `Path` tool edits a temporary staging
+ghost for the selected 2D primitive node; clicking `Add Keyframe` is the save
+path for that deformation into the active prefab clip. The source asset itself is
+not changed by in-place timeline path edits.

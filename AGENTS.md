@@ -39,6 +39,9 @@ than to the heavier 3D/game look of Star Birds.
 - SVG assets are strict primitives: one file, one path. Supported kinds are
   `filledPath` for solid-color closed paths and `strokePath` for open paths with
   `fill="none"`, solid `stroke`, and positive `stroke-width`.
+- A third primitive kind, `bezierCurve3d`, is created only by converting an
+  existing `strokePath` into a 3D curve copy. Do not add direct 3D file import
+  unless that is planned explicitly.
 - A single wrapper `<g>` is allowed only when it has no transform, class, or
   style.
 - Supported fill/stroke values may be read from attributes or from the path
@@ -51,16 +54,18 @@ than to the heavier 3D/game look of Star Birds.
   symbols, class styles, opacity, and basic shape elements.
 - Compose birds, characters, props, and animated forms later in the editor from
   multiple primitive assets rather than exporting grouped character SVGs.
-- Store structured Bezier path data for every imported primitive. The original
-  SVG `pathD` remains the current rendering source, while the normalized segment
-  list is reserved for future Path Edit Mode, anchor/handle editing, and path
-  deformation animation.
+- Store structured Bezier path data for every imported primitive. Source Path
+  Edit can update the asset source path and regenerate both `pathD` and the
+  normalized segment list. Prefab timeline path keyframes store structured
+  Bezier snapshots for 2D path deformation. `bezierCurve3d` assets additionally
+  store structured 3D Bezier data and project it to a 2D stroke for rendering.
 
 ## Entrypoint Rules
 
 - Keep `/index.html` as the clean runtime stage without editor UI.
-- Use `/editor.html` for authoring UI experiments such as asset import, prefab
-  assembly, prefab-local timeline editing, scene layout, selection, and preview.
+- Use `/editor.html` for authoring UI experiments such as asset import, source
+  path editing, prefab assembly, prefab-local timeline editing, scene layout,
+  selection, and preview.
 - Shared rendering and asset code belongs under `src/core`; entrypoint-specific
   behavior belongs under `src/stage` or `src/editor`.
 - Editor-only Three.js helpers may live under `src/editor`; keep them separate
@@ -72,7 +77,11 @@ than to the heavier 3D/game look of Star Birds.
   primitives; Three.js proxies are for editing, picking, and transform handles.
 - Keep the editor mode split explicit:
   - `Asset Assembly` is for project-level reusable prefabs made from primitive
-    SVG parts, optional transform groups, and local transform keyframes.
+    SVG parts, optional transform groups, local transform keyframes, and 2D path
+    deformation keyframes.
+  - `Source Path Edit` is for editing project-level primitive asset source
+    curves. It saves the asset itself and is distinct from in-place timeline
+    path staging.
   - `Scene Layout` is for spatial scene documents that place prefab reference
     instances.
 - Scene nodes should reference prefabs instead of unpacking or copying prefab
@@ -89,13 +98,14 @@ than to the heavier 3D/game look of Star Birds.
   machines, deployments, or long-running experiments.
 - Keep backend persistence APIs under `server/`; do not make frontend code write
   directly into repository files.
-- Project metadata currently lives in SQLite at `data/ivg.sqlite`; uploaded SVG
-  sources live beside their project under `data/projects/<project-id>/`.
-- Prefab metadata lives in the same SQLite database; prefab document v3 JSON
+- Project metadata currently lives in SQLite at `data/ivg.sqlite`; imported SVG
+  sources are validated and rewritten as normalized project-native SVG files
+  beside their project under `data/projects/<project-id>/`.
+- Prefab metadata lives in the same SQLite database; prefab document v4 JSON
   files under `data/projects/<project-id>/prefabs/` store nodes plus local
-  animation clips/tracks/keyframes for `position`, `rotation`, and `scale`.
-  Keyframe times are integer milliseconds, and `snapFps` is saved per prefab as
-  an editing helper only.
+  animation clips/tracks/keyframes for `position`, `rotation`, `scale`, and 2D
+  `path` deformation. Keyframe times are integer milliseconds, and `snapFps` is
+  saved per prefab as an editing helper only.
 - Scene metadata lives in the same SQLite database; scene documents are JSON
   files under `data/projects/<project-id>/scenes/`.
 - Scene document v2 stores camera, nodes, and animation clips/tracks/keyframes.
