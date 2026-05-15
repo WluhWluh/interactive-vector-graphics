@@ -160,7 +160,6 @@ import {
   applyPrefabDocumentState,
   createEmptyPrefabAnimation as createEmptyPrefabAnimationState,
   createPrefabDocument,
-  type PrefabSelectionId,
 } from "./state/prefabState";
 import {
   applySceneDocumentState,
@@ -224,7 +223,6 @@ import {
   runLoadPrefabCommand,
   runSavePrefabCommand,
   startPrefabClipboard,
-  type PendingPrefabClipboard,
   type PrefabClipboardMode,
 } from "./controllers/prefabAssemblyController";
 import {
@@ -330,16 +328,9 @@ const initialAppState = createInitialEditorAppState({
 const appStateStore = createEditorAppStateStore(initialAppState);
 const editorState = appStateStore.getMutableState();
 
-let prefabs: PrefabRecord[] = initialAppState.prefabs;
-let prefabNodes: PrefabNode[] = initialAppState.prefabNodes;
-let prefabDocuments = initialAppState.prefabDocuments;
 let scenes: SceneRecord[] = initialAppState.scenes;
 let sceneNodes: SceneNode[] = initialAppState.sceneNodes;
 let editorMode: EditorMode = initialAppState.editorMode;
-let selectedPrefabId: string | null = initialAppState.selectedPrefabId;
-let loadedPrefabId: string | null = initialAppState.loadedPrefabId;
-let selectedPrefabNodeId: PrefabSelectionId | null =
-  initialAppState.selectedPrefabNodeId;
 let prefabAnimation: PrefabAnimation = initialAppState.prefabAnimation;
 let timelineStagingPoses = initialAppState.timelineStagingPoses;
 let timelineCurrentTimeMs = initialAppState.timelineCurrentTimeMs;
@@ -351,8 +342,6 @@ let activeEditorTool: EditorTool = initialAppState.activeEditorTool;
 let selectedSceneId: string | null = initialAppState.selectedSceneId;
 let loadedSceneId: string | null = initialAppState.loadedSceneId;
 let selectedSceneNodeId: string | null = initialAppState.selectedSceneNodeId;
-let pendingPrefabClipboard: PendingPrefabClipboard | null =
-  initialAppState.pendingPrefabClipboard;
 let pathEditSession: SourcePathEditSession | null = null;
 let pathEdit3DSession: SourcePathEdit3DSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
@@ -363,20 +352,13 @@ let inPlacePathEditHoveredControl: PathEditDragState | null = null;
 let inPlacePathEditCameraDragActive = false;
 let lastFrameTime = performance.now();
 let nextSceneNodeNumber = initialAppState.nextSceneNodeNumber;
-let nextPrefabNodeNumber = initialAppState.nextPrefabNodeNumber;
 let pendingCameraInspectorRender = false;
 
 function syncAppStateStore(): void {
   appStateStore.patch({
-    prefabs,
-    prefabNodes,
-    prefabDocuments,
     scenes,
     sceneNodes,
     editorMode,
-    selectedPrefabId,
-    loadedPrefabId,
-    selectedPrefabNodeId,
     prefabAnimation,
     timelineStagingPoses,
     timelineCurrentTimeMs,
@@ -386,9 +368,7 @@ function syncAppStateStore(): void {
     selectedSceneId,
     loadedSceneId,
     selectedSceneNodeId,
-    pendingPrefabClipboard,
     nextSceneNodeNumber,
-    nextPrefabNodeNumber,
   });
 }
 
@@ -778,7 +758,7 @@ function bindEditorEvents(): void {
   threeViewport.setCallbacks({
     onSelectionChange: (nodeId) => {
       if (editorMode === "asset") {
-        selectedPrefabNodeId = nodeId;
+        editorState.selectedPrefabNodeId = nodeId;
         syncSelectionFromPrefabNode();
         syncActiveToolAfterSelectionChange();
         rebuildViewportProxies();
@@ -895,37 +875,37 @@ async function refreshAssets(): Promise<void> {
 
 async function refreshPrefabs(): Promise<void> {
   if (!editorState.selectedProjectId) {
-    prefabs = [];
-    prefabDocuments = new Map();
-    selectedPrefabId = null;
-    loadedPrefabId = null;
-    selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
-    pendingPrefabClipboard = null;
+    editorState.prefabs = [];
+    editorState.prefabDocuments = new Map();
+    editorState.selectedPrefabId = null;
+    editorState.loadedPrefabId = null;
+    editorState.selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    editorState.pendingPrefabClipboard = null;
     resetPrefabTimelineState();
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
   }
 
-  prefabs = await listPrefabs(editorState.selectedProjectId);
-  prefabDocuments = await loadPrefabDocuments({
+  editorState.prefabs = await listPrefabs(editorState.selectedProjectId);
+  editorState.prefabDocuments = await loadPrefabDocuments({
     projectId: editorState.selectedProjectId,
-    prefabs,
+    prefabs: editorState.prefabs,
     getPrefab,
     onError: (error) => console.error(error),
   });
   const nextPrefab = reconcilePrefabSelection(
-    selectedPrefabId,
-    loadedPrefabId,
-    prefabs,
+    editorState.selectedPrefabId,
+    editorState.loadedPrefabId,
+    editorState.prefabs,
   );
-  selectedPrefabId = nextPrefab.nextSelectedPrefabId;
+  editorState.selectedPrefabId = nextPrefab.nextSelectedPrefabId;
 
   if (nextPrefab.missingLoadedPrefabId) {
-    loadedPrefabId = null;
-    prefabNodes = [];
-    selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
-    pendingPrefabClipboard = null;
+    editorState.loadedPrefabId = null;
+    editorState.prefabNodes = [];
+    editorState.selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    editorState.pendingPrefabClipboard = null;
     resetPrefabTimelineState();
   }
 
@@ -1127,8 +1107,8 @@ async function importSelectedFile(): Promise<void> {
     );
     editorState.assets = nextAssetState.assets;
     editorState.selectedAssetId = nextAssetState.selectedAssetId;
-    if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
-      selectedPrefabNodeId = null;
+    if (editorState.selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+      editorState.selectedPrefabNodeId = null;
     }
     editorState.lastImportError = null;
     hideError();
@@ -1209,14 +1189,18 @@ async function createPrefabFromInput(): Promise<void> {
       createPrefab,
     });
     const nextPrefabState = applyLoadedPrefabDocument(
-      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      {
+        selectedPrefabId: editorState.selectedPrefabId,
+        loadedPrefabId: editorState.loadedPrefabId,
+        prefabDocuments: editorState.prefabDocuments,
+      },
       result,
     );
 
     elements.prefabNameInput.value = "";
-    selectedPrefabId = nextPrefabState.selectedPrefabId;
-    loadedPrefabId = nextPrefabState.loadedPrefabId;
-    prefabDocuments = nextPrefabState.prefabDocuments;
+    editorState.selectedPrefabId = nextPrefabState.selectedPrefabId;
+    editorState.loadedPrefabId = nextPrefabState.loadedPrefabId;
+    editorState.prefabDocuments = nextPrefabState.prefabDocuments;
     applyPrefabDocument(result.document);
     editorState.lastImportError = null;
     hideError();
@@ -1232,7 +1216,7 @@ async function loadSelectedPrefab(): Promise<void> {
     "Select a saved prefab before loading.",
   );
   const prefabResult = requireCommandValue(
-    selectedPrefabId,
+    editorState.selectedPrefabId,
     "Select a saved prefab before loading.",
   );
 
@@ -1253,12 +1237,16 @@ async function loadSelectedPrefab(): Promise<void> {
       getPrefab,
     });
     const nextPrefabState = applyLoadedPrefabDocument(
-      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      {
+        selectedPrefabId: editorState.selectedPrefabId,
+        loadedPrefabId: editorState.loadedPrefabId,
+        prefabDocuments: editorState.prefabDocuments,
+      },
       result,
     );
-    selectedPrefabId = nextPrefabState.selectedPrefabId;
-    loadedPrefabId = nextPrefabState.loadedPrefabId;
-    prefabDocuments = nextPrefabState.prefabDocuments;
+    editorState.selectedPrefabId = nextPrefabState.selectedPrefabId;
+    editorState.loadedPrefabId = nextPrefabState.loadedPrefabId;
+    editorState.prefabDocuments = nextPrefabState.prefabDocuments;
     applyPrefabDocument(result.document);
     setEditorMode("asset");
     editorState.lastImportError = null;
@@ -1274,7 +1262,7 @@ async function saveSelectedPrefab(): Promise<void> {
     "Select a saved prefab before saving.",
   );
   const prefabResult = requireCommandValue(
-    selectedPrefabId,
+    editorState.selectedPrefabId,
     "Select a saved prefab before saving.",
   );
 
@@ -1296,13 +1284,17 @@ async function saveSelectedPrefab(): Promise<void> {
       savePrefab,
     });
     const nextPrefabState = applySavedPrefabDocument(
-      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      {
+        selectedPrefabId: editorState.selectedPrefabId,
+        loadedPrefabId: editorState.loadedPrefabId,
+        prefabDocuments: editorState.prefabDocuments,
+      },
       result,
     );
 
-    selectedPrefabId = nextPrefabState.selectedPrefabId;
-    loadedPrefabId = nextPrefabState.loadedPrefabId;
-    prefabDocuments = nextPrefabState.prefabDocuments;
+    editorState.selectedPrefabId = nextPrefabState.selectedPrefabId;
+    editorState.loadedPrefabId = nextPrefabState.loadedPrefabId;
+    editorState.prefabDocuments = nextPrefabState.prefabDocuments;
     editorState.lastImportError = null;
     hideError();
     await refreshPrefabs();
@@ -1312,29 +1304,33 @@ async function saveSelectedPrefab(): Promise<void> {
 }
 
 async function deleteSelectedPrefab(): Promise<void> {
-  if (!editorState.selectedProjectId || !selectedPrefabId) {
+  if (!editorState.selectedProjectId || !editorState.selectedPrefabId) {
     return;
   }
 
   try {
     const deletedPrefabId = await runDeletePrefabCommand({
       projectId: editorState.selectedProjectId,
-      prefabId: selectedPrefabId,
+      prefabId: editorState.selectedPrefabId,
       deletePrefab,
     });
     const nextPrefabState = applyDeletedPrefabDocument(
-      { selectedPrefabId, loadedPrefabId, prefabDocuments },
+      {
+        selectedPrefabId: editorState.selectedPrefabId,
+        loadedPrefabId: editorState.loadedPrefabId,
+        prefabDocuments: editorState.prefabDocuments,
+      },
       deletedPrefabId,
     );
-    selectedPrefabId = nextPrefabState.selectedPrefabId;
-    loadedPrefabId = nextPrefabState.loadedPrefabId;
-    prefabDocuments = nextPrefabState.prefabDocuments;
+    editorState.selectedPrefabId = nextPrefabState.selectedPrefabId;
+    editorState.loadedPrefabId = nextPrefabState.loadedPrefabId;
+    editorState.prefabDocuments = nextPrefabState.prefabDocuments;
 
     if (nextPrefabState.deletedLoadedPrefab) {
-      prefabNodes = [];
+      editorState.prefabNodes = [];
       resetPrefabTimelineState();
-      selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
-      pendingPrefabClipboard = null;
+      editorState.selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+      editorState.pendingPrefabClipboard = null;
     }
 
     editorState.lastImportError = null;
@@ -1352,19 +1348,19 @@ function createPrefabGroup(): void {
     return;
   }
 
-  const nodeNumber = nextPrefabNodeNumber;
+  const nodeNumber = editorState.nextPrefabNodeNumber;
   const nextState = createPrefabGroupNode(
-    prefabNodes,
-    selectedPrefabNodeId,
+    editorState.prefabNodes,
+    editorState.selectedPrefabNodeId,
     PREFAB_ROOT_NODE_ID,
     createNextPrefabNodeId(),
     nodeNumber,
   );
 
-  prefabNodes = nextState.nodes;
-  selectedPrefabNodeId = nextState.selectedNodeId;
+  editorState.prefabNodes = nextState.nodes;
+  editorState.selectedPrefabNodeId = nextState.selectedNodeId;
   pauseTimeline();
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1379,18 +1375,18 @@ function addSelectedAssetToPrefab(): void {
   }
 
   const nextState = addPrimitiveAssetToPrefab(
-    prefabNodes,
-    selectedPrefabNodeId,
+    editorState.prefabNodes,
+    editorState.selectedPrefabNodeId,
     PREFAB_ROOT_NODE_ID,
     selectedAsset,
     createNextPrefabNodeId(),
   );
 
-  prefabNodes = nextState.nodes;
-  selectedPrefabNodeId = nextState.selectedNodeId;
+  editorState.prefabNodes = nextState.nodes;
+  editorState.selectedPrefabNodeId = nextState.selectedNodeId;
   editorState.selectedAssetId = selectedAsset.id;
   pauseTimeline();
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
@@ -1399,14 +1395,14 @@ function addSelectedAssetToPrefab(): void {
 }
 
 function deleteSelectedPrefabNode(): void {
-  if (!selectedPrefabNodeId || selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+  if (!editorState.selectedPrefabNodeId || editorState.selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
     return;
   }
 
   const nextState = deletePrefabNodeSubtree(
-    prefabNodes,
+    editorState.prefabNodes,
     PREFAB_ROOT_NODE_ID,
-    selectedPrefabNodeId,
+    editorState.selectedPrefabNodeId,
   );
   const { deletedNodeIds } = nextState;
 
@@ -1417,11 +1413,11 @@ function deleteSelectedPrefabNode(): void {
     exitPathTool();
   }
   pruneTimelineStagingPoses({ nodeIds: deletedNodeIds });
-  prefabNodes = nextState.nodes;
-  selectedPrefabNodeId = nextState.selectedNodeId;
+  editorState.prefabNodes = nextState.nodes;
+  editorState.selectedPrefabNodeId = nextState.selectedNodeId;
   clearInvalidPrefabClipboard();
   pauseTimeline();
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1433,7 +1429,7 @@ async function addSelectedPrefabToScene(): Promise<void> {
     "Select a prefab before adding a scene instance.",
   );
   const prefabResult = requireCommandValue(
-    selectedPrefabId,
+    editorState.selectedPrefabId,
     "Select a prefab before adding a scene instance.",
   );
 
@@ -1447,14 +1443,14 @@ async function addSelectedPrefabToScene(): Promise<void> {
     return;
   }
 
-  if (!prefabDocuments.has(prefabResult.value)) {
+  if (!editorState.prefabDocuments.has(prefabResult.value)) {
     const result = await getPrefab(projectResult.value, prefabResult.value);
     const nextCache = cachePrefabDocumentForScene(
-      { prefabDocuments },
+      { prefabDocuments: editorState.prefabDocuments },
       result.prefab.id,
       result.document,
     );
-    prefabDocuments = nextCache.prefabDocuments;
+    editorState.prefabDocuments = nextCache.prefabDocuments;
   }
 
   const nextSceneState = addPrefabInstanceToScene({
@@ -1677,9 +1673,9 @@ function startInPlacePathEditSession(): boolean {
   const activeClip = getActiveTimelineClip();
   const selectedNode =
     editorMode === "asset" &&
-    selectedPrefabNodeId &&
-    selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-      ? getPrefabNode(selectedPrefabNodeId)
+    editorState.selectedPrefabNodeId &&
+    editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(editorState.selectedPrefabNodeId)
       : null;
   const asset =
     selectedNode?.kind === "primitive" && selectedNode.assetId
@@ -1788,17 +1784,17 @@ function clearProjectWorkspace(): void {
   exitPathTool();
   const emptyWorkspace = createEmptyProjectWorkspaceState();
   editorState.assets = emptyWorkspace.assets;
-  prefabs = emptyWorkspace.prefabs;
-  prefabDocuments = emptyWorkspace.prefabDocuments;
+  editorState.prefabs = emptyWorkspace.prefabs;
+  editorState.prefabDocuments = emptyWorkspace.prefabDocuments;
   scenes = emptyWorkspace.scenes;
-  prefabNodes = [];
+  editorState.prefabNodes = [];
   resetPrefabTimelineState();
   sceneNodes = [];
   editorState.selectedAssetId = emptyWorkspace.selectedAssetId;
-  selectedPrefabId = emptyWorkspace.selectedPrefabId;
-  loadedPrefabId = emptyWorkspace.loadedPrefabId;
-  selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
-  pendingPrefabClipboard = null;
+  editorState.selectedPrefabId = emptyWorkspace.selectedPrefabId;
+  editorState.loadedPrefabId = emptyWorkspace.loadedPrefabId;
+  editorState.selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+  editorState.pendingPrefabClipboard = null;
   selectedSceneId = emptyWorkspace.selectedSceneId;
   loadedSceneId = emptyWorkspace.loadedSceneId;
   selectedSceneNodeId = emptyWorkspace.selectedSceneNodeId;
@@ -1806,7 +1802,7 @@ function clearProjectWorkspace(): void {
   pathEdit3DSession = null;
   pathEditDragState = null;
   threeViewport.clearCurve3DControls();
-  nextPrefabNodeNumber = 1;
+  editorState.nextPrefabNodeNumber = 1;
   nextSceneNodeNumber = 1;
   threeViewport.clearNodes();
 }
@@ -1827,22 +1823,22 @@ function clearSceneLayout(): void {
 }
 
 function createCurrentPrefabDocument(): PrefabDocument {
-  return createPrefabDocument(prefabNodes, prefabAnimation);
+  return createPrefabDocument(editorState.prefabNodes, prefabAnimation);
 }
 
 function applyPrefabDocument(document: PrefabDocument): void {
   exitPathTool();
   const nextState = applyPrefabDocumentState(document, PREFAB_ROOT_NODE_ID);
 
-  prefabNodes = nextState.nodes;
+  editorState.prefabNodes = nextState.nodes;
   prefabAnimation = nextState.animation;
   timelineStagingPoses = new TimelineStagingPoseStore();
   timelineCurrentTimeMs = 0;
   isTimelinePlaying = false;
   selectedTimelineKeyframeId = null;
-  selectedPrefabNodeId = nextState.selectedNodeId;
+  editorState.selectedPrefabNodeId = nextState.selectedNodeId;
   clearInvalidPrefabClipboard();
-  nextPrefabNodeNumber = nextState.nextNodeNumber;
+  editorState.nextPrefabNodeNumber = nextState.nextNodeNumber;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1882,8 +1878,8 @@ function rebuildViewportProxies(): void {
 
   if (editorMode === "asset") {
     for (const proxy of createAssetViewportProxyNodes({
-      nodes: prefabNodes,
-      selectedNodeId: selectedPrefabNodeId,
+      nodes: editorState.prefabNodes,
+      selectedNodeId: editorState.selectedPrefabNodeId,
       rootNodeId: PREFAB_ROOT_NODE_ID,
       activeClip: getActiveTimelineClip(),
       getAssetById,
@@ -1895,7 +1891,7 @@ function rebuildViewportProxies(): void {
     }
 
     threeViewport.setSelectedNode(
-      selectedPrefabNodeId === PREFAB_ROOT_NODE_ID ? null : selectedPrefabNodeId,
+      editorState.selectedPrefabNodeId === PREFAB_ROOT_NODE_ID ? null : editorState.selectedPrefabNodeId,
     );
     return;
   }
@@ -1918,7 +1914,7 @@ function syncNodeFromViewport(nodeId: string): void {
 
     const activeClip = getActiveTimelineClip();
     const stagingPose =
-      activeClip && node.id === selectedPrefabNodeId
+      activeClip && node.id === editorState.selectedPrefabNodeId
         ? getOrCreateTimelineStagingPose(node, activeClip)
         : null;
 
@@ -1932,7 +1928,7 @@ function syncNodeFromViewport(nodeId: string): void {
 
       threeViewport.syncNodeFromProxy(worldNode);
       applyViewportTransformToStagingPose({
-        nodes: prefabNodes,
+        nodes: editorState.prefabNodes,
         node,
         worldNode,
         stagingPose,
@@ -1950,11 +1946,11 @@ function syncNodeFromViewport(nodeId: string): void {
 
     threeViewport.syncNodeFromProxy(worldNode);
     applyViewportTransformToPrefabNode({
-      nodes: prefabNodes,
+      nodes: editorState.prefabNodes,
       node,
       worldNode,
     });
-    loadedPrefabId = null;
+    editorState.loadedPrefabId = null;
 
     /**
      * TransformControls fires continuously while the user drags a handle. Do
@@ -1981,11 +1977,11 @@ function syncNodeFromViewport(nodeId: string): void {
 }
 
 function syncSelectionFromPrefabNode(): void {
-  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+  if (editorState.selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
     return;
   }
 
-  const node = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
+  const node = editorState.selectedPrefabNodeId ? getPrefabNode(editorState.selectedPrefabNodeId) : null;
 
   if (node?.kind === "primitive" && node.assetId) {
     editorState.selectedAssetId = node.assetId;
@@ -2065,7 +2061,7 @@ function getEvaluatedPrefabPathOverrides(): Map<string, StructuredBezierPath> {
 
 function getCurrentPrefabPoseSnapshot(): ReturnType<typeof evaluatePrefabPose> {
   return evaluatePrefabPose({
-    nodes: prefabNodes,
+    nodes: editorState.prefabNodes,
     activeClip: getActiveTimelineClip(),
     currentTimeMs: timelineCurrentTimeMs,
   });
@@ -2092,7 +2088,7 @@ function createTimelineClipFromInput(): void {
       loop: true,
     }),
   );
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   elements.timelineClipNameInput.value = "";
   editorState.lastImportError = null;
   hideError();
@@ -2113,7 +2109,7 @@ function deleteSelectedTimelineClip(): void {
   if (inPlacePathEditSession) {
     exitPathTool();
   }
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -2229,7 +2225,7 @@ function applyTimelineDurationInput(): void {
     getActiveTimelineClip(),
   );
   isTimelinePlaying = false;
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -2246,7 +2242,7 @@ function applyTimelineLoopInput(): void {
     ...activeClip,
     loop: elements.timelineLoopInput.checked,
   });
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -2265,7 +2261,7 @@ function applyTimelineSnapFpsInput(): void {
     ...clonePrefabAnimation(prefabAnimation),
     snapFps: roundTimelineNumber(nextSnapFps),
   };
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   renderEditorShell();
   exposeEditorDebugHooks();
 }
@@ -2350,7 +2346,7 @@ function deleteSelectedTimelineKeyframe(): void {
 
   selectedTimelineKeyframeId = null;
   updateActiveTimelineClip(nextClip);
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -2371,7 +2367,7 @@ function updateSelectedTimelineKeyframe(
   selectedTimelineKeyframeId = result.selectedKeyframeId;
   timelineCurrentTimeMs = result.currentTimeMs;
   updateActiveTimelineClip(result.clip);
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -2446,7 +2442,7 @@ function addKeyframeForSelectedPrefabNode(): void {
     selectedTimelineKeyframeId = result.selectedKeyframeId;
     updateActiveTimelineClip(result.clip);
     timelineCurrentTimeMs = timeMs;
-    loadedPrefabId = null;
+    editorState.loadedPrefabId = null;
     editorState.lastImportError = null;
     hideError();
     rebuildViewportProxies();
@@ -2471,7 +2467,7 @@ function addKeyframeForSelectedPrefabNode(): void {
   selectedTimelineKeyframeId = result.selectedKeyframeId;
   updateActiveTimelineClip(result.clip);
   timelineCurrentTimeMs = timeMs;
-  loadedPrefabId = null;
+  editorState.loadedPrefabId = null;
   editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
@@ -2535,7 +2531,7 @@ function snapSelectedPrefabBaseToTimeline(): void {
 }
 
 function handlePrefabClipboardPrimaryAction(): void {
-  if (pendingPrefabClipboard) {
+  if (editorState.pendingPrefabClipboard) {
     pastePendingPrefabClipboard();
     return;
   }
@@ -2544,8 +2540,8 @@ function handlePrefabClipboardPrimaryAction(): void {
 }
 
 function handlePrefabClipboardSecondaryAction(): void {
-  if (pendingPrefabClipboard) {
-    pendingPrefabClipboard = null;
+  if (editorState.pendingPrefabClipboard) {
+    editorState.pendingPrefabClipboard = null;
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
@@ -2557,7 +2553,7 @@ function handlePrefabClipboardSecondaryAction(): void {
 function startPendingPrefabClipboard(mode: PrefabClipboardMode): void {
   const clipboard = startPrefabClipboard(
     mode,
-    selectedPrefabNodeId,
+    editorState.selectedPrefabNodeId,
     PREFAB_ROOT_NODE_ID,
   );
 
@@ -2570,36 +2566,36 @@ function startPendingPrefabClipboard(mode: PrefabClipboardMode): void {
     return;
   }
 
-  pendingPrefabClipboard = clipboard;
+  editorState.pendingPrefabClipboard = clipboard;
   renderEditorShell();
   exposeEditorDebugHooks();
 }
 
 function pastePendingPrefabClipboard(): void {
-  if (!pendingPrefabClipboard) {
+  if (!editorState.pendingPrefabClipboard) {
     return;
   }
 
   const nextState = pastePrefabClipboard(
-    prefabNodes,
-    pendingPrefabClipboard,
-    selectedPrefabNodeId,
+    editorState.prefabNodes,
+    editorState.pendingPrefabClipboard,
+    editorState.selectedPrefabNodeId,
     PREFAB_ROOT_NODE_ID,
     createNextPrefabNodeId,
   );
 
   if ("error" in nextState) {
     if (nextState.error !== "Cannot paste a group or node inside itself.") {
-      pendingPrefabClipboard = null;
+      editorState.pendingPrefabClipboard = null;
     }
     setImportError(new Error(nextState.error));
     return;
   }
 
-  prefabNodes = nextState.nodes;
-  selectedPrefabNodeId = nextState.selectedNodeId;
-  pendingPrefabClipboard = null;
-  loadedPrefabId = null;
+  editorState.prefabNodes = nextState.nodes;
+  editorState.selectedPrefabNodeId = nextState.selectedNodeId;
+  editorState.pendingPrefabClipboard = null;
+  editorState.loadedPrefabId = null;
   editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
@@ -2617,12 +2613,12 @@ function syncSelectionFromSceneNode(): void {
   if (node.kind === "primitive") {
     editorState.selectedAssetId = node.assetId;
   } else {
-    selectedPrefabId = node.prefabId;
+    editorState.selectedPrefabId = node.prefabId;
   }
 }
 
 function syncPrefabProxyWorldTransforms(exceptNodeId: string | null = null): void {
-  for (const proxyNode of createPrefabWorldProxyNodes(prefabNodes, exceptNodeId)) {
+  for (const proxyNode of createPrefabWorldProxyNodes(editorState.prefabNodes, exceptNodeId)) {
     threeViewport.syncProxyFromNode(proxyNode);
   }
 }
@@ -2659,12 +2655,12 @@ function renderEditorShell(): void {
     mode: editorMode,
     selectedProjectId: editorState.selectedProjectId,
     selectedAssetId: editorState.selectedAssetId,
-    selectedPrefabId,
+    selectedPrefabId: editorState.selectedPrefabId,
     selectedSceneId,
     selectedSceneNodeId,
-    selectedPrefabNodeId,
+    selectedPrefabNodeId: editorState.selectedPrefabNodeId,
     prefabRootNodeId: PREFAB_ROOT_NODE_ID,
-    pendingPrefabClipboard: Boolean(pendingPrefabClipboard),
+    pendingPrefabClipboard: Boolean(editorState.pendingPrefabClipboard),
     hasPathEditSession: Boolean(pathEditSession),
     hasPathEdit3DSession: Boolean(pathEdit3DSession),
     hasValidInPlacePathEditSession: Boolean(validInPlacePathEditSession),
@@ -2773,18 +2769,18 @@ function renderPathAssetList(): void {
 
 function renderPrefabList(): void {
   elements.prefabList.replaceChildren(
-    ...prefabs.map((prefab) => {
+    ...editorState.prefabs.map((prefab) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
-      const loadedMarker = prefab.id === loadedPrefabId ? " *" : "";
+      const loadedMarker = prefab.id === editorState.loadedPrefabId ? " *" : "";
 
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.prefabId = prefab.id;
-      button.dataset.selected = String(prefab.id === selectedPrefabId);
+      button.dataset.selected = String(prefab.id === editorState.selectedPrefabId);
       button.textContent = `${prefab.name}${loadedMarker}`;
       button.addEventListener("click", () => {
-        selectedPrefabId = prefab.id;
+        editorState.selectedPrefabId = prefab.id;
         renderEditorShell();
         exposeEditorDebugHooks();
       });
@@ -2802,13 +2798,13 @@ function renderPrefabNodeList(): void {
   rootButton.type = "button";
   rootButton.className = "asset-list-item";
   rootButton.dataset.prefabNodeId = PREFAB_ROOT_NODE_ID;
-  rootButton.dataset.selected = String(selectedPrefabNodeId === PREFAB_ROOT_NODE_ID);
+  rootButton.dataset.selected = String(editorState.selectedPrefabNodeId === PREFAB_ROOT_NODE_ID);
   rootButton.textContent = "Group: Root Group";
   rootButton.addEventListener("click", () => {
-    if (selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID) {
+    if (editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID) {
       exitPathTool();
     }
-    selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
+    editorState.selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
     syncActiveToolAfterSelectionChange();
     threeViewport.setSelectedNode(null);
     renderEditorShell();
@@ -2833,11 +2829,11 @@ function renderPrefabNodeList(): void {
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.prefabNodeId = node.id;
-      button.dataset.selected = String(node.id === selectedPrefabNodeId);
+      button.dataset.selected = String(node.id === editorState.selectedPrefabNodeId);
       button.style.paddingLeft = `${12 + depth * 14}px`;
       button.textContent = label;
       button.addEventListener("click", () => {
-        selectedPrefabNodeId = node.id;
+        editorState.selectedPrefabNodeId = node.id;
         syncSelectionFromPrefabNode();
         syncActiveToolAfterSelectionChange();
         if (editorMode === "asset") {
@@ -2865,8 +2861,8 @@ function renderPrefabTimeline(): void {
       defaultDurationMs: DEFAULT_TIMELINE_DURATION_MS,
       activeClip: null,
       selectedNode:
-        selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-          ? getPrefabNode(selectedPrefabNodeId)
+        editorState.selectedPrefabNodeId && editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+          ? getPrefabNode(editorState.selectedPrefabNodeId)
           : null,
       activeProperty,
       laneProperties: TIMELINE_LANE_PROPERTIES,
@@ -2890,8 +2886,8 @@ function renderPrefabTimeline(): void {
     defaultDurationMs: DEFAULT_TIMELINE_DURATION_MS,
     activeClip,
     selectedNode:
-      selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-        ? getPrefabNode(selectedPrefabNodeId)
+      editorState.selectedPrefabNodeId && editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+        ? getPrefabNode(editorState.selectedPrefabNodeId)
         : null,
     activeProperty,
     laneProperties: TIMELINE_LANE_PROPERTIES,
@@ -3092,8 +3088,8 @@ function renderInspector(): void {
 function renderAssetModeInspector(): void {
   const model = createAssetModeInspectorModel({
     selectedPrefab: getSelectedPrefab(),
-    loadedPrefabId,
-    selectedNodeId: selectedPrefabNodeId,
+    loadedPrefabId: editorState.loadedPrefabId,
+    selectedNodeId: editorState.selectedPrefabNodeId,
     rootNodeId: PREFAB_ROOT_NODE_ID,
     getPrefabNode,
     selectedAsset: getSelectedAsset(),
@@ -3400,7 +3396,7 @@ function applyTransformInput(
     } else {
       node[property] = nextValue;
       pauseTimeline();
-      loadedPrefabId = null;
+      editorState.loadedPrefabId = null;
       rebuildViewportProxies();
     }
   } else {
@@ -3558,9 +3554,9 @@ function renderInPlacePathEditOverlay(): void {
 
 function getCachedAssetAssemblyBillboards(): DrawableBillboard[] {
   return renderCache.getAssetAssemblyBillboards({
-    nodes: prefabNodes,
+    nodes: editorState.prefabNodes,
     evaluatedNodes: getEvaluatedPrefabNodes(),
-    selectedNodeId: selectedPrefabNodeId,
+    selectedNodeId: editorState.selectedPrefabNodeId,
     activeClip: getActiveTimelineClip(),
     selectedNode: getSelectedPrefabNode(),
     pathOverrides: getEvaluatedPrefabPathOverrides(),
@@ -4093,7 +4089,7 @@ function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
   if (
     !isInPlacePathEditSessionValid({
       session: inPlacePathEditSession,
-      selectedNodeId: selectedPrefabNodeId,
+      selectedNodeId: editorState.selectedPrefabNodeId,
       node,
       asset,
       stagingPose,
@@ -4122,9 +4118,9 @@ function getSelectedInPlacePathNodeAndAsset(): {
 } | null {
   const node =
     editorMode === "asset" &&
-    selectedPrefabNodeId &&
-    selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-      ? getPrefabNode(selectedPrefabNodeId)
+    editorState.selectedPrefabNodeId &&
+    editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+      ? getPrefabNode(editorState.selectedPrefabNodeId)
       : null;
   const asset =
     node?.kind === "primitive" && node.assetId ? getAssetById(node.assetId) : null;
@@ -4224,7 +4220,7 @@ function getSelectedAsset(): PrimitiveSvgAsset | null {
 }
 
 function getSelectedPrefab(): PrefabRecord | null {
-  return getSelectedPrefabFromState(prefabs, selectedPrefabId);
+  return getSelectedPrefabFromState(editorState.prefabs, editorState.selectedPrefabId);
 }
 
 function getSelectedScene(): SceneRecord | null {
@@ -4240,20 +4236,20 @@ function getAssetsById(): Map<string, PrimitiveSvgAsset> {
 }
 
 function getPrefabRecordById(prefabId: string): PrefabRecord | null {
-  return findRecordById(prefabs, prefabId);
+  return findRecordById(editorState.prefabs, prefabId);
 }
 
 function getPrefabDocumentById(prefabId: string): PrefabDocument | null {
   return getPrefabDocumentByIdFromState(
-    prefabDocuments,
+    editorState.prefabDocuments,
     prefabId,
-    loadedPrefabId,
+    editorState.loadedPrefabId,
     createCurrentPrefabDocument(),
   );
 }
 
 function getPrefabNode(nodeId: string): PrefabNode | null {
-  return getNodeById(prefabNodes, nodeId);
+  return getNodeById(editorState.prefabNodes, nodeId);
 }
 
 function getSceneNode(nodeId: string): SceneNode | null {
@@ -4316,8 +4312,8 @@ function createEmptyPrefabAnimation(): PrefabAnimation {
 }
 
 function getSelectedPrefabNode(): PrefabNode | null {
-  return selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-    ? getPrefabNode(selectedPrefabNodeId)
+  return editorState.selectedPrefabNodeId && editorState.selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
+    ? getPrefabNode(editorState.selectedPrefabNodeId)
     : null;
 }
 
@@ -4359,7 +4355,7 @@ function getTimelineStagingWorldTransform(
   pose: TimelineStagingPose,
 ): TransformSnapshot {
   return getStagingWorldTransform({
-    nodes: prefabNodes,
+    nodes: editorState.prefabNodes,
     stagingPose: pose,
   });
 }
@@ -4400,20 +4396,20 @@ function pruneTimelineStagingPoses(
 }
 
 function createNextPrefabNodeId(): string {
-  const id = `prefab-node-${nextPrefabNodeNumber}`;
-  nextPrefabNodeNumber += 1;
+  const id = `prefab-node-${editorState.nextPrefabNodeNumber}`;
+  editorState.nextPrefabNodeNumber += 1;
   return id;
 }
 
 function clearInvalidPrefabClipboard(): void {
-  pendingPrefabClipboard = clearInvalidPrefabClipboardForState(
-    pendingPrefabClipboard,
-    prefabNodes,
+  editorState.pendingPrefabClipboard = clearInvalidPrefabClipboardForState(
+    editorState.pendingPrefabClipboard,
+    editorState.prefabNodes,
   );
 }
 
 function getPrefabNodeTreeEntries(): PrefabNodeTreeEntry[] {
-  return getPrefabNodeTreeEntriesFromNodes(prefabNodes);
+  return getPrefabNodeTreeEntriesFromNodes(editorState.prefabNodes);
 }
 
 function getSceneNodeLabel(node: SceneNode): string {
@@ -4497,14 +4493,14 @@ function exposeEditorDebugHooks(): void {
             : null,
         pathD: asset.pathD,
       })),
-    getPrefabs: () => [...prefabs],
+    getPrefabs: () => [...editorState.prefabs],
     getPrefabAssembly: () => ({
-      nodes: prefabNodes.map(clonePrefabNode),
-      selectedPrefabId,
-      loadedPrefabId,
-      selectedPrefabNodeId,
-      pendingClipboard: pendingPrefabClipboard
-        ? { ...pendingPrefabClipboard }
+      nodes: editorState.prefabNodes.map(clonePrefabNode),
+      selectedPrefabId: editorState.selectedPrefabId,
+      loadedPrefabId: editorState.loadedPrefabId,
+      selectedPrefabNodeId: editorState.selectedPrefabNodeId,
+      pendingClipboard: editorState.pendingPrefabClipboard
+        ? { ...editorState.pendingPrefabClipboard }
         : null,
     }),
     getPrefabTimeline: () => {
@@ -4583,8 +4579,8 @@ function exposeEditorDebugHooks(): void {
     getEditorMode: () => editorMode,
     getSelectedProjectId: () => editorState.selectedProjectId,
     getSelectedAssetId: () => editorState.selectedAssetId,
-    getSelectedPrefabId: () => selectedPrefabId,
-    getLoadedPrefabId: () => loadedPrefabId,
+    getSelectedPrefabId: () => editorState.selectedPrefabId,
+    getLoadedPrefabId: () => editorState.loadedPrefabId,
     getSelectedSceneId: () => selectedSceneId,
     getLoadedSceneId: () => loadedSceneId,
     getLastImportError: () => editorState.lastImportError,
@@ -4595,4 +4591,5 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }
+
 
