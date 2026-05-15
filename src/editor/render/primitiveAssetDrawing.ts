@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import {
   getPrimitiveAssetListLabel,
   primitiveAssetUsesStrokeStyle,

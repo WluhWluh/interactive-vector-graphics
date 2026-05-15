@@ -2,7 +2,7 @@ import type {
   PrimitiveAssetKind,
   PrimitiveFillRule,
   PrimitiveSvgAsset,
-} from "../core/assets/primitiveSvg";
+} from "../core/assets/primitiveAssetTypes";
 import { hydratePrimitiveSvgAsset } from "../core/assets/primitiveAssetHydration";
 import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../core/assets/structuredBezierPath3d";

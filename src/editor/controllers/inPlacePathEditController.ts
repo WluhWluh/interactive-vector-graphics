@@ -2,7 +2,7 @@ import {
   cloneStructuredBezierPath,
   type StructuredBezierPath,
 } from "../../core/assets/structuredBezierPath";
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { canInPlaceEditPrimitiveAssetPath } from "../../core/assets/primitiveAssetCapabilities";
 import type { PrefabNode } from "../api";
 import {

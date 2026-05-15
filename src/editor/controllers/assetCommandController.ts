@@ -1,8 +1,6 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { canConvertPrimitiveAssetTo3DCurve } from "../../core/assets/primitiveAssetCapabilities";
-import type {
-  SourcePathEditSession,
-} from "./pathEditController";
+import type { SourcePathEditSession } from "./sourcePathEditController";
 import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
 
 export type AssetSelectionState = {

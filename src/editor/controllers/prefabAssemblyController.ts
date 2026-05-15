@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import type { PrefabDocument, PrefabNode, PrefabRecord } from "../api";
 import { clonePrefabNode, getPrefabNodeAndDescendantIds } from "../state/documentNodes";
 import type { PrefabSelectionId } from "../state/prefabState";

@@ -2,7 +2,7 @@ import {
   cloneStructuredBezierPath3D,
   type StructuredBezierPath3D,
 } from "../../core/assets/structuredBezierPath3d";
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
 import {
   createPathEditSession,

@@ -12,7 +12,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../core/assets/primitiveAssetTypes";
 import type { StageSize } from "../core/stage/canvasStage";
 import {
   eulerToTuple,

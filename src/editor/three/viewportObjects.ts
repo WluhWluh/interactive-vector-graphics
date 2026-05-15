@@ -15,7 +15,7 @@ import {
   WebGLRenderer,
   type Object3D,
 } from "three";
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import type { Vector3Tuple } from "./viewportMath";
 
 export type TransformProxyNode = {

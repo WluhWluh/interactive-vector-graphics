@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import type {
   PrefabAnimation,
   PrefabDocument,
@@ -14,8 +14,10 @@ import type { PendingPrefabClipboard } from "../controllers/prefabAssemblyContro
 import type { PrefabTrackProperty } from "../api";
 import type {
   InPlacePathEditSession,
+} from "../controllers/inPlacePathEditController";
+import type {
   SourcePathEditSession,
-} from "../controllers/pathEditController";
+} from "../controllers/sourcePathEditController";
 import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
 import type { PathEditDragState } from "../tools/pathEditCore";
 import {

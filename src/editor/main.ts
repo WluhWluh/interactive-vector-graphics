@@ -1,6 +1,6 @@
 import "../styles.css";
 import { Matrix4, Vector3 } from "three";
-import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../core/assets/primitiveAssetTypes";
 import {
   canConvertPrimitiveAssetTo3DCurve,
   canKeyframePrimitiveAssetPath,
@@ -268,23 +268,31 @@ import {
 import { bindViewportInteractions } from "./controllers/viewportInteractionController";
 import {
   createInPlacePathEditDebugState,
-  createInPlacePathEditSession as createInPlacePathEditSessionForState,
   createSourcePathEditDebugState,
-  dragPathEditSessionAtPoint,
-  findPathEditControlAtPoint,
+} from "./controllers/pathEditDebugController";
+import {
+  createInPlacePathEditSession as createInPlacePathEditSessionForState,
   getInPlacePathEditScreenControls as getInPlacePathEditScreenControlsForState,
-  getRestoredPathEditSelection,
+  isInPlacePathEditSessionValid,
+  type InPlacePathEditSession,
+} from "./controllers/inPlacePathEditController";
+import {
+  clearSourcePathEditState,
+  getSourcePathEditScreenControls,
+  startSourcePathEditState,
+} from "./controllers/sourcePathEditController";
+import {
   getSourcePathEdit3DControls as getSourcePathEdit3DControlsForState,
   getSourcePathEdit3DHandleLines as getSourcePathEdit3DHandleLinesForState,
-  getSourcePathEditScreenControls,
-  isInPlacePathEditSessionValid,
+} from "./controllers/sourcePathEdit3DController";
+import {
+  dragPathEditSessionAtPoint,
+  findPathEditControlAtPoint,
+  getRestoredPathEditSelection,
   pathEditSelectionsEqual,
   selectPathEditSessionControl,
-  clearSourcePathEditState,
-  startSourcePathEditState,
   toPathEditSelection,
-  type InPlacePathEditSession,
-} from "./controllers/pathEditController";
+} from "./controllers/pathEditSessionControls";
 import {
   advanceTimelinePlayback,
   createTimelineClipCommand,

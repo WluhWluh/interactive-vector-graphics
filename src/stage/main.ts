@@ -1,8 +1,6 @@
 import "../styles.css";
-import {
-  PrimitiveAssetRegistry,
-  type PrimitiveSvgAsset,
-} from "../core/assets/primitiveSvg";
+import { PrimitiveAssetRegistry } from "../core/assets/primitiveAssetRegistry";
+import type { PrimitiveSvgAsset } from "../core/assets/primitiveAssetTypes";
 import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
 import { CanvasStage } from "../core/stage/canvasStage";
 import {

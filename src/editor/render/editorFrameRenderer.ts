@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
 import type { StructuredBezierPath3D } from "../../core/assets/structuredBezierPath3d";
 import { drawCenteredStatus, drawPrimitivePreview } from "../../core/stage/primitivePreview";

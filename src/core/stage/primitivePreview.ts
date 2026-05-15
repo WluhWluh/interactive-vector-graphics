@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../assets/primitiveAssetTypes";
 import { primitiveAssetUsesStrokeStyle } from "../assets/primitiveAssetCapabilities";
 import type { StageLayer, StageSize } from "./canvasStage";
 

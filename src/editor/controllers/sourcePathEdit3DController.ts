@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import {
   addBezierPoints3D,
   getSourcePathEdit3DControlId,

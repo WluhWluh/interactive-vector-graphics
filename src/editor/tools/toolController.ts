@@ -1,6 +1,6 @@
 import type { PrefabTrackProperty } from "../api";
 import type { TransformMode } from "../threeEditorViewport";
-import type { PrimitiveAssetKind } from "../../core/assets/primitiveSvg";
+import type { PrimitiveAssetKind } from "../../core/assets/primitiveAssetTypes";
 import { getPrimitiveAssetCapabilities } from "../../core/assets/primitiveAssetCapabilities";
 
 export type TransformProperty = "position" | "rotation" | "scale";

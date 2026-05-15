@@ -1,4 +1,4 @@
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import type { PrefabAnimationClip, PrefabNode, SceneNode } from "../api";
 import type { EditorTransformNode } from "../threeEditorViewport";
 import type { TimelineStagingPose } from "../timeline/stagingPose";

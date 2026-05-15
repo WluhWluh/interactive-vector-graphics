@@ -1,5 +1,5 @@
 import { Matrix4 } from "three";
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import type { StructuredBezierPath } from "../../core/assets/structuredBezierPath";
 import type { PrefabAnimationClip, PrefabDocument, PrefabNode } from "../api";
 import type { SceneNode } from "../api";

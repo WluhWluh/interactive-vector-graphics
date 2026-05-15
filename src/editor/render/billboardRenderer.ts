@@ -1,6 +1,6 @@
 import { Matrix4 } from "three";
 import type { Camera } from "three";
-import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
 import {
   drawProjectedCurveCommands,
