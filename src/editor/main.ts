@@ -138,6 +138,11 @@ import {
   createPathEdit3DPointInputRow as createPathEdit3DPointInputRowForUi,
   createPathEditPointInputRow as createPathEditPointInputRowForUi,
 } from "./ui/inspector";
+import {
+  createAssetModeInspectorModel,
+  createInspectorHeaderModel,
+  createSceneModeInspectorModel,
+} from "./ui/inspectorModel";
 import { renderEditorShellFrame } from "./ui/editorShell";
 import {
   clonePathOverrideForNode,
@@ -2816,20 +2821,22 @@ function renderSourcePathEditPanel(): void {
 function renderInspector(): void {
   elements.inspectorFields.replaceChildren();
 
-  const selectedProject = getSelectedProject();
-  const camera = threeViewport.getCameraSnapshot();
+  const model = createInspectorHeaderModel({
+    selectedProject: getSelectedProject(),
+    camera: threeViewport.getCameraSnapshot(),
+  });
 
-  if (!selectedProject) {
+  if (!model.hasProject) {
     appendInspectorRow("Status", "Create or select a project");
     return;
   }
 
   appendInspectorRow("Mode", getEditorModeLabel(editorMode));
-  appendInspectorRow("Project", selectedProject.name);
-  appendInspectorRow("Project ID", selectedProject.id);
-  appendInspectorRow("Projection", camera.projection);
-  appendInspectorRow("Camera Pos", camera.position.join(", "));
-  appendInspectorRow("Camera Target", camera.target.join(", "));
+  appendInspectorRow("Project", model.project.name);
+  appendInspectorRow("Project ID", model.project.id);
+  appendInspectorRow("Projection", model.camera.projection);
+  appendInspectorRow("Camera Pos", model.camera.position.join(", "));
+  appendInspectorRow("Camera Target", model.camera.target.join(", "));
 
   if (editorMode === "asset" || editorMode === "path") {
     renderAssetModeInspector();
@@ -2839,32 +2846,36 @@ function renderInspector(): void {
 }
 
 function renderAssetModeInspector(): void {
-  const selectedPrefab = getSelectedPrefab();
-  const selectedNode =
-    selectedPrefabNodeId && selectedPrefabNodeId !== PREFAB_ROOT_NODE_ID
-      ? getPrefabNode(selectedPrefabNodeId)
-      : null;
-  const inspectedAsset =
-    selectedNode?.kind === "primitive" && selectedNode.assetId
-      ? getAssetById(selectedNode.assetId)
-      : getSelectedAsset();
+  const model = createAssetModeInspectorModel({
+    selectedPrefab: getSelectedPrefab(),
+    loadedPrefabId,
+    selectedNodeId: selectedPrefabNodeId,
+    rootNodeId: PREFAB_ROOT_NODE_ID,
+    getPrefabNode,
+    selectedAsset: getSelectedAsset(),
+    getAssetById,
+    stagingTransform: getActiveTimelineClip()
+      ? getSelectedTimelineStagingTransform()
+      : null,
+  });
 
-  appendInspectorRow("Selected Prefab", selectedPrefab?.name ?? "None");
-  appendInspectorRow("Loaded Prefab", loadedPrefabId ?? "None");
-  appendAssetInspectorRows(inspectedAsset);
+  appendInspectorRow("Selected Prefab", model.selectedPrefab?.name ?? "None");
+  appendInspectorRow("Loaded Prefab", model.loadedPrefabId ?? "None");
+  appendAssetInspectorRows(model.inspectedAsset);
 
-  if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+  if (model.selectedNodeIsRoot) {
     appendInspectorRow("Prefab Node", "Root Group");
     appendInspectorRow("Kind", "virtual group");
     appendInspectorRow("Parent", "None");
     return;
   }
 
-  if (!selectedNode) {
+  if (!model.selectedNode || !model.editableTransform) {
     appendInspectorRow("Prefab Node", "No node selected");
     return;
   }
 
+  const selectedNode = model.selectedNode;
   appendInspectorRow("Prefab Node", selectedNode.id);
   appendInspectorRow("Node Name", selectedNode.name);
   appendInspectorRow("Kind", selectedNode.kind);
@@ -2878,45 +2889,47 @@ function renderAssetModeInspector(): void {
     }
   }
 
-  const editableTransform = getAssetModeEditableTransform(selectedNode);
-
-  appendTransformInspectorRow("Position", editableTransform, "position");
-  appendTransformInspectorRow("Rotation", editableTransform, "rotation");
-  appendTransformInspectorRow("Scale", editableTransform, "scale");
+  appendTransformInspectorRow("Position", model.editableTransform, "position");
+  appendTransformInspectorRow("Rotation", model.editableTransform, "rotation");
+  appendTransformInspectorRow("Scale", model.editableTransform, "scale");
   appendInspectorRow("Billboard", selectedNode.billboardMode);
   renderInPlacePathEditInspector(selectedNode);
 }
 
 function renderSceneModeInspector(): void {
-  const selectedScene = getSelectedScene();
-  const selectedNode = selectedSceneNodeId ? getSceneNode(selectedSceneNodeId) : null;
+  const model = createSceneModeInspectorModel({
+    selectedScene: getSelectedScene(),
+    loadedSceneId,
+    selectedNodeId: selectedSceneNodeId,
+    getSceneNode,
+    getAssetById,
+    getPrefabNameById: (prefabId) => getPrefabRecordById(prefabId)?.name ?? null,
+    hasPrefabDocument: (prefabId) => Boolean(getPrefabDocumentById(prefabId)),
+  });
 
-  appendInspectorRow("Selected Scene", selectedScene?.name ?? "None");
-  appendInspectorRow("Loaded Scene", loadedSceneId ?? "None");
+  appendInspectorRow("Selected Scene", model.selectedScene?.name ?? "None");
+  appendInspectorRow("Loaded Scene", model.loadedSceneId ?? "None");
 
-  if (!selectedNode) {
+  if (!model.selectedNode) {
     appendInspectorRow("Scene Node", "No node selected");
     return;
   }
 
+  const selectedNode = model.selectedNode;
   appendInspectorRow("Scene Node", selectedNode.id);
   appendInspectorRow("Kind", selectedNode.kind);
 
   if (selectedNode.kind === "primitive") {
-    const asset = getAssetById(selectedNode.assetId);
-
-    appendAssetInspectorRows(asset);
+    appendAssetInspectorRows(model.inspectedAsset);
     appendInspectorRow("Node Asset", selectedNode.assetId);
-    if (!asset) {
+    if (!model.inspectedAsset) {
       appendInspectorRow("Missing Asset", selectedNode.assetId);
     }
     appendInspectorRow("Billboard", selectedNode.billboardMode);
   } else {
-    const prefab = getPrefabRecordById(selectedNode.prefabId);
-
-    appendInspectorRow("Prefab", prefab?.name ?? "Missing Prefab");
+    appendInspectorRow("Prefab", model.prefabName ?? "Missing Prefab");
     appendInspectorRow("Prefab ID", selectedNode.prefabId);
-    if (!getPrefabDocumentById(selectedNode.prefabId)) {
+    if (!model.prefabExists) {
       appendInspectorRow("Missing Prefab", selectedNode.prefabId);
     }
   }
@@ -2928,19 +2941,6 @@ function renderSceneModeInspector(): void {
 
 function appendAssetInspectorRows(asset: PrimitiveSvgAsset | null): void {
   appendAssetInspectorRowsForUi(elements, asset);
-}
-
-function getAssetModeEditableTransform(node: PrefabNode): EditorTransformNode {
-  const stagingTransform = getActiveTimelineClip()
-    ? getSelectedTimelineStagingTransform()
-    : null;
-
-  return {
-    id: node.id,
-    position: stagingTransform?.position ?? [...node.position],
-    rotation: stagingTransform?.rotation ?? [...node.rotation],
-    scale: stagingTransform?.scale ?? [...node.scale],
-  };
 }
 
 function renderInPlacePathEditInspector(node: PrefabNode): void {
@@ -3115,9 +3115,18 @@ function applyTransformInput(
 ): void {
   const node = editorMode === "asset" ? getPrefabNode(nodeId) : getSceneNode(nodeId);
   const parsedValue = Number(input.value.trim());
+  const stagingTransform =
+    editorMode === "asset" && getActiveTimelineClip()
+      ? getSelectedTimelineStagingTransform()
+      : null;
   const editableNode =
     editorMode === "asset" && node
-      ? getAssetModeEditableTransform(node as PrefabNode)
+      ? {
+          id: node.id,
+          position: stagingTransform?.position ?? [...node.position],
+          rotation: stagingTransform?.rotation ?? [...node.rotation],
+          scale: stagingTransform?.scale ?? [...node.scale],
+        }
       : node;
 
   if (!node || !editableNode || !Number.isFinite(parsedValue)) {
