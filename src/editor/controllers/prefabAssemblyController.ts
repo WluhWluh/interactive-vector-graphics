@@ -28,6 +28,53 @@ export type PrefabDocumentDetail = {
   document: PrefabDocument;
 };
 
+export async function runCreatePrefabCommand(input: {
+  projectId: string;
+  name: string;
+  document: PrefabDocument;
+  createPrefab: (
+    projectId: string,
+    name: string,
+    document: PrefabDocument,
+  ) => Promise<PrefabDocumentDetail>;
+}): Promise<PrefabDocumentDetail> {
+  return input.createPrefab(input.projectId, input.name, input.document);
+}
+
+export async function runLoadPrefabCommand(input: {
+  projectId: string;
+  prefabId: string;
+  getPrefab: (
+    projectId: string,
+    prefabId: string,
+  ) => Promise<PrefabDocumentDetail>;
+}): Promise<PrefabDocumentDetail> {
+  return input.getPrefab(input.projectId, input.prefabId);
+}
+
+export async function runSavePrefabCommand(input: {
+  projectId: string;
+  prefabId: string;
+  document: PrefabDocument;
+  savePrefab: (
+    projectId: string,
+    prefabId: string,
+    document: PrefabDocument,
+  ) => Promise<PrefabDocumentDetail>;
+}): Promise<PrefabDocumentDetail> {
+  return input.savePrefab(input.projectId, input.prefabId, input.document);
+}
+
+export async function runDeletePrefabCommand(input: {
+  projectId: string;
+  prefabId: string;
+  deletePrefab: (projectId: string, prefabId: string) => Promise<void>;
+}): Promise<string> {
+  await input.deletePrefab(input.projectId, input.prefabId);
+
+  return input.prefabId;
+}
+
 export function applyLoadedPrefabDocument(
   state: PrefabDocumentCacheState,
   detail: PrefabDocumentDetail,

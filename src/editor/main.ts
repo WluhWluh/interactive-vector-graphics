@@ -219,6 +219,10 @@ import {
   createPrefabGroupNode,
   deletePrefabNodeSubtree,
   pastePrefabClipboard,
+  runCreatePrefabCommand,
+  runDeletePrefabCommand,
+  runLoadPrefabCommand,
+  runSavePrefabCommand,
   startPrefabClipboard,
   type PendingPrefabClipboard,
   type PrefabClipboardMode,
@@ -1196,11 +1200,12 @@ async function createPrefabFromInput(): Promise<void> {
   }
 
   try {
-    const result = await createPrefab(
-      projectResult.value,
-      nameResult.value,
-      createCurrentPrefabDocument(),
-    );
+    const result = await runCreatePrefabCommand({
+      projectId: projectResult.value,
+      name: nameResult.value,
+      document: createCurrentPrefabDocument(),
+      createPrefab,
+    });
     const nextPrefabState = applyLoadedPrefabDocument(
       { selectedPrefabId, loadedPrefabId, prefabDocuments },
       result,
@@ -1240,7 +1245,11 @@ async function loadSelectedPrefab(): Promise<void> {
   }
 
   try {
-    const result = await getPrefab(projectResult.value, prefabResult.value);
+    const result = await runLoadPrefabCommand({
+      projectId: projectResult.value,
+      prefabId: prefabResult.value,
+      getPrefab,
+    });
     const nextPrefabState = applyLoadedPrefabDocument(
       { selectedPrefabId, loadedPrefabId, prefabDocuments },
       result,
@@ -1278,11 +1287,12 @@ async function saveSelectedPrefab(): Promise<void> {
   }
 
   try {
-    const result = await savePrefab(
-      projectResult.value,
-      prefabResult.value,
-      createCurrentPrefabDocument(),
-    );
+    const result = await runSavePrefabCommand({
+      projectId: projectResult.value,
+      prefabId: prefabResult.value,
+      document: createCurrentPrefabDocument(),
+      savePrefab,
+    });
     const nextPrefabState = applySavedPrefabDocument(
       { selectedPrefabId, loadedPrefabId, prefabDocuments },
       result,
@@ -1305,8 +1315,11 @@ async function deleteSelectedPrefab(): Promise<void> {
   }
 
   try {
-    const deletedPrefabId = selectedPrefabId;
-    await deletePrefab(selectedProjectId, deletedPrefabId);
+    const deletedPrefabId = await runDeletePrefabCommand({
+      projectId: selectedProjectId,
+      prefabId: selectedPrefabId,
+      deletePrefab,
+    });
     const nextPrefabState = applyDeletedPrefabDocument(
       { selectedPrefabId, loadedPrefabId, prefabDocuments },
       deletedPrefabId,
