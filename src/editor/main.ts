@@ -115,7 +115,7 @@ import {
 } from "./render/billboardRenderer";
 import { BillboardFrameDataCache } from "./render/billboardFrameData";
 import { renderEditorFrame } from "./render/editorFrameRenderer";
-import { createRenderInvalidation } from "./render/renderInvalidation";
+import { createEditorRenderCache } from "./render/editorRenderCache";
 import {
   applyViewportTransformToPrefabNode,
   applyViewportTransformToStagingPose,
@@ -286,12 +286,12 @@ const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
 const elements = getEditorElements();
 const collapsedModuleIds = readCollapsedModuleCookie();
-const renderInvalidation = createRenderInvalidation();
 const billboardFrameDataCache = new BillboardFrameDataCache({
   getAssetById,
   getPrefabDocumentById,
   getOrCreateTimelineStagingPose,
 });
+const renderCache = createEditorRenderCache(billboardFrameDataCache);
 const initialAppState = createInitialEditorAppState({
   rootPrefabNodeId: PREFAB_ROOT_NODE_ID,
   defaultPrefabSnapFps: DEFAULT_PREFAB_SNAP_FPS,
@@ -435,10 +435,10 @@ declare global {
         transformMode: TransformMode;
         viewportProxies: ReturnType<ThreeEditorViewport["getProxySnapshot"]>;
       };
-      getRenderInvalidation: () => {
-        flags: typeof renderInvalidation.flags;
-      cachedAssetAssemblyBillboardCount: number;
-      cachedSceneLayoutBillboardCount: number;
+      getRenderCache: () => {
+        flags: typeof renderCache.flags;
+        cachedAssetAssemblyBillboardCount: number;
+        cachedSceneLayoutBillboardCount: number;
       };
       getActiveEditorTool: () => EditorTool;
       getScenes: () => SceneRecord[];
@@ -716,7 +716,7 @@ function bindEditorEvents(): void {
     if (editorMode === "scene") {
       loadedSceneId = null;
     }
-    renderInvalidation.markAllDirty();
+    renderCache.markAllDirty();
     renderEditorShell();
     exposeEditorDebugHooks();
   });
@@ -730,7 +730,7 @@ function bindEditorEvents(): void {
       } else if (editorMode === "scene") {
         selectedSceneNodeId = nodeId;
         syncSelectionFromSceneNode();
-        renderInvalidation.markSceneBillboardsDirty();
+        renderCache.markSceneBillboardsDirty();
       }
 
       renderEditorShell();
@@ -754,7 +754,7 @@ function bindEditorEvents(): void {
       if (editorMode === "scene") {
         loadedSceneId = null;
       }
-      renderInvalidation.markAllDirty();
+      renderCache.markAllDirty();
       scheduleCameraInspectorRender();
       exposeEditorDebugHooks();
     },
@@ -1748,7 +1748,7 @@ function applySceneDocument(document: SceneDocument): void {
 }
 
 function rebuildViewportProxies(): void {
-  renderInvalidation.markAllDirty();
+  renderCache.markAllDirty();
   threeViewport.clearNodes();
 
   if (!selectedProjectId) {
@@ -1816,7 +1816,7 @@ function syncNodeFromViewport(nodeId: string): void {
         worldNode,
         stagingPose,
       });
-      renderInvalidation.markAssetBillboardsDirty();
+      renderCache.markAssetBillboardsDirty();
       return;
     }
 
@@ -1843,7 +1843,7 @@ function syncNodeFromViewport(nodeId: string): void {
      * only refresh the world-space transforms of the other prefab proxies.
      */
     syncPrefabProxyWorldTransforms(node.id);
-    renderInvalidation.markAssetBillboardsDirty();
+    renderCache.markAssetBillboardsDirty();
 
     return;
   }
@@ -1856,7 +1856,7 @@ function syncNodeFromViewport(nodeId: string): void {
 
   threeViewport.syncNodeFromProxy(node);
   loadedSceneId = null;
-  renderInvalidation.markSceneBillboardsDirty();
+  renderCache.markSceneBillboardsDirty();
 }
 
 function syncSelectionFromPrefabNode(): void {
@@ -1905,7 +1905,7 @@ function updateTimelinePlayback(deltaSeconds: number): void {
   timelineCurrentTimeMs = nextPlayback.currentTimeMs;
   isTimelinePlaying = nextPlayback.isPlaying;
 
-  renderInvalidation.markAssetBillboardsDirty();
+  renderCache.markAssetBillboardsDirty();
   renderPrefabTimeline();
   exposeEditorDebugHooks();
 }
@@ -2504,7 +2504,7 @@ function renderCollapsibleModules(): void {
 }
 
 function renderEditorShell(): void {
-  renderInvalidation.markAllDirty();
+  renderCache.markAllDirty();
   const activeTimelineClip = getActiveTimelineClip();
   const validInPlacePathEditSession =
     editorMode === "asset" &&
@@ -3255,7 +3255,7 @@ function applyTransformInput(
         id: node.id,
         ...getTimelineStagingWorldTransform(stagingPose),
       });
-      renderInvalidation.markAssetBillboardsDirty();
+      renderCache.markAssetBillboardsDirty();
     } else {
       node[property] = nextValue;
       pauseTimeline();
@@ -3266,7 +3266,7 @@ function applyTransformInput(
     node[property] = nextValue;
     loadedSceneId = null;
     threeViewport.syncProxyFromNode(node);
-    renderInvalidation.markSceneBillboardsDirty();
+    renderCache.markSceneBillboardsDirty();
   }
 
   renderEditorShell();
@@ -3314,7 +3314,7 @@ function renderPreviewFrame(): void {
     drawSourcePathEdit3DPreview,
   });
 
-  renderInvalidation.clearFrameDirtyFlags();
+  renderCache.clearFrameDirtyFlags();
 }
 
 function renderPathEditFrame(): void {
@@ -3416,27 +3416,21 @@ function renderInPlacePathEditOverlay(): void {
 }
 
 function getCachedAssetAssemblyBillboards(): DrawableBillboard[] {
-  return billboardFrameDataCache.getAssetAssemblyBillboards(
-    {
-      nodes: prefabNodes,
-      evaluatedNodes: getEvaluatedPrefabNodes(),
-      selectedNodeId: selectedPrefabNodeId,
-      activeClip: getActiveTimelineClip(),
-      selectedNode: getSelectedPrefabNode(),
-      pathOverrides: getEvaluatedPrefabPathOverrides(),
-    },
-    renderInvalidation.flags,
-  );
+  return renderCache.getAssetAssemblyBillboards({
+    nodes: prefabNodes,
+    evaluatedNodes: getEvaluatedPrefabNodes(),
+    selectedNodeId: selectedPrefabNodeId,
+    activeClip: getActiveTimelineClip(),
+    selectedNode: getSelectedPrefabNode(),
+    pathOverrides: getEvaluatedPrefabPathOverrides(),
+  });
 }
 
 function getCachedSceneLayoutBillboards(): DrawableBillboard[] {
-  return billboardFrameDataCache.getSceneLayoutBillboards(
-    {
-      nodes: sceneNodes,
-      selectedNodeId: selectedSceneNodeId,
-    },
-    renderInvalidation.flags,
-  );
+  return renderCache.getSceneLayoutBillboards({
+    nodes: sceneNodes,
+    selectedNodeId: selectedSceneNodeId,
+  });
 }
 
 function drawBillboards(
@@ -3548,7 +3542,7 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
     control,
   });
   event.preventDefault();
-  renderInvalidation.markPaperDirty();
+  renderCache.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3584,7 +3578,7 @@ function updatePathEditHoveredControl(control: PathEditControl | null): void {
   }
 
   pathEditHoveredControl = nextHover;
-  renderInvalidation.markPaperDirty();
+  renderCache.markPaperDirty();
   exposeEditorDebugHooks();
 }
 
@@ -3618,8 +3612,8 @@ function dragPathEditControl(event: PointerEvent | MouseEvent): void {
     altKey: event.altKey,
     shiftKey: event.shiftKey,
   });
-  renderInvalidation.markVectorDirty();
-  renderInvalidation.markPaperDirty();
+  renderCache.markVectorDirty();
+  renderCache.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3754,8 +3748,8 @@ function selectSourcePathEdit3DControlById(controlId: string | null): void {
   const selection = controlId ? parseSourcePathEdit3DControlId(controlId) : null;
   pathEdit3DSession.selected = selection;
   syncSourcePathEdit3DControls();
-  renderInvalidation.markVectorDirty();
-  renderInvalidation.markThreeDirty();
+  renderCache.markVectorDirty();
+  renderCache.markThreeDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3828,7 +3822,7 @@ function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean
   if ("stopImmediatePropagation" in event) {
     event.stopImmediatePropagation();
   }
-  renderInvalidation.markPaperDirty();
+  renderCache.markPaperDirty();
   renderInspector();
   exposeEditorDebugHooks();
   return true;
@@ -3859,7 +3853,7 @@ function updateInPlacePathEditHoveredControl(control: PathEditControl | null): v
   }
 
   inPlacePathEditHoveredControl = nextHover;
-  renderInvalidation.markPaperDirty();
+  renderCache.markPaperDirty();
   exposeEditorDebugHooks();
 }
 
@@ -3908,8 +3902,8 @@ function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
   });
   syncInPlacePathSessionToStagingPose();
   event.preventDefault();
-  renderInvalidation.markAssetBillboardsDirty();
-  renderInvalidation.markPaperDirty();
+  renderCache.markAssetBillboardsDirty();
+  renderCache.markPaperDirty();
   renderInspector();
   exposeEditorDebugHooks();
 }
@@ -4436,12 +4430,11 @@ function exposeEditorDebugHooks(): void {
         viewportProxies: threeViewport.getProxySnapshot(),
       };
     },
-    getRenderInvalidation: () => ({
-      flags: { ...renderInvalidation.flags },
+    getRenderCache: () => ({
+      flags: { ...renderCache.flags },
       cachedAssetAssemblyBillboardCount:
-        billboardFrameDataCache.getAssetAssemblyBillboardCount(),
-      cachedSceneLayoutBillboardCount:
-        billboardFrameDataCache.getSceneLayoutBillboardCount(),
+        renderCache.getAssetAssemblyBillboardCount(),
+      cachedSceneLayoutBillboardCount: renderCache.getSceneLayoutBillboardCount(),
     }),
     getActiveEditorTool: () => activeEditorTool,
     getScenes: () => [...scenes],
