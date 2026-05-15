@@ -216,6 +216,10 @@ import {
   type PrefabClipboardMode,
 } from "./controllers/prefabAssemblyController";
 import {
+  appendAsset,
+  createEmptyProjectWorkspaceState,
+  loadPrefabDocuments,
+  replaceAssetById,
   reconcileAssetSelection,
   reconcilePrefabSelection,
   reconcileProjectSelection,
@@ -824,20 +828,12 @@ async function refreshPrefabs(): Promise<void> {
   }
 
   prefabs = await listPrefabs(selectedProjectId);
-  const nextDocuments = new Map<string, PrefabDocument>();
-
-  await Promise.all(
-    prefabs.map(async (prefab) => {
-      try {
-        const detail = await getPrefab(selectedProjectId!, prefab.id);
-        nextDocuments.set(prefab.id, detail.document);
-      } catch (error) {
-        console.error(error);
-      }
-    }),
-  );
-
-  prefabDocuments = nextDocuments;
+  prefabDocuments = await loadPrefabDocuments({
+    projectId: selectedProjectId,
+    prefabs,
+    getPrefab,
+    onError: (error) => console.error(error),
+  });
   const nextPrefab = reconcilePrefabSelection(
     selectedPrefabId,
     loadedPrefabId,
@@ -942,9 +938,7 @@ async function savePathEditSession(): Promise<void> {
           pathEditSession!.assetId,
           pathEditSession!.draft,
         );
-    assets = assets.map((asset) =>
-      asset.id === updatedAsset.id ? updatedAsset : asset,
-    );
+    assets = replaceAssetById(assets, updatedAsset);
     selectedAssetId = updatedAsset.id;
     pathEditSession = null;
     pathEdit3DSession = null;
@@ -1010,7 +1004,7 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
       selectedProjectId,
       selectedAssetId,
     );
-    assets = [...assets, convertedAsset];
+    assets = appendAsset(assets, convertedAsset);
     selectedAssetId = convertedAsset.id;
     lastImportError = null;
     hideError();
@@ -1557,21 +1551,22 @@ function setEditorMode(mode: EditorMode): void {
 
 function clearProjectWorkspace(): void {
   exitPathTool();
-  assets = [];
-  prefabs = [];
-  prefabDocuments = new Map();
-  scenes = [];
+  const emptyWorkspace = createEmptyProjectWorkspaceState();
+  assets = emptyWorkspace.assets;
+  prefabs = emptyWorkspace.prefabs;
+  prefabDocuments = emptyWorkspace.prefabDocuments;
+  scenes = emptyWorkspace.scenes;
   prefabNodes = [];
   resetPrefabTimelineState();
   sceneNodes = [];
-  selectedAssetId = null;
-  selectedPrefabId = null;
-  loadedPrefabId = null;
+  selectedAssetId = emptyWorkspace.selectedAssetId;
+  selectedPrefabId = emptyWorkspace.selectedPrefabId;
+  loadedPrefabId = emptyWorkspace.loadedPrefabId;
   selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
   pendingPrefabClipboard = null;
-  selectedSceneId = null;
-  loadedSceneId = null;
-  selectedSceneNodeId = null;
+  selectedSceneId = emptyWorkspace.selectedSceneId;
+  loadedSceneId = emptyWorkspace.loadedSceneId;
+  selectedSceneNodeId = emptyWorkspace.selectedSceneNodeId;
   pathEditSession = null;
   pathEdit3DSession = null;
   pathEditDragState = null;

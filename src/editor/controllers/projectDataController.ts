@@ -1,5 +1,10 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
-import type { PrefabRecord, ProjectRecord, SceneRecord } from "../api";
+import type {
+  PrefabDocument,
+  PrefabRecord,
+  ProjectRecord,
+  SceneRecord,
+} from "../api";
 import { chooseStableSelection } from "../tools/editorUtils";
 
 export type ProjectRefreshResult = {
@@ -94,5 +99,74 @@ export function reconcileSceneSelection(
     nextSelectedSceneId,
     missingLoadedSceneId:
       loadedSceneId && !sceneIds.has(loadedSceneId) ? loadedSceneId : null,
+  };
+}
+
+export function replaceAssetById(
+  assets: PrimitiveSvgAsset[],
+  updatedAsset: PrimitiveSvgAsset,
+): PrimitiveSvgAsset[] {
+  return assets.map((asset) =>
+    asset.id === updatedAsset.id ? updatedAsset : asset,
+  );
+}
+
+export function appendAsset(
+  assets: PrimitiveSvgAsset[],
+  asset: PrimitiveSvgAsset,
+): PrimitiveSvgAsset[] {
+  return [...assets, asset];
+}
+
+export async function loadPrefabDocuments(input: {
+  projectId: string;
+  prefabs: PrefabRecord[];
+  getPrefab: (
+    projectId: string,
+    prefabId: string,
+  ) => Promise<{ prefab: PrefabRecord; document: PrefabDocument }>;
+  onError?: (error: unknown) => void;
+}): Promise<Map<string, PrefabDocument>> {
+  const documents = new Map<string, PrefabDocument>();
+
+  await Promise.all(
+    input.prefabs.map(async (prefab) => {
+      try {
+        const detail = await input.getPrefab(input.projectId, prefab.id);
+        documents.set(prefab.id, detail.document);
+      } catch (error) {
+        input.onError?.(error);
+      }
+    }),
+  );
+
+  return documents;
+}
+
+export type ProjectWorkspaceState = {
+  assets: PrimitiveSvgAsset[];
+  prefabs: PrefabRecord[];
+  prefabDocuments: Map<string, PrefabDocument>;
+  scenes: SceneRecord[];
+  selectedAssetId: string | null;
+  selectedPrefabId: string | null;
+  loadedPrefabId: string | null;
+  selectedSceneId: string | null;
+  loadedSceneId: string | null;
+  selectedSceneNodeId: string | null;
+};
+
+export function createEmptyProjectWorkspaceState(): ProjectWorkspaceState {
+  return {
+    assets: [],
+    prefabs: [],
+    prefabDocuments: new Map(),
+    scenes: [],
+    selectedAssetId: null,
+    selectedPrefabId: null,
+    loadedPrefabId: null,
+    selectedSceneId: null,
+    loadedSceneId: null,
+    selectedSceneNodeId: null,
   };
 }
