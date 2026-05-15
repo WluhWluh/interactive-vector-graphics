@@ -1,4 +1,4 @@
-import type { PrimitiveAssetKind, PrimitiveSvgAsset } from "./primitiveSvg";
+import type { PrimitiveAssetKind, PrimitiveSvgAsset } from "./primitiveAssetTypes";
 
 export type StrokeStyledPrimitiveSvgAsset = Extract<
   PrimitiveSvgAsset,

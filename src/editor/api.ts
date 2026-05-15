@@ -3,14 +3,9 @@ import type {
   PrimitiveFillRule,
   PrimitiveSvgAsset,
 } from "../core/assets/primitiveSvg";
-import {
-  cloneStructuredBezierPath,
-  type StructuredBezierPath,
-} from "../core/assets/structuredBezierPath";
-import {
-  cloneStructuredBezierPath3D,
-  type StructuredBezierPath3D,
-} from "../core/assets/structuredBezierPath3d";
+import { hydratePrimitiveSvgAsset } from "../core/assets/primitiveAssetHydration";
+import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
+import type { StructuredBezierPath3D } from "../core/assets/structuredBezierPath3d";
 import type {
   EditorSceneNode,
   EditorViewportCameraSnapshot,
@@ -515,48 +510,7 @@ export async function deleteScene(
 }
 
 function hydratePrimitiveAsset(asset: StoredPrimitiveAssetDto): PrimitiveSvgAsset {
-  /**
-   * The backend stores portable primitive data, not browser-only objects. The
-   * editor recreates Path2D at the API boundary so rendering code can stay the
-   * same whether an asset came from a built-in manifest or persisted storage.
-   */
-  const baseAsset = {
-    id: asset.id,
-    name: asset.name,
-    sourceUrl: asset.sourcePath,
-    viewBox: asset.viewBox,
-    pathD: asset.pathD,
-    path: new Path2D(asset.pathD),
-    bezierPath: cloneStructuredBezierPath(asset.bezierPath),
-  };
-
-  return asset.assetKind === "strokePath"
-    ? {
-        ...baseAsset,
-        assetKind: "strokePath",
-        stroke: asset.stroke ?? "#000000",
-        strokeWidth: asset.strokeWidth ?? 1,
-      }
-    : asset.assetKind === "bezierCurve3d"
-      ? {
-          ...baseAsset,
-          assetKind: "bezierCurve3d",
-          stroke: asset.stroke ?? "#000000",
-          strokeWidth: asset.strokeWidth ?? 1,
-          bezierPath3d: asset.bezierPath3d
-            ? cloneStructuredBezierPath3D(asset.bezierPath3d)
-            : {
-                version: 1,
-                closed: false,
-                segments: [],
-              },
-        }
-    : {
-        ...baseAsset,
-        assetKind: "filledPath",
-        fill: asset.fill,
-        fillRule: asset.fillRule,
-      };
+  return hydratePrimitiveSvgAsset(asset);
 }
 
 function assertOk(response: Response, error?: string): void {
