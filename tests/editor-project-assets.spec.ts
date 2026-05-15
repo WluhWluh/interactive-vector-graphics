@@ -1,10 +1,15 @@
 ﻿import { expect, test } from "@playwright/test";
 import { countWarmYellowPixels } from "./helpers/canvasPixels";
+import {
+  createEditorProject,
+  openEditor,
+  uploadPrimitiveSvg,
+} from "./helpers/editorActions";
 
 test("creates a project, imports a primitive SVG, and deletes data", async ({
   page,
 }) => {
-  await page.goto("/editor.html");
+  await openEditor(page);
 
   await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Inspector" })).toBeVisible();
@@ -58,21 +63,17 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       window.__vectorEditorDebug?.getCollapsedModules() ?? [],
     ),
   ).toEqual([]);
-  await page.locator("#project-name-input").fill("Playwright Project");
-  await page.locator("#project-form").getByRole("button", { name: "Create" }).click();
-  await expect(page.getByRole("button", { name: "Playwright Project" })).toBeVisible();
+  await createEditorProject(page, "Playwright Project");
 
-  const fileInput = page.locator("#svg-file-input");
   const validSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">',
     '<path fill="#ffcf4a" d="M -50 0 C -50 -33 -21 -50 0 -50 C 21 -50 50 -33 50 0 C 50 33 21 50 0 50 C -21 50 -50 33 -50 0 Z" />',
     "</svg>",
   ].join("");
 
-  await fileInput.setInputFiles({
-    name: "uploaded-face.svg",
-    mimeType: "image/svg+xml",
-    buffer: Buffer.from(validSvg),
+  await uploadPrimitiveSvg(page, {
+    filename: "uploaded-face.svg",
+    svgText: validSvg,
   });
 
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
@@ -962,10 +963,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     "</svg>",
   ].join("");
 
-  await fileInput.setInputFiles({
-    name: "bad-asset.svg",
-    mimeType: "image/svg+xml",
-    buffer: Buffer.from(invalidSvg),
+  await uploadPrimitiveSvg(page, {
+    filename: "bad-asset.svg",
+    svgText: invalidSvg,
   });
 
   await expect(page.locator("#import-error")).toBeVisible();

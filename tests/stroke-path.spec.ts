@@ -1,12 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { countTealPixels } from "./helpers/canvasPixels";
+import {
+  createEditorProject,
+  openEditor,
+  uploadPrimitiveSvg,
+} from "./helpers/editorActions";
 
 test("imports and previews an open strokePath primitive", async ({ page }) => {
-  await page.goto("/editor.html");
-
-  await page.locator("#project-name-input").fill("Stroke Project");
-  await page.locator("#project-form").getByRole("button", { name: "Create" }).click();
-  await expect(page.getByRole("button", { name: "Stroke Project" })).toBeVisible();
+  await openEditor(page);
+  await createEditorProject(page, "Stroke Project");
 
   const strokeSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">',
@@ -14,12 +16,9 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     "</svg>",
   ].join("");
 
-  const fileInput = page.locator("#svg-file-input");
-
-  await fileInput.setInputFiles({
-    name: "leg-stroke.svg",
-    mimeType: "image/svg+xml",
-    buffer: Buffer.from(strokeSvg),
+  await uploadPrimitiveSvg(page, {
+    filename: "leg-stroke.svg",
+    svgText: strokeSvg,
   });
 
   await expect(page.getByRole("button", { name: "Stroke: leg-stroke" })).toBeVisible();
@@ -176,10 +175,9 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     "</svg>",
   ].join("");
 
-  await fileInput.setInputFiles({
-    name: "closed-stroke.svg",
-    mimeType: "image/svg+xml",
-    buffer: Buffer.from(closedStrokeSvg),
+  await uploadPrimitiveSvg(page, {
+    filename: "closed-stroke.svg",
+    svgText: closedStrokeSvg,
   });
 
   await expect(page.locator("#import-error")).toContainText(

@@ -1,25 +1,24 @@
 import { expect, test } from "@playwright/test";
+import {
+  createEditorProject,
+  openEditor,
+  uploadPrimitiveSvg,
+} from "./helpers/editorActions";
 
 test("keeps staged timeline ghost proxies aligned when switching prefab nodes", async ({
   page,
 }) => {
-  await page.goto("/editor.html");
-
-  await page.locator("#project-name-input").fill("Staging Proxy Project");
-  await page.locator("#project-form").getByRole("button", { name: "Create" }).click();
-  await expect(page.getByRole("button", { name: "Staging Proxy Project" })).toBeVisible();
+  await openEditor(page);
+  await createEditorProject(page, "Staging Proxy Project");
 
   const filledSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">',
     '<path fill="#ffcf4a" d="M -42 0 C -42 -26 -18 -42 0 -42 C 28 -42 42 -18 42 0 C 42 28 18 42 0 42 C -28 42 -42 18 -42 0 Z" />',
     "</svg>",
   ].join("");
-  const fileInput = page.locator("#svg-file-input");
-
-  await fileInput.setInputFiles({
-    name: "staged-face.svg",
-    mimeType: "image/svg+xml",
-    buffer: Buffer.from(filledSvg),
+  await uploadPrimitiveSvg(page, {
+    filename: "staged-face.svg",
+    svgText: filledSvg,
   });
   await expect(page.getByRole("button", { name: "Fill: staged-face" })).toBeVisible();
   await page.getByRole("button", { name: "Group: Root Group" }).click();
