@@ -11,12 +11,26 @@ import type {
 import { TimelineStagingPoseStore } from "../timeline/stagingPose";
 import type { EditorTool } from "../tools/toolController";
 import type { PendingPrefabClipboard } from "../controllers/prefabAssemblyController";
+import type { PrefabTrackProperty } from "../api";
+import type {
+  InPlacePathEditSession,
+  SourcePathEditSession,
+} from "../controllers/pathEditController";
+import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
+import type { PathEditDragState } from "../tools/pathEditCore";
 import {
   createEmptyPrefabAnimation,
   type PrefabSelectionId,
 } from "./prefabState";
+import { cloneStructuredBezierPath } from "../../core/assets/structuredBezierPath";
+import { cloneStructuredBezierPath3D } from "../../core/assets/structuredBezierPath3d";
 
 export type EditorMode = "asset" | "path" | "scene";
+
+export type TimelinePointerDrag = {
+  keyframeId: string;
+  property: PrefabTrackProperty;
+};
 
 export type EditorAppState = {
   projects: ProjectRecord[];
@@ -37,11 +51,20 @@ export type EditorAppState = {
   timelineCurrentTimeMs: number;
   isTimelinePlaying: boolean;
   selectedTimelineKeyframeId: string | null;
+  timelinePointerDrag: TimelinePointerDrag | null;
   activeEditorTool: EditorTool;
   selectedSceneId: string | null;
   loadedSceneId: string | null;
   selectedSceneNodeId: string | null;
   pendingPrefabClipboard: PendingPrefabClipboard | null;
+  pathEditSession: SourcePathEditSession | null;
+  pathEdit3DSession: SourcePathEdit3DSession | null;
+  pathEditDragState: PathEditDragState | null;
+  pathEditHoveredControl: PathEditDragState | null;
+  inPlacePathEditSession: InPlacePathEditSession | null;
+  inPlacePathEditDragState: PathEditDragState | null;
+  inPlacePathEditHoveredControl: PathEditDragState | null;
+  inPlacePathEditCameraDragActive: boolean;
   lastImportError: string | null;
   nextSceneNodeNumber: number;
   nextPrefabNodeNumber: number;
@@ -86,9 +109,22 @@ export type TimelineDomainState = Pick<
   | "timelineCurrentTimeMs"
   | "isTimelinePlaying"
   | "selectedTimelineKeyframeId"
+  | "timelinePointerDrag"
 >;
 
 export type ToolDomainState = Pick<EditorAppState, "activeEditorTool" | "editorMode">;
+
+export type PathEditDomainState = Pick<
+  EditorAppState,
+  | "pathEditSession"
+  | "pathEdit3DSession"
+  | "pathEditDragState"
+  | "pathEditHoveredControl"
+  | "inPlacePathEditSession"
+  | "inPlacePathEditDragState"
+  | "inPlacePathEditHoveredControl"
+  | "inPlacePathEditCameraDragActive"
+>;
 
 export type EditorAppStateStore = {
   getMutableState: () => EditorAppState;
@@ -106,6 +142,8 @@ export type EditorAppStateStore = {
   patchTimelineState: (patch: Partial<TimelineDomainState>) => TimelineDomainState;
   getToolState: () => ToolDomainState;
   patchToolState: (patch: Partial<ToolDomainState>) => ToolDomainState;
+  getPathEditState: () => PathEditDomainState;
+  patchPathEditState: (patch: Partial<PathEditDomainState>) => PathEditDomainState;
 };
 
 export function createInitialEditorAppState(input: {
@@ -131,11 +169,20 @@ export function createInitialEditorAppState(input: {
     timelineCurrentTimeMs: 0,
     isTimelinePlaying: false,
     selectedTimelineKeyframeId: null,
+    timelinePointerDrag: null,
     activeEditorTool: "translate",
     selectedSceneId: null,
     loadedSceneId: null,
     selectedSceneNodeId: null,
     pendingPrefabClipboard: null,
+    pathEditSession: null,
+    pathEdit3DSession: null,
+    pathEditDragState: null,
+    pathEditHoveredControl: null,
+    inPlacePathEditSession: null,
+    inPlacePathEditDragState: null,
+    inPlacePathEditHoveredControl: null,
+    inPlacePathEditCameraDragActive: false,
     lastImportError: null,
     nextSceneNodeNumber: 1,
     nextPrefabNodeNumber: 1,
@@ -194,6 +241,12 @@ export function createEditorAppStateStore(
 
       return cloneToolDomainState(state);
     },
+    getPathEditState: () => clonePathEditDomainState(state),
+    patchPathEditState: (patch) => {
+      applyPatch(patch);
+
+      return clonePathEditDomainState(state);
+    },
   };
 }
 
@@ -207,6 +260,20 @@ export function cloneEditorAppState(state: EditorAppState): EditorAppState {
     prefabDocuments: new Map(state.prefabDocuments),
     scenes: [...state.scenes],
     sceneNodes: [...state.sceneNodes],
+    timelinePointerDrag: cloneTimelinePointerDrag(state.timelinePointerDrag),
+    pathEditSession: cloneSourcePathEditSession(state.pathEditSession),
+    pathEdit3DSession: cloneSourcePathEdit3DSession(state.pathEdit3DSession),
+    pathEditDragState: clonePathEditDragState(state.pathEditDragState),
+    pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
+    inPlacePathEditSession: cloneInPlacePathEditSession(
+      state.inPlacePathEditSession,
+    ),
+    inPlacePathEditDragState: clonePathEditDragState(
+      state.inPlacePathEditDragState,
+    ),
+    inPlacePathEditHoveredControl: clonePathEditDragState(
+      state.inPlacePathEditHoveredControl,
+    ),
   };
 }
 
@@ -258,6 +325,7 @@ function cloneTimelineDomainState(state: EditorAppState): TimelineDomainState {
     timelineCurrentTimeMs: state.timelineCurrentTimeMs,
     isTimelinePlaying: state.isTimelinePlaying,
     selectedTimelineKeyframeId: state.selectedTimelineKeyframeId,
+    timelinePointerDrag: cloneTimelinePointerDrag(state.timelinePointerDrag),
   };
 }
 
@@ -266,4 +334,72 @@ function cloneToolDomainState(state: EditorAppState): ToolDomainState {
     activeEditorTool: state.activeEditorTool,
     editorMode: state.editorMode,
   };
+}
+
+function clonePathEditDomainState(state: EditorAppState): PathEditDomainState {
+  return {
+    pathEditSession: cloneSourcePathEditSession(state.pathEditSession),
+    pathEdit3DSession: cloneSourcePathEdit3DSession(state.pathEdit3DSession),
+    pathEditDragState: clonePathEditDragState(state.pathEditDragState),
+    pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
+    inPlacePathEditSession: cloneInPlacePathEditSession(
+      state.inPlacePathEditSession,
+    ),
+    inPlacePathEditDragState: clonePathEditDragState(
+      state.inPlacePathEditDragState,
+    ),
+    inPlacePathEditHoveredControl: clonePathEditDragState(
+      state.inPlacePathEditHoveredControl,
+    ),
+    inPlacePathEditCameraDragActive: state.inPlacePathEditCameraDragActive,
+  };
+}
+
+function cloneSourcePathEditSession(
+  session: SourcePathEditSession | null,
+): SourcePathEditSession | null {
+  return session
+    ? {
+        assetId: session.assetId,
+        draft: cloneStructuredBezierPath(session.draft),
+        selected: session.selected ? { ...session.selected } : null,
+      }
+    : null;
+}
+
+function cloneInPlacePathEditSession(
+  session: InPlacePathEditSession | null,
+): InPlacePathEditSession | null {
+  return session
+    ? {
+        nodeId: session.nodeId,
+        assetId: session.assetId,
+        draft: cloneStructuredBezierPath(session.draft),
+        selected: session.selected ? { ...session.selected } : null,
+      }
+    : null;
+}
+
+function cloneSourcePathEdit3DSession(
+  session: SourcePathEdit3DSession | null,
+): SourcePathEdit3DSession | null {
+  return session
+    ? {
+        assetId: session.assetId,
+        draft: cloneStructuredBezierPath3D(session.draft),
+        selected: session.selected ? { ...session.selected } : null,
+      }
+    : null;
+}
+
+function clonePathEditDragState(
+  dragState: PathEditDragState | null,
+): PathEditDragState | null {
+  return dragState ? { ...dragState } : null;
+}
+
+function cloneTimelinePointerDrag(
+  dragState: TimelinePointerDrag | null,
+): TimelinePointerDrag | null {
+  return dragState ? { ...dragState } : null;
 }

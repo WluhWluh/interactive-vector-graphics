@@ -65,7 +65,6 @@ import {
   setPathEditComponentAxisValue,
   type PathEditComponent,
   type PathEditControl,
-  type PathEditDragState,
   type PathEditScreenControl,
   type PathEditSession,
   type PathEditViewportAdapter,
@@ -276,7 +275,6 @@ import {
   startSourcePathEditState,
   toPathEditSelection,
   type InPlacePathEditSession,
-  type SourcePathEditSession,
 } from "./controllers/pathEditController";
 import {
   advanceTimelinePlayback,
@@ -301,10 +299,6 @@ import {
   upsertPrefabVectorKeyframe,
 } from "./controllers/timelineController";
 
-type TimelinePointerDrag = {
-  keyframeId: string;
-  property: PrefabTrackProperty;
-};
 type SceneCreateSource = "empty" | "current";
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 const DEFAULT_PREFAB_SNAP_FPS = 10;
@@ -329,15 +323,6 @@ const appStateStore = createEditorAppStateStore(initialAppState);
 const editorState = appStateStore.getMutableState();
 
 let editorMode: EditorMode = initialAppState.editorMode;
-let timelinePointerDrag: TimelinePointerDrag | null = null;
-let pathEditSession: SourcePathEditSession | null = null;
-let pathEdit3DSession: SourcePathEdit3DSession | null = null;
-let pathEditDragState: PathEditDragState | null = null;
-let pathEditHoveredControl: PathEditDragState | null = null;
-let inPlacePathEditSession: InPlacePathEditSession | null = null;
-let inPlacePathEditDragState: PathEditDragState | null = null;
-let inPlacePathEditHoveredControl: PathEditDragState | null = null;
-let inPlacePathEditCameraDragActive = false;
 let lastFrameTime = performance.now();
 let pendingCameraInspectorRender = false;
 
@@ -608,10 +593,10 @@ function bindEditorEvents(): void {
     (event) => {
       const capturedPathControl = selectInPlacePathEditControl(event);
 
-      inPlacePathEditCameraDragActive =
+      editorState.inPlacePathEditCameraDragActive =
         Boolean(getValidInPlacePathEditSession()) && !capturedPathControl;
 
-      if (inPlacePathEditCameraDragActive) {
+      if (editorState.inPlacePathEditCameraDragActive) {
         clearInPlacePathEditHover();
       }
     },
@@ -646,19 +631,19 @@ function bindEditorEvents(): void {
     dragInPlacePathEditControl(event);
   });
   window.addEventListener("pointerup", () => {
-    timelinePointerDrag = null;
-    pathEditDragState = null;
-    pathEditHoveredControl = null;
-    inPlacePathEditDragState = null;
-    inPlacePathEditHoveredControl = null;
-    inPlacePathEditCameraDragActive = false;
+    editorState.timelinePointerDrag = null;
+    editorState.pathEditDragState = null;
+    editorState.pathEditHoveredControl = null;
+    editorState.inPlacePathEditDragState = null;
+    editorState.inPlacePathEditHoveredControl = null;
+    editorState.inPlacePathEditCameraDragActive = false;
   });
   window.addEventListener("mouseup", () => {
-    pathEditDragState = null;
-    pathEditHoveredControl = null;
-    inPlacePathEditDragState = null;
-    inPlacePathEditHoveredControl = null;
-    inPlacePathEditCameraDragActive = false;
+    editorState.pathEditDragState = null;
+    editorState.pathEditHoveredControl = null;
+    editorState.inPlacePathEditDragState = null;
+    editorState.inPlacePathEditHoveredControl = null;
+    editorState.inPlacePathEditCameraDragActive = false;
   });
   elements.createSceneButton.addEventListener("click", () => {
     void createSceneFromInput("empty");
@@ -826,20 +811,20 @@ async function refreshAssets(): Promise<void> {
   const nextAsset = reconcileAssetSelection(
     editorState.selectedAssetId,
     editorState.assets,
-    pathEditSession?.assetId ?? null,
-    pathEdit3DSession?.assetId ?? null,
+    editorState.pathEditSession?.assetId ?? null,
+    editorState.pathEdit3DSession?.assetId ?? null,
   );
 
   editorState.selectedAssetId = nextAsset.nextSelectedAssetId;
 
   if (nextAsset.missingPathEditAssetId) {
-    pathEditSession = null;
-    pathEditDragState = null;
+    editorState.pathEditSession = null;
+    editorState.pathEditDragState = null;
     setImportError(new Error("Path edit asset no longer exists."));
     return;
   }
   if (nextAsset.missingPathEdit3DAssetId) {
-    pathEdit3DSession = null;
+    editorState.pathEdit3DSession = null;
     threeViewport.clearCurve3DControls();
     setImportError(new Error("3D curve edit asset no longer exists."));
     return;
@@ -960,15 +945,15 @@ async function deleteSelectedProject(): Promise<void> {
 }
 
 async function savePathEditSession(): Promise<void> {
-  if (!editorState.selectedProjectId || (!pathEditSession && !pathEdit3DSession)) {
+  if (!editorState.selectedProjectId || (!editorState.pathEditSession && !editorState.pathEdit3DSession)) {
     return;
   }
 
   try {
     const updatedAsset = await runSaveSourcePathEditCommand({
       projectId: editorState.selectedProjectId,
-      pathEditSession,
-      pathEdit3DSession,
+      pathEditSession: editorState.pathEditSession,
+      pathEdit3DSession: editorState.pathEdit3DSession,
       updateAssetPath,
       updateAssetCurve3D,
     });
@@ -983,9 +968,9 @@ async function savePathEditSession(): Promise<void> {
     editorState.assets = nextAssetState.assets;
     editorState.selectedAssetId = nextAssetState.selectedAssetId;
     const nextPathEditState = clearSourcePathEditState();
-    pathEditSession = nextPathEditState.pathEditSession;
-    pathEdit3DSession = nextPathEditState.pathEdit3DSession;
-    pathEditDragState = nextPathEditState.pathEditDragState;
+    editorState.pathEditSession = nextPathEditState.pathEditSession;
+    editorState.pathEdit3DSession = nextPathEditState.pathEdit3DSession;
+    editorState.pathEditDragState = nextPathEditState.pathEditDragState;
     threeViewport.clearCurve3DControls();
     editorState.lastImportError = null;
     hideError();
@@ -1002,9 +987,9 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
   editorMode = "path";
   threeViewport.clearCurve3DControls();
   const nextPathEditState = startSourcePathEditState(asset);
-  pathEditSession = nextPathEditState.pathEditSession;
-  pathEdit3DSession = nextPathEditState.pathEdit3DSession;
-  pathEditDragState = nextPathEditState.pathEditDragState;
+  editorState.pathEditSession = nextPathEditState.pathEditSession;
+  editorState.pathEdit3DSession = nextPathEditState.pathEdit3DSession;
+  editorState.pathEditDragState = nextPathEditState.pathEditDragState;
 
   if (nextPathEditState.mode === "3d") {
     threeViewport.setTransformMode("translate");
@@ -1020,9 +1005,9 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
 
 function cancelPathEditSession(): void {
   const nextPathEditState = clearSourcePathEditState();
-  pathEditSession = nextPathEditState.pathEditSession;
-  pathEdit3DSession = nextPathEditState.pathEdit3DSession;
-  pathEditDragState = nextPathEditState.pathEditDragState;
+  editorState.pathEditSession = nextPathEditState.pathEditSession;
+  editorState.pathEdit3DSession = nextPathEditState.pathEdit3DSession;
+  editorState.pathEditDragState = nextPathEditState.pathEditDragState;
   threeViewport.clearCurve3DControls();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1108,15 +1093,15 @@ async function deleteSelectedAsset(): Promise<void> {
       assetId: editorState.selectedAssetId,
       deleteAsset,
     });
-    if (pathEditSession?.assetId === deletedAssetId) {
-      pathEditSession = null;
-      pathEditDragState = null;
+    if (editorState.pathEditSession?.assetId === deletedAssetId) {
+      editorState.pathEditSession = null;
+      editorState.pathEditDragState = null;
     }
-    if (pathEdit3DSession?.assetId === deletedAssetId) {
-      pathEdit3DSession = null;
+    if (editorState.pathEdit3DSession?.assetId === deletedAssetId) {
+      editorState.pathEdit3DSession = null;
       threeViewport.clearCurve3DControls();
     }
-    if (inPlacePathEditSession?.assetId === deletedAssetId) {
+    if (editorState.inPlacePathEditSession?.assetId === deletedAssetId) {
       exitPathTool();
     }
     pruneTimelineStagingPoses({ assetIds: new Set([deletedAssetId]) });
@@ -1382,8 +1367,8 @@ function deleteSelectedPrefabNode(): void {
   const { deletedNodeIds } = nextState;
 
   if (
-    inPlacePathEditSession &&
-    deletedNodeIds.has(inPlacePathEditSession.nodeId)
+    editorState.inPlacePathEditSession &&
+    deletedNodeIds.has(editorState.inPlacePathEditSession.nodeId)
   ) {
     exitPathTool();
   }
@@ -1680,7 +1665,7 @@ function startInPlacePathEditSession(): boolean {
     selectedNode,
     asset,
     stagingPose,
-    previousSession: inPlacePathEditSession,
+    previousSession: editorState.inPlacePathEditSession,
   });
 
   if (!sessionResult.ok) {
@@ -1694,9 +1679,9 @@ function startInPlacePathEditSession(): boolean {
   }
 
   pauseTimeline();
-  inPlacePathEditSession = sessionResult.session;
+  editorState.inPlacePathEditSession = sessionResult.session;
   stagingPose.pathDraft = cloneStructuredBezierPath(sessionResult.pathDraft);
-  inPlacePathEditDragState = null;
+  editorState.inPlacePathEditDragState = null;
   editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
@@ -1706,10 +1691,10 @@ function startInPlacePathEditSession(): boolean {
 }
 
 function discardInPlacePathEditSession(): void {
-  inPlacePathEditSession = null;
-  inPlacePathEditDragState = null;
-  inPlacePathEditHoveredControl = null;
-  inPlacePathEditCameraDragActive = false;
+  editorState.inPlacePathEditSession = null;
+  editorState.inPlacePathEditDragState = null;
+  editorState.inPlacePathEditHoveredControl = null;
+  editorState.inPlacePathEditCameraDragActive = false;
 }
 
 function fallbackToTransformTool(): void {
@@ -1746,10 +1731,10 @@ function setEditorMode(mode: EditorMode): void {
     exitPathTool();
   }
   if (mode !== "path") {
-    pathEditSession = null;
-    pathEdit3DSession = null;
-    pathEditDragState = null;
-    pathEditHoveredControl = null;
+    editorState.pathEditSession = null;
+    editorState.pathEdit3DSession = null;
+    editorState.pathEditDragState = null;
+    editorState.pathEditHoveredControl = null;
     threeViewport.clearCurve3DControls();
   }
   editorMode = mode;
@@ -1776,9 +1761,9 @@ function clearProjectWorkspace(): void {
   editorState.selectedSceneId = emptyWorkspace.selectedSceneId;
   editorState.loadedSceneId = emptyWorkspace.loadedSceneId;
   editorState.selectedSceneNodeId = emptyWorkspace.selectedSceneNodeId;
-  pathEditSession = null;
-  pathEdit3DSession = null;
-  pathEditDragState = null;
+  editorState.pathEditSession = null;
+  editorState.pathEdit3DSession = null;
+  editorState.pathEditDragState = null;
   threeViewport.clearCurve3DControls();
   editorState.nextPrefabNodeNumber = 1;
   editorState.nextSceneNodeNumber = 1;
@@ -1789,7 +1774,7 @@ function clearSceneLayout(): void {
   editorState.sceneNodes = [];
   editorState.selectedSceneNodeId = null;
   editorState.loadedSceneId = null;
-  pathEditDragState = null;
+  editorState.pathEditDragState = null;
   if (editorMode !== "path") {
     threeViewport.clearCurve3DControls();
   }
@@ -2002,7 +1987,7 @@ function applyTimelineStatePatch(patch: {
     editorState.selectedTimelineKeyframeId = patch.selectedKeyframeId;
   }
   if (patch.timelinePointerDragCleared) {
-    timelinePointerDrag = null;
+    editorState.timelinePointerDrag = null;
   }
 }
 
@@ -2084,7 +2069,7 @@ function deleteSelectedTimelineClip(): void {
 
   applyTimelineStatePatch(result);
   pruneTimelineStagingPoses({ clipIds: new Set([result.deletedClipId]) });
-  if (inPlacePathEditSession) {
+  if (editorState.inPlacePathEditSession) {
     exitPathTool();
   }
   editorState.loadedPrefabId = null;
@@ -2352,7 +2337,7 @@ function updateSelectedTimelineKeyframe(
 }
 
 function dragSelectedTimelineKeyframe(event: PointerEvent): void {
-  if (!timelinePointerDrag) {
+  if (!editorState.timelinePointerDrag) {
     return;
   }
 
@@ -2360,12 +2345,12 @@ function dragSelectedTimelineKeyframe(event: PointerEvent): void {
   const selected = activeClip ? getSelectedTimelineKeyframe(activeClip) : null;
 
   if (!activeClip || !selected) {
-    timelinePointerDrag = null;
+    editorState.timelinePointerDrag = null;
     return;
   }
 
   const trackBar = document.querySelector(
-    `.timeline-track-bar[data-timeline-property="${timelinePointerDrag.property}"]`,
+    `.timeline-track-bar[data-timeline-property="${editorState.timelinePointerDrag.property}"]`,
   );
 
   if (!(trackBar instanceof HTMLElement)) {
@@ -2400,8 +2385,8 @@ function addKeyframeForSelectedPrefabNode(): void {
 
   if (property === "path") {
     const pathDraft =
-      inPlacePathEditSession?.nodeId === selectedNode.id
-        ? inPlacePathEditSession.draft
+      editorState.inPlacePathEditSession?.nodeId === selectedNode.id
+        ? editorState.inPlacePathEditSession.draft
         : stagingPose.pathDraft;
 
     if (!pathDraft || selectedNode.kind !== "primitive") {
@@ -2490,11 +2475,11 @@ function snapSelectedPrefabBaseToTimeline(): void {
 
     stagingPose.pathDraft = cloneStructuredBezierPath(evaluatedPathForSnap);
 
-    if (inPlacePathEditSession?.nodeId === selectedNode.id) {
-      const previousSelection = inPlacePathEditSession.selected;
-      inPlacePathEditSession.draft = cloneStructuredBezierPath(evaluatedPathForSnap);
-      inPlacePathEditSession.selected = getRestoredPathEditSelection(
-        inPlacePathEditSession.draft,
+    if (editorState.inPlacePathEditSession?.nodeId === selectedNode.id) {
+      const previousSelection = editorState.inPlacePathEditSession.selected;
+      editorState.inPlacePathEditSession.draft = cloneStructuredBezierPath(evaluatedPathForSnap);
+      editorState.inPlacePathEditSession.selected = getRestoredPathEditSelection(
+        editorState.inPlacePathEditSession.draft,
         previousSelection,
       );
     }
@@ -2624,8 +2609,8 @@ function renderEditorShell(): void {
   const validInPlacePathEditSession =
     editorMode === "asset" &&
     editorState.activeEditorTool === "path" &&
-    inPlacePathEditSession
-      ? inPlacePathEditSession
+    editorState.inPlacePathEditSession
+      ? editorState.inPlacePathEditSession
       : null;
 
   renderEditorShellFrame({
@@ -2639,8 +2624,8 @@ function renderEditorShell(): void {
     selectedPrefabNodeId: editorState.selectedPrefabNodeId,
     prefabRootNodeId: PREFAB_ROOT_NODE_ID,
     pendingPrefabClipboard: Boolean(editorState.pendingPrefabClipboard),
-    hasPathEditSession: Boolean(pathEditSession),
-    hasPathEdit3DSession: Boolean(pathEdit3DSession),
+    hasPathEditSession: Boolean(editorState.pathEditSession),
+    hasPathEdit3DSession: Boolean(editorState.pathEdit3DSession),
     hasValidInPlacePathEditSession: Boolean(validInPlacePathEditSession),
     activeTimelineClip,
     timelineCurrentTimeMs: editorState.timelineCurrentTimeMs,
@@ -2727,12 +2712,12 @@ function renderPathAssetList(): void {
       button.textContent = `${getAssetKindListLabel(asset)}: ${asset.name}`;
       button.addEventListener("click", () => {
         editorState.selectedAssetId = asset.id;
-        if (pathEditSession && pathEditSession.assetId !== asset.id) {
-          pathEditSession = null;
-          pathEditDragState = null;
+        if (editorState.pathEditSession && editorState.pathEditSession.assetId !== asset.id) {
+          editorState.pathEditSession = null;
+          editorState.pathEditDragState = null;
         }
-        if (pathEdit3DSession && pathEdit3DSession.assetId !== asset.id) {
-          pathEdit3DSession = null;
+        if (editorState.pathEdit3DSession && editorState.pathEdit3DSession.assetId !== asset.id) {
+          editorState.pathEdit3DSession = null;
           threeViewport.clearCurve3DControls();
         }
         renderEditorShell();
@@ -2909,7 +2894,7 @@ function renderPrefabTimeline(): void {
       }
 
       editorState.selectedTimelineKeyframeId = keyframeId;
-      timelinePointerDrag = {
+      editorState.timelinePointerDrag = {
         keyframeId,
         property,
       };
@@ -2987,16 +2972,16 @@ function renderSourcePathEditPanel(): void {
     return;
   }
 
-  if (pathEdit3DSession && pathEdit3DSession.assetId === selectedAsset.id) {
-    const selectedSegment = getSelectedPathEdit3DSegment(pathEdit3DSession);
-    status.textContent = pathEdit3DSession.selected
-      ? `${pathEdit3DSession.selected.segmentId} / ${pathEdit3DSession.selected.component} / 3D`
+  if (editorState.pathEdit3DSession && editorState.pathEdit3DSession.assetId === selectedAsset.id) {
+    const selectedSegment = getSelectedPathEdit3DSegment(editorState.pathEdit3DSession);
+    status.textContent = editorState.pathEdit3DSession.selected
+      ? `${editorState.pathEdit3DSession.selected.segmentId} / ${editorState.pathEdit3DSession.selected.component} / 3D`
       : "Select a 3D anchor or handle";
     elements.pathEditFields.append(status);
 
-    if (selectedSegment && pathEdit3DSession.selected) {
+    if (selectedSegment && editorState.pathEdit3DSession.selected) {
       elements.pathEditFields.append(
-        createPathEdit3DPointInputRowForUi(selectedSegment, pathEdit3DSession.selected.component, {
+        createPathEdit3DPointInputRowForUi(selectedSegment, editorState.pathEdit3DSession.selected.component, {
           onApply: applyPathEdit3DPointInput,
         }),
       );
@@ -3004,7 +2989,7 @@ function renderSourcePathEditPanel(): void {
     return;
   }
 
-  if (!pathEditSession || pathEditSession.assetId !== selectedAsset.id) {
+  if (!editorState.pathEditSession || editorState.pathEditSession.assetId !== selectedAsset.id) {
     status.textContent =
       selectedAsset.assetKind === "bezierCurve3d"
         ? "Click Edit Path to edit this 3D source curve."
@@ -3013,19 +2998,19 @@ function renderSourcePathEditPanel(): void {
     return;
   }
 
-  const selectedSegment = getSelectedPathEditSegment(pathEditSession);
-  status.textContent = pathEditSession.selected
-    ? `${pathEditSession.selected.segmentId} / ${pathEditSession.selected.component}`
+  const selectedSegment = getSelectedPathEditSegment(editorState.pathEditSession);
+  status.textContent = editorState.pathEditSession.selected
+    ? `${editorState.pathEditSession.selected.segmentId} / ${editorState.pathEditSession.selected.component}`
     : "Select an anchor or handle";
   elements.pathEditFields.append(status);
 
-  if (selectedSegment && pathEditSession.selected) {
+  if (selectedSegment && editorState.pathEditSession.selected) {
     elements.pathEditFields.append(
-      createPathEditPointInputRowForUi(selectedSegment, pathEditSession.selected.component, {
+      createPathEditPointInputRowForUi(selectedSegment, editorState.pathEditSession.selected.component, {
         onApply: (input, segmentId, component, axisIndex) => {
           applyPathEditPointInput(
             input,
-            pathEditSession,
+            editorState.pathEditSession,
             segmentId,
             component,
             axisIndex,
@@ -3167,7 +3152,7 @@ function renderInPlacePathEditInspector(node: PrefabNode): void {
   }
 
   const session =
-    inPlacePathEditSession?.nodeId === node.id ? inPlacePathEditSession : null;
+    editorState.inPlacePathEditSession?.nodeId === node.id ? editorState.inPlacePathEditSession : null;
 
   if (!session) {
     appendInspectorRow("In-Place Path", "Use the Path tool to preview-edit this node");
@@ -3239,10 +3224,10 @@ function applyPathEdit3DPointInput(
   component: PathEditComponent,
   axisIndex: number,
 ): void {
-  const segment = getPathEdit3DSegment(pathEdit3DSession, segmentId);
+  const segment = getPathEdit3DSegment(editorState.pathEdit3DSession, segmentId);
   const parsedValue = Number(input.value.trim());
 
-  if (!pathEdit3DSession || !segment || !Number.isFinite(parsedValue)) {
+  if (!editorState.pathEdit3DSession || !segment || !Number.isFinite(parsedValue)) {
     restorePathEdit3DPointInput(input, segment, component, axisIndex);
     return;
   }
@@ -3256,7 +3241,7 @@ function applyPathEdit3DPointInput(
     segment[component] = point;
   }
 
-  pathEdit3DSession.selected = { segmentId, component };
+  editorState.pathEdit3DSession.selected = { segmentId, component };
   syncSourcePathEdit3DControls();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
@@ -3435,9 +3420,9 @@ function renderPreviewFrame(): void {
 function renderPathEditFrame(): void {
   const vectorContext = stage.getLayer("vector-canvas").context;
   const paperContext = stage.getLayer("paper-canvas").context;
-  const asset = pathEditSession ? getAssetById(pathEditSession.assetId) : null;
-  const asset3d = pathEdit3DSession
-    ? getAssetById(pathEdit3DSession.assetId)
+  const asset = editorState.pathEditSession ? getAssetById(editorState.pathEditSession.assetId) : null;
+  const asset3d = editorState.pathEdit3DSession
+    ? getAssetById(editorState.pathEdit3DSession.assetId)
     : null;
 
   if (!editorState.selectedProjectId) {
@@ -3445,7 +3430,7 @@ function renderPathEditFrame(): void {
     return;
   }
 
-  if (pathEdit3DSession) {
+  if (editorState.pathEdit3DSession) {
     threeViewport.render(stage.size);
 
     if (!asset3d || asset3d.assetKind !== "bezierCurve3d") {
@@ -3454,14 +3439,14 @@ function renderPathEditFrame(): void {
       return;
     }
 
-    drawSourcePathEdit3DPreview(vectorContext, asset3d, pathEdit3DSession.draft);
+    drawSourcePathEdit3DPreview(vectorContext, asset3d, editorState.pathEdit3DSession.draft);
     syncSourcePathEdit3DControls();
     return;
   }
 
   threeViewport.clearCurve3DControls();
 
-  if (!pathEditSession) {
+  if (!editorState.pathEditSession) {
     const selectedAsset = getSelectedAsset();
 
     if (selectedAsset) {
@@ -3488,12 +3473,12 @@ function renderPathEditFrame(): void {
     return;
   }
 
-  const pathD = buildPathEditPathD(pathEditSession.draft);
+  const pathD = buildPathEditPathD(editorState.pathEditSession.draft);
   const previewAsset = {
     ...asset,
     pathD,
     path: new Path2D(pathD),
-    bezierPath: pathEditSession.draft,
+    bezierPath: editorState.pathEditSession.draft,
   };
 
   drawPathEditPreview(
@@ -3503,9 +3488,9 @@ function renderPathEditFrame(): void {
   );
   drawPathEditControls(
     paperContext,
-    pathEditSession,
+    editorState.pathEditSession,
     getSourcePathEditAdapter(previewAsset),
-    pathEditHoveredControl,
+    editorState.pathEditHoveredControl,
   );
 }
 
@@ -3525,7 +3510,7 @@ function renderInPlacePathEditOverlay(): void {
       paperContext,
       session,
       adapter,
-      inPlacePathEditHoveredControl,
+      editorState.inPlacePathEditHoveredControl,
     );
   }
 }
@@ -3628,11 +3613,11 @@ function transformPoint3DFromWorldUnit(
 }
 
 function selectPathEditControl(event: PointerEvent | MouseEvent): void {
-  if (editorMode !== "path" || !pathEditSession) {
+  if (editorMode !== "path" || !editorState.pathEditSession) {
     return;
   }
 
-  const asset = getAssetById(pathEditSession.assetId);
+  const asset = getAssetById(editorState.pathEditSession.assetId);
   const adapter = asset ? getSourcePathEditAdapter(asset) : null;
 
   if (!asset || !adapter) {
@@ -3641,7 +3626,7 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
 
   const control = findPathEditControlAtPoint({
     point: getCanvasPointerPoint(event),
-    session: pathEditSession,
+    session: editorState.pathEditSession,
     adapter,
     hitRadius: PATH_EDIT_HIT_RADIUS,
   });
@@ -3651,9 +3636,9 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
     return;
   }
 
-  pathEditHoveredControl = toPathEditSelection(control);
-  pathEditDragState = selectPathEditSessionControl({
-    session: pathEditSession,
+  editorState.pathEditHoveredControl = toPathEditSelection(control);
+  editorState.pathEditDragState = selectPathEditSessionControl({
+    session: editorState.pathEditSession,
     control,
   });
   event.preventDefault();
@@ -3663,20 +3648,20 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
 }
 
 function updatePathEditHover(event: PointerEvent | MouseEvent): void {
-  if (editorMode !== "path" || !pathEditSession || pathEditDragState) {
-    if (pathEditHoveredControl) {
+  if (editorMode !== "path" || !editorState.pathEditSession || editorState.pathEditDragState) {
+    if (editorState.pathEditHoveredControl) {
       clearPathEditHover();
     }
     return;
   }
 
-  const asset = getAssetById(pathEditSession.assetId);
+  const asset = getAssetById(editorState.pathEditSession.assetId);
   const adapter = asset ? getSourcePathEditAdapter(asset) : null;
   const hoveredControl =
     asset && adapter
       ? findPathEditControlAtPoint({
           point: getCanvasPointerPoint(event),
-          session: pathEditSession,
+          session: editorState.pathEditSession,
           adapter,
           hitRadius: PATH_EDIT_HIT_RADIUS,
         })
@@ -3688,11 +3673,11 @@ function updatePathEditHover(event: PointerEvent | MouseEvent): void {
 function updatePathEditHoveredControl(control: PathEditControl | null): void {
   const nextHover = toPathEditSelection(control);
 
-  if (pathEditSelectionsEqual(pathEditHoveredControl, nextHover)) {
+  if (pathEditSelectionsEqual(editorState.pathEditHoveredControl, nextHover)) {
     return;
   }
 
-  pathEditHoveredControl = nextHover;
+  editorState.pathEditHoveredControl = nextHover;
   renderCache.markPaperDirty();
   exposeEditorDebugHooks();
 }
@@ -3702,15 +3687,15 @@ function clearPathEditHover(): void {
 }
 
 function dragPathEditControl(event: PointerEvent | MouseEvent): void {
-  if (editorMode !== "path" || !pathEditSession || !pathEditDragState) {
+  if (editorMode !== "path" || !editorState.pathEditSession || !editorState.pathEditDragState) {
     return;
   }
 
-  const asset = getAssetById(pathEditSession.assetId);
+  const asset = getAssetById(editorState.pathEditSession.assetId);
   const adapter = asset ? getSourcePathEditAdapter(asset) : null;
 
   if (!asset || !adapter) {
-    pathEditDragState = null;
+    editorState.pathEditDragState = null;
     return;
   }
 
@@ -3721,8 +3706,8 @@ function dragPathEditControl(event: PointerEvent | MouseEvent): void {
   }
 
   dragPathEditSessionAtPoint({
-    session: pathEditSession,
-    dragState: pathEditDragState,
+    session: editorState.pathEditSession,
+    dragState: editorState.pathEditDragState,
     point: pathPoint,
     altKey: event.altKey,
     shiftKey: event.shiftKey,
@@ -3785,36 +3770,36 @@ function getPathEditScreenControls(): Array<{
   x: number;
   y: number;
 }> {
-  const asset = pathEditSession ? getAssetById(pathEditSession.assetId) : null;
+  const asset = editorState.pathEditSession ? getAssetById(editorState.pathEditSession.assetId) : null;
 
   return getSourcePathEditScreenControls({
-    session: pathEditSession,
+    session: editorState.pathEditSession,
     adapter: asset ? getSourcePathEditAdapter(asset) : null,
   });
 }
 
 function syncSourcePathEdit3DControls(): void {
-  if (!pathEdit3DSession) {
+  if (!editorState.pathEdit3DSession) {
     threeViewport.clearCurve3DControls();
     return;
   }
 
-  const controls = getSourcePathEdit3DControls(pathEdit3DSession);
-  const lines = getSourcePathEdit3DHandleLines(pathEdit3DSession);
+  const controls = getSourcePathEdit3DControls(editorState.pathEdit3DSession);
+  const lines = getSourcePathEdit3DHandleLines(editorState.pathEdit3DSession);
 
   threeViewport.setCurve3DControls(controls, lines);
 
-  const selectedId = pathEdit3DSession.selected
+  const selectedId = editorState.pathEdit3DSession.selected
     ? getSourcePathEdit3DControlId(
-        pathEdit3DSession.selected.segmentId,
-        pathEdit3DSession.selected.component,
+        editorState.pathEdit3DSession.selected.segmentId,
+        editorState.pathEdit3DSession.selected.component,
       )
     : null;
   threeViewport.setSelectedCurve3DControl(selectedId);
 }
 
 function getSourcePathEdit3DControls(
-  session: SourcePathEdit3DSession | null = pathEdit3DSession,
+  session: SourcePathEdit3DSession | null = editorState.pathEdit3DSession,
 ): Curve3DControlDescriptor[] {
   return getSourcePathEdit3DControlsForState({
     session,
@@ -3824,7 +3809,7 @@ function getSourcePathEdit3DControls(
 }
 
 function getSourcePathEdit3DProjectedCommands(): ProjectedCurveCommand[] {
-  if (!pathEdit3DSession) {
+  if (!editorState.pathEdit3DSession) {
     const selectedAsset = getSelectedAsset();
 
     return selectedAsset?.assetKind === "bezierCurve3d"
@@ -3836,9 +3821,9 @@ function getSourcePathEdit3DProjectedCommands(): ProjectedCurveCommand[] {
       : [];
   }
 
-  const asset = getAssetById(pathEdit3DSession.assetId);
+  const asset = getAssetById(editorState.pathEdit3DSession.assetId);
 
-  return projectBezierPath3DToCommands(pathEdit3DSession.draft, {
+  return projectBezierPath3DToCommands(editorState.pathEdit3DSession.draft, {
     camera: threeViewport.activeCamera,
     viewport: stage.size,
     worldMatrix: asset ? getAsset3DLocalToWorldUnitMatrix(asset) : undefined,
@@ -3846,7 +3831,7 @@ function getSourcePathEdit3DProjectedCommands(): ProjectedCurveCommand[] {
 }
 
 function getSourcePathEdit3DHandleLines(
-  session: SourcePathEdit3DSession | null = pathEdit3DSession,
+  session: SourcePathEdit3DSession | null = editorState.pathEdit3DSession,
 ): ReturnType<typeof getSourcePathEdit3DHandleLinesForState> {
   return getSourcePathEdit3DHandleLinesForState({
     session,
@@ -3856,12 +3841,12 @@ function getSourcePathEdit3DHandleLines(
 }
 
 function selectSourcePathEdit3DControlById(controlId: string | null): void {
-  if (editorMode !== "path" || !pathEdit3DSession) {
+  if (editorMode !== "path" || !editorState.pathEdit3DSession) {
     return;
   }
 
   const selection = controlId ? parseSourcePathEdit3DControlId(controlId) : null;
-  pathEdit3DSession.selected = selection;
+  editorState.pathEdit3DSession.selected = selection;
   syncSourcePathEdit3DControls();
   renderCache.markVectorDirty();
   renderCache.markThreeDirty();
@@ -3873,7 +3858,7 @@ function updateSourcePathEdit3DControlPosition(
   controlId: string,
   position: Vector3Tuple,
 ): void {
-  if (editorMode !== "path" || !pathEdit3DSession) {
+  if (editorMode !== "path" || !editorState.pathEdit3DSession) {
     return;
   }
 
@@ -3883,8 +3868,8 @@ function updateSourcePathEdit3DControlPosition(
     return;
   }
 
-  const segment = getPathEdit3DSegment(pathEdit3DSession, selection.segmentId);
-  const asset = getAssetById(pathEdit3DSession.assetId);
+  const segment = getPathEdit3DSegment(editorState.pathEdit3DSession, selection.segmentId);
+  const asset = getAssetById(editorState.pathEdit3DSession.assetId);
 
   if (!segment || !asset) {
     return;
@@ -3901,7 +3886,7 @@ function updateSourcePathEdit3DControlPosition(
     );
   }
 
-  pathEdit3DSession.selected = selection;
+  editorState.pathEdit3DSession.selected = selection;
   syncSourcePathEdit3DControls();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
@@ -3927,8 +3912,8 @@ function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean
     return false;
   }
 
-  inPlacePathEditHoveredControl = toPathEditSelection(control);
-  inPlacePathEditDragState = selectPathEditSessionControl({
+  editorState.inPlacePathEditHoveredControl = toPathEditSelection(control);
+  editorState.inPlacePathEditDragState = selectPathEditSessionControl({
     session,
     control,
   });
@@ -3946,10 +3931,10 @@ function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean
 function updateInPlacePathEditHover(event: PointerEvent | MouseEvent): void {
   if (
     !getValidInPlacePathEditSession() ||
-    inPlacePathEditDragState ||
-    inPlacePathEditCameraDragActive
+    editorState.inPlacePathEditDragState ||
+    editorState.inPlacePathEditCameraDragActive
   ) {
-    if (inPlacePathEditHoveredControl) {
+    if (editorState.inPlacePathEditHoveredControl) {
       clearInPlacePathEditHover();
     }
     return;
@@ -3963,11 +3948,11 @@ function updateInPlacePathEditHover(event: PointerEvent | MouseEvent): void {
 function updateInPlacePathEditHoveredControl(control: PathEditControl | null): void {
   const nextHover = toPathEditSelection(control);
 
-  if (pathEditSelectionsEqual(inPlacePathEditHoveredControl, nextHover)) {
+  if (pathEditSelectionsEqual(editorState.inPlacePathEditHoveredControl, nextHover)) {
     return;
   }
 
-  inPlacePathEditHoveredControl = nextHover;
+  editorState.inPlacePathEditHoveredControl = nextHover;
   renderCache.markPaperDirty();
   exposeEditorDebugHooks();
 }
@@ -3998,7 +3983,7 @@ function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
   const session = getValidInPlacePathEditSession();
   const adapter = getInPlacePathEditAdapter();
 
-  if (!session || !adapter || !inPlacePathEditDragState) {
+  if (!session || !adapter || !editorState.inPlacePathEditDragState) {
     return;
   }
 
@@ -4010,7 +3995,7 @@ function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
 
   dragPathEditSessionAtPoint({
     session,
-    dragState: inPlacePathEditDragState,
+    dragState: editorState.inPlacePathEditDragState,
     point: pathPoint,
     altKey: event.altKey,
     shiftKey: event.shiftKey,
@@ -4055,18 +4040,18 @@ function getInPlacePathEditScreenControls(): PathEditScreenControl[] {
 }
 
 function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
-  if (editorMode !== "asset" || editorState.activeEditorTool !== "path" || !inPlacePathEditSession) {
+  if (editorMode !== "asset" || editorState.activeEditorTool !== "path" || !editorState.inPlacePathEditSession) {
     return null;
   }
 
-  const node = getPrefabNode(inPlacePathEditSession.nodeId);
-  const asset = getAssetById(inPlacePathEditSession.assetId);
+  const node = getPrefabNode(editorState.inPlacePathEditSession.nodeId);
+  const asset = getAssetById(editorState.inPlacePathEditSession.assetId);
   const activeClip = getActiveTimelineClip();
-  const stagingPose = getTimelineStagingPose(inPlacePathEditSession.nodeId, activeClip);
+  const stagingPose = getTimelineStagingPose(editorState.inPlacePathEditSession.nodeId, activeClip);
 
   if (
     !isInPlacePathEditSessionValid({
-      session: inPlacePathEditSession,
+      session: editorState.inPlacePathEditSession,
       selectedNodeId: editorState.selectedPrefabNodeId,
       node,
       asset,
@@ -4084,10 +4069,10 @@ function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
   }
 
   if (stagingPose.pathDraft) {
-    inPlacePathEditSession.draft = stagingPose.pathDraft;
+    editorState.inPlacePathEditSession.draft = stagingPose.pathDraft;
   }
 
-  return inPlacePathEditSession;
+  return editorState.inPlacePathEditSession;
 }
 
 function getSelectedInPlacePathNodeAndAsset(): {
@@ -4281,7 +4266,7 @@ function resetPrefabTimelineState(): void {
   editorState.timelineCurrentTimeMs = 0;
   editorState.isTimelinePlaying = false;
   editorState.selectedTimelineKeyframeId = null;
-  timelinePointerDrag = null;
+  editorState.timelinePointerDrag = null;
   discardInPlacePathEditSession();
 }
 
@@ -4357,7 +4342,7 @@ function getSelectedTimelineStagingTransform(): TransformSnapshot | null {
 }
 
 function syncInPlacePathSessionToStagingPose(): void {
-  const session = inPlacePathEditSession;
+  const session = editorState.inPlacePathEditSession;
   const pose = session ? getTimelineStagingPose(session.nodeId) : null;
 
   if (!session || !pose) {
@@ -4513,18 +4498,18 @@ function exposeEditorDebugHooks(): void {
     },
     getPathEditState: () =>
       createSourcePathEditDebugState({
-        pathEditSession,
-        pathEdit3DSession,
-        hoveredControl: pathEditHoveredControl,
+        pathEditSession: editorState.pathEditSession,
+        pathEdit3DSession: editorState.pathEdit3DSession,
+        hoveredControl: editorState.pathEditHoveredControl,
         controls: getPathEditScreenControls(),
         controls3d: getSourcePathEdit3DControls(),
         projectedCommandCount: getSourcePathEdit3DProjectedCommands().length,
       }),
     getInPlacePathEditState: () =>
       createInPlacePathEditDebugState({
-        session: inPlacePathEditSession,
+        session: editorState.inPlacePathEditSession,
         active: Boolean(getValidInPlacePathEditSession()),
-        hoveredControl: inPlacePathEditHoveredControl,
+        hoveredControl: editorState.inPlacePathEditHoveredControl,
         controls: getInPlacePathEditScreenControls(),
       }),
     getExperimentScene: () => {
@@ -4569,6 +4554,8 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }
+
+
 
 
 
