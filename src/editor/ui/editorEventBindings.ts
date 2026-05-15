@@ -42,6 +42,7 @@ export type EditorEventBindingCallbacks = {
   onSavePath: () => void;
   onCancelPath: () => void;
   onCreate3DCurve: () => void;
+  onCreateViewMorphProfile: () => void;
   onImportFile: () => void;
   onAddNode: () => void;
   onAddPrefabInstance: () => void;
@@ -182,6 +183,9 @@ export function bindEditorUiEvents(input: {
   });
   elements.create3DCurveButton.addEventListener("click", () => {
     callbacks.onCreate3DCurve();
+  });
+  elements.createViewMorphProfileButton.addEventListener("click", () => {
+    callbacks.onCreateViewMorphProfile();
   });
   elements.fileInput.addEventListener("change", () => {
     callbacks.onImportFile();

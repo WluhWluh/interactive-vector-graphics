@@ -12,6 +12,7 @@ export function runAssetCapabilityUnitTests(): void {
     "bezierCurve3d",
     "filledPath",
     "strokePath",
+    "viewMorphProfile",
   ];
 
   assert.deepEqual(kinds, expectedKinds.sort());
@@ -19,6 +20,7 @@ export function runAssetCapabilityUnitTests(): void {
   const filled = getPrimitiveAssetCapabilities("filledPath");
   const stroke = getPrimitiveAssetCapabilities("strokePath");
   const curve3d = getPrimitiveAssetCapabilities("bezierCurve3d");
+  const viewMorph = getPrimitiveAssetCapabilities("viewMorphProfile");
 
   assert.equal(filled.renderStyle, "fill");
   assert.equal(filled.usesFillStyle, true);
@@ -35,4 +37,12 @@ export function runAssetCapabilityUnitTests(): void {
   assert.equal(curve3d.canUpdate2DSourcePath, false);
   assert.equal(curve3d.canInPlacePathEdit, false);
   assert.equal(curve3d.canPathKeyframe, false);
+
+  assert.equal(viewMorph.renderStyle, "viewMorphProfile");
+  assert.equal(viewMorph.usesFillStyle, true);
+  assert.equal(viewMorph.expectedStructuredPathClosed, true);
+  assert.equal(viewMorph.canUpdate2DSourcePath, false);
+  assert.equal(viewMorph.canSourcePathEdit, false);
+  assert.equal(viewMorph.canInPlacePathEdit, false);
+  assert.equal(viewMorph.canPathKeyframe, false);
 }

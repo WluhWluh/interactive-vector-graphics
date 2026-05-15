@@ -34,6 +34,7 @@ import {
   convertAssetTo3DCurve,
   createProject,
   createScene,
+  createViewMorphProfileAsset,
   deleteAsset,
   deletePrefab,
   deleteProject,
@@ -247,6 +248,7 @@ import {
   applyDeletedAsset,
   applyImportedAsset,
   applyUpdatedAsset,
+  runCreateViewMorphProfileAssetCommand,
   runConvertAssetTo3DCurveCommand,
   runDeleteAssetCommand,
   runImportPrimitiveAssetCommand,
@@ -415,6 +417,7 @@ function bindEditorEvents(): void {
       onSavePath: () => void savePathEditSession(),
       onCancelPath: cancelPathEditSession,
       onCreate3DCurve: () => void create3DCurveCopyFromSelectedAsset(),
+      onCreateViewMorphProfile: () => void createViewMorphProfileFromTemplate(),
       onImportFile: () => void importSelectedFile(),
       onAddNode: addSelectedAssetToPrefab,
       onAddPrefabInstance: () => void addSelectedPrefabToScene(),
@@ -803,6 +806,34 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
     await refreshAssets();
     editorState.selectedAssetId = convertedAsset.id;
     startPathEditSession(convertedAsset);
+  } catch (error) {
+    setImportError(error);
+  }
+}
+
+async function createViewMorphProfileFromTemplate(): Promise<void> {
+  if (!editorState.selectedProjectId) {
+    setImportError(new Error("Create or select a project before creating a view morph profile."));
+    return;
+  }
+
+  try {
+    const asset = await runCreateViewMorphProfileAssetCommand({
+      projectId: editorState.selectedProjectId,
+      createViewMorphProfileAsset,
+    });
+    const nextAssetState = applyImportedAsset(
+      { assets: editorState.assets, selectedAssetId: editorState.selectedAssetId },
+      asset,
+    );
+    editorState.assets = nextAssetState.assets;
+    editorState.selectedAssetId = nextAssetState.selectedAssetId;
+    editorState.lastImportError = null;
+    hideError();
+    await refreshAssets();
+    editorState.selectedAssetId = asset.id;
+    renderEditorShell();
+    exposeEditorDebugHooks();
   } catch (error) {
     setImportError(error);
   }
@@ -2397,6 +2428,7 @@ function renderEditorShell(): void {
     mode: editorState.editorMode,
     selectedProjectId: editorState.selectedProjectId,
     selectedAssetId: editorState.selectedAssetId,
+    selectedAsset: getSelectedAsset(),
     selectedPrefabId: editorState.selectedPrefabId,
     selectedSceneId: editorState.selectedSceneId,
     selectedSceneNodeId: editorState.selectedSceneNodeId,
@@ -2772,7 +2804,9 @@ function renderSourcePathEditPanel(): void {
 
   if (!editorState.pathEditSession || editorState.pathEditSession.assetId !== selectedAsset.id) {
     status.textContent =
-      primitiveAssetHas3DSourcePath(selectedAsset)
+      selectedAsset.assetKind === "viewMorphProfile"
+        ? "View morph profiles do not support Source Path Edit yet."
+        : primitiveAssetHas3DSourcePath(selectedAsset)
         ? "Click Edit Path to edit this 3D source curve."
         : "Click Edit Path to edit the selected asset source.";
     elements.pathEditFields.append(status);
@@ -4257,6 +4291,10 @@ function exposeEditorDebugHooks(): void {
         bezierPath3d:
           primitiveAssetHas3DSourcePath(asset)
             ? cloneStructuredBezierPath3D(asset.bezierPath3d)
+            : null,
+        viewMorphProfile:
+          asset.assetKind === "viewMorphProfile"
+            ? asset.viewMorphProfile
             : null,
         pathD: asset.pathD,
       })),

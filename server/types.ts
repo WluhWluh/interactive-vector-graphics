@@ -1,5 +1,6 @@
 import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
+import type { ViewMorphProfile } from "../src/core/assets/viewMorphProfile";
 import type {
   PrefabDocument,
   Vector3Tuple,
@@ -33,7 +34,7 @@ export type ProjectRecord = {
 export type StoredPrimitiveAsset = {
   id: string;
   projectId: string;
-  assetKind: "filledPath" | "strokePath" | "bezierCurve3d";
+  assetKind: "filledPath" | "strokePath" | "bezierCurve3d" | "viewMorphProfile";
   name: string;
   sourceFilename: string;
   sourcePath: string;
@@ -45,6 +46,7 @@ export type StoredPrimitiveAsset = {
   strokeWidth: number | null;
   bezierPath: StructuredBezierPath;
   bezierPath3d: StructuredBezierPath3D | null;
+  viewMorphProfile: ViewMorphProfile | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -162,6 +164,10 @@ export type UpdateAssetPathResponse = {
 };
 
 export type ConvertAssetTo3DCurveResponse = {
+  asset: StoredPrimitiveAsset;
+};
+
+export type CreateViewMorphProfileAssetResponse = {
   asset: StoredPrimitiveAsset;
 };
 

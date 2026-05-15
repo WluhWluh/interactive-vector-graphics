@@ -12,14 +12,19 @@ import {
   validateStructuredBezierPath3D,
   type StructuredBezierPath3D,
 } from "../../src/core/assets/structuredBezierPath3d";
+import {
+  validateViewMorphProfile,
+  type ViewMorphProfile,
+} from "../../src/core/assets/viewMorphProfile";
 
 export type StoredPrimitiveAssetRow = Omit<
   StoredPrimitiveAsset,
-  "viewBox" | "bezierPath" | "bezierPath3d"
+  "viewBox" | "bezierPath" | "bezierPath3d" | "viewMorphProfile"
 > & {
   viewBox: string;
   bezierPath: string | null;
   bezierPath3d: string | null;
+  viewMorphProfile: string | null;
 };
 
 export function hydratePrimitiveAssetRow(
@@ -28,6 +33,8 @@ export function hydratePrimitiveAssetRow(
   const assetKind =
     row.assetKind === "bezierCurve3d"
       ? "bezierCurve3d"
+      : row.assetKind === "viewMorphProfile"
+        ? "viewMorphProfile"
       : row.assetKind === "strokePath"
         ? "strokePath"
         : "filledPath";
@@ -35,6 +42,10 @@ export function hydratePrimitiveAssetRow(
   const bezierPath3d = capabilities.has3DSourcePath
     ? readStoredBezierPath3D(row.bezierPath3d)
     : null;
+  const viewMorphProfile =
+    assetKind === "viewMorphProfile"
+      ? readStoredViewMorphProfile(row.viewMorphProfile)
+      : null;
 
   return {
     ...row,
@@ -52,6 +63,7 @@ export function hydratePrimitiveAssetRow(
       capabilities.expectedStructuredPathClosed,
     ),
     bezierPath3d,
+    viewMorphProfile,
   };
 }
 
@@ -75,4 +87,12 @@ function readStoredBezierPath3D(value: string | null): StructuredBezierPath3D {
   }
 
   return validateStructuredBezierPath3D(JSON.parse(value) as StructuredBezierPath3D);
+}
+
+function readStoredViewMorphProfile(value: string | null): ViewMorphProfile {
+  if (!value) {
+    throw new Error("View morph asset is missing profile data.");
+  }
+
+  return validateViewMorphProfile(JSON.parse(value) as ViewMorphProfile);
 }

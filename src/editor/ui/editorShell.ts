@@ -1,6 +1,8 @@
 import type { EditorElements } from "./editorDom";
 import type { EditorTool } from "../tools/toolController";
 import type { PrefabTrackProperty } from "../api";
+import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
+import { getPrimitiveAssetCapabilities } from "../../core/assets/primitiveAssetCapabilities";
 
 export type EditorShellMode = "asset" | "path" | "scene";
 
@@ -9,6 +11,7 @@ export type EditorShellRenderInput = {
   mode: EditorShellMode;
   selectedProjectId: string | null;
   selectedAssetId: string | null;
+  selectedAsset: PrimitiveSvgAsset | null;
   selectedPrefabId: string | null;
   selectedSceneId: string | null;
   selectedSceneNodeId: string | null;
@@ -74,6 +77,7 @@ function syncEditorShellChrome(input: EditorShellRenderInput): void {
   );
 
   elements.fileInput.disabled = !input.selectedProjectId;
+  elements.createViewMorphProfileButton.disabled = !input.selectedProjectId;
   elements.deleteProjectButton.disabled = !input.selectedProjectId;
   elements.prefabNameInput.disabled = !input.selectedProjectId;
   elements.createPrefabButton.disabled = !input.selectedProjectId;
@@ -141,7 +145,10 @@ function syncEditorShellChrome(input: EditorShellRenderInput): void {
     !input.selectedProjectId || !input.selectedAssetId;
   elements.deleteSceneNodeButton.disabled = !input.selectedSceneNodeId;
   elements.editPathButton.disabled =
-    !input.selectedProjectId || !input.selectedAssetId;
+    !input.selectedProjectId ||
+    !input.selectedAssetId ||
+    !input.selectedAsset ||
+    !getPrimitiveAssetCapabilities(input.selectedAsset).canSourcePathEdit;
   elements.create3DCurveButton.disabled =
     !input.selectedProjectId || !input.canConvertSelectedAssetTo3DCurve;
   elements.savePathButton.disabled =

@@ -2,12 +2,14 @@ import { getPrimitiveAssetCapabilities } from "./primitiveAssetCapabilities";
 import { structuredBezierToPathD } from "./structuredBezierPath";
 import type { StructuredBezierPath } from "./structuredBezierPath";
 import type { StructuredBezierPath3D } from "./structuredBezierPath3d";
+import type { ViewMorphProfile } from "./viewMorphProfile";
 
 export type SerializedPrimitiveAssetSvgInput = {
-  assetKind: "filledPath" | "strokePath" | "bezierCurve3d";
+  assetKind: "filledPath" | "strokePath" | "bezierCurve3d" | "viewMorphProfile";
   viewBox: [number, number, number, number];
   bezierPath: StructuredBezierPath;
   bezierPath3d?: StructuredBezierPath3D | null;
+  viewMorphProfile?: ViewMorphProfile | null;
   fill: string;
   fillRule: "nonzero" | "evenodd";
   stroke: string | null;
@@ -35,6 +37,10 @@ export function createNormalizedPrimitiveSvg(
       ? `  <metadata data-ivg-asset-kind="bezierCurve3d">${escapeXmlText(
           JSON.stringify(input.bezierPath3d),
         )}</metadata>`
+      : input.assetKind === "viewMorphProfile" && input.viewMorphProfile
+        ? `  <metadata data-ivg-asset-kind="viewMorphProfile">${escapeXmlText(
+            JSON.stringify(input.viewMorphProfile),
+          )}</metadata>`
       : null;
 
   return {

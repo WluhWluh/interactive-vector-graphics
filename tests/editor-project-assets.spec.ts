@@ -1095,3 +1095,69 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(afterProjectDeleteState.hasPlaywrightProject).toBe(false);
 });
 
+test("creates and renders a view morph profile asset", async ({ page }) => {
+  await openEditor(page);
+  await createEditorProject(page, "View Morph Project");
+
+  await page.getByRole("button", { name: "Create View Morph Profile" }).click();
+  await expect(
+    page.getByRole("button", { name: "View Morph: View Morph Profile" }),
+  ).toBeVisible();
+  await expect(page.locator("#inspector-fields")).toContainText("viewMorphProfile");
+  await expect(page.locator("#inspector-fields")).toContainText("Planes");
+  await expect(page.locator("#inspector-fields")).toContainText("View Morph Segments");
+
+  const assetState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    const asset = debug
+      ?.getAssets()
+      .find((candidate) => candidate.id === "view-morph-profile");
+
+    return {
+      selectedAssetId: debug?.getSelectedAssetId() ?? null,
+      asset,
+    };
+  });
+
+  expect(assetState.selectedAssetId).toBe("view-morph-profile");
+  expect(assetState.asset?.assetKind).toBe("viewMorphProfile");
+  expect(assetState.asset?.viewMorphProfile?.version).toBe(1);
+  expect(assetState.asset?.viewMorphProfile?.planes.length).toBe(3);
+  expect(assetState.asset?.bezierPath.closed).toBe(true);
+  expect(assetState.asset?.bezierPath.segments.length).toBe(4);
+
+  const vectorCanvas = page.locator("#vector-canvas");
+  await expect.poll(() => countWarmYellowPixels(vectorCanvas)).toBeGreaterThan(50);
+
+  await page.getByRole("button", { name: "Source Path Edit" }).click();
+  await expect(page.locator("#edit-path-button")).toBeDisabled();
+  await expect(page.locator("#path-edit-fields")).toContainText(
+    "View morph profiles do not support Source Path Edit yet.",
+  );
+
+  await page.getByRole("button", { name: "Asset Assembly" }).click();
+  await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
+  await expect(
+    page.getByRole("button", { name: /Primitive: View Morph Profile/ }),
+  ).toBeVisible();
+
+  await expect.poll(() => countWarmYellowPixels(vectorCanvas)).toBeGreaterThan(50);
+  await page.locator("#projection-toggle-button").click();
+  await expect.poll(() => countWarmYellowPixels(vectorCanvas)).toBeGreaterThan(50);
+
+  const prefabState = await page.evaluate(() => ({
+    node: window.__vectorEditorDebug?.getPrefabAssembly().nodes[0] ?? null,
+    asset: window.__vectorEditorDebug
+      ?.getAssets()
+      .find((candidate) => candidate.id === "view-morph-profile"),
+  }));
+
+  expect(prefabState.node).toMatchObject({
+    kind: "primitive",
+    assetId: "view-morph-profile",
+  });
+  expect(prefabState.asset?.viewMorphProfile?.planes[0]?.path.segments.length).toBe(
+    4,
+  );
+});
+

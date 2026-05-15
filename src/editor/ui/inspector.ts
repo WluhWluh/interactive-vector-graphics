@@ -106,10 +106,28 @@ export function appendAssetInspectorRows(
   } else {
     appendInspectorRow(elements, "Fill", asset.fill);
     appendInspectorRow(elements, "Fill Rule", asset.fillRule);
+    if (asset.assetKind === "viewMorphProfile") {
+      appendInspectorRow(
+        elements,
+        "Planes",
+        String(asset.viewMorphProfile.planes.length),
+      );
+      appendInspectorRow(
+        elements,
+        "View Morph Segments",
+        String(asset.viewMorphProfile.planes[0]?.path.segments.length ?? 0),
+      );
+    }
   }
 
   appendInspectorRow(elements, "Path Length", `${asset.pathD.length} chars`);
-  appendInspectorRow(elements, "Source Path Edit", "Use the Source Path Edit mode");
+  appendInspectorRow(
+    elements,
+    "Source Path Edit",
+    asset.assetKind === "viewMorphProfile"
+      ? "Not supported for view morph profiles"
+      : "Use the Source Path Edit mode",
+  );
 }
 
 export function appendPathEditInspectorInputRow(

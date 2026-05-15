@@ -3,7 +3,10 @@ import {
   type StructuredBezierPath3D,
 } from "../../core/assets/structuredBezierPath3d";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
-import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
+import {
+  getPrimitiveAssetCapabilities,
+  primitiveAssetHas3DSourcePath,
+} from "../../core/assets/primitiveAssetCapabilities";
 import {
   createPathEditSession,
   getPathEditScreenControls,
@@ -38,6 +41,10 @@ export type SourcePathEditState = {
 export function createSourcePathEditSession(
   asset: PrimitiveSvgAsset,
 ): PathEditSessionDraft {
+  if (!getPrimitiveAssetCapabilities(asset).canSourcePathEdit) {
+    throw new Error("This asset kind does not support Source Path Edit.");
+  }
+
   if (primitiveAssetHas3DSourcePath(asset)) {
     return {
       mode: "3d",

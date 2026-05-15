@@ -6,6 +6,7 @@ import type {
 import { hydratePrimitiveSvgAsset } from "../core/assets/primitiveAssetHydration";
 import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../core/assets/structuredBezierPath3d";
+import type { ViewMorphProfile } from "../core/assets/viewMorphProfile";
 import type {
   EditorSceneNode,
   EditorViewportCameraSnapshot,
@@ -52,6 +53,7 @@ export type StoredPrimitiveAssetDto = {
   strokeWidth: number | null;
   bezierPath: StructuredBezierPath;
   bezierPath3d: StructuredBezierPath3D | null;
+  viewMorphProfile: ViewMorphProfile | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -201,6 +203,28 @@ export async function uploadAsset(
 
   if (!body.asset) {
     throw new Error("Asset API did not return an asset.");
+  }
+
+  return hydratePrimitiveAsset(body.asset);
+}
+
+export async function createViewMorphProfileAsset(
+  projectId: string,
+): Promise<PrimitiveSvgAsset> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/view-morph-profile`,
+    {
+      method: "POST",
+    },
+  );
+  const body = (await response.json()) as {
+    asset?: StoredPrimitiveAssetDto;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.asset) {
+    throw new Error("Asset API did not return a view morph profile asset.");
   }
 
   return hydratePrimitiveAsset(body.asset);

@@ -52,6 +52,7 @@ export type EditorElements = {
   saveSceneButton: HTMLButtonElement;
   deleteSceneButton: HTMLButtonElement;
   fileInput: HTMLInputElement;
+  createViewMorphProfileButton: HTMLButtonElement;
   assetList: HTMLUListElement;
   pathAssetList: HTMLUListElement;
   editPathButton: HTMLButtonElement;
@@ -219,6 +220,10 @@ export function getEditorElements(): EditorElements {
       HTMLButtonElement,
     ),
     fileInput: getRequiredElement("svg-file-input", HTMLInputElement),
+    createViewMorphProfileButton: getRequiredElement(
+      "create-view-morph-profile-button",
+      HTMLButtonElement,
+    ),
     assetList: getRequiredElement("asset-list", HTMLUListElement),
     pathAssetList: getRequiredElement("path-asset-list", HTMLUListElement),
     editPathButton: getRequiredElement("edit-path-button", HTMLButtonElement),

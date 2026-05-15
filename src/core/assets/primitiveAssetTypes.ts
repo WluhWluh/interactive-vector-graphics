@@ -1,8 +1,13 @@
 import type { StructuredBezierPath } from "./structuredBezierPath";
 import type { StructuredBezierPath3D } from "./structuredBezierPath3d";
+import type { ViewMorphProfile } from "./viewMorphProfile";
 
 export type PrimitiveFillRule = "nonzero" | "evenodd";
-export type PrimitiveAssetKind = "filledPath" | "strokePath" | "bezierCurve3d";
+export type PrimitiveAssetKind =
+  | "filledPath"
+  | "strokePath"
+  | "bezierCurve3d"
+  | "viewMorphProfile";
 
 export type PrimitiveAssetManifestEntry = {
   id: string;
@@ -44,10 +49,18 @@ export type BezierCurve3DPrimitiveSvgAsset = PrimitiveSvgAssetBase & {
   bezierPath3d: StructuredBezierPath3D;
 };
 
+export type ViewMorphProfilePrimitiveSvgAsset = PrimitiveSvgAssetBase & {
+  assetKind: "viewMorphProfile";
+  fill: string;
+  fillRule: PrimitiveFillRule;
+  viewMorphProfile: ViewMorphProfile;
+};
+
 export type PrimitiveSvgAsset =
   | FilledPrimitiveSvgAsset
   | StrokePrimitiveSvgAsset
-  | BezierCurve3DPrimitiveSvgAsset;
+  | BezierCurve3DPrimitiveSvgAsset
+  | ViewMorphProfilePrimitiveSvgAsset;
 
 export type SvgImportContext = {
   id: string;
@@ -68,4 +81,5 @@ export type StoredPrimitiveAssetLike = {
   strokeWidth: number | null;
   bezierPath: StructuredBezierPath;
   bezierPath3d: StructuredBezierPath3D | null;
+  viewMorphProfile: ViewMorphProfile | null;
 };

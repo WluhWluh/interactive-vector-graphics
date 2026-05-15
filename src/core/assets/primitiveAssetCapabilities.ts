@@ -6,14 +6,18 @@ export type StrokeStyledPrimitiveSvgAsset = Extract<
 >;
 export type FillStyledPrimitiveSvgAsset = Extract<
   PrimitiveSvgAsset,
-  { assetKind: "filledPath" }
+  { assetKind: "filledPath" | "viewMorphProfile" }
 >;
 export type PrimitiveAssetWith3DSourcePath = Extract<
   PrimitiveSvgAsset,
   { assetKind: "bezierCurve3d" }
 >;
 
-export type PrimitiveAssetRenderStyle = "fill" | "stroke" | "projectedStroke3d";
+export type PrimitiveAssetRenderStyle =
+  | "fill"
+  | "stroke"
+  | "projectedStroke3d"
+  | "viewMorphProfile";
 
 export type PrimitiveAssetCapabilityDefinition = {
   readonly kind: PrimitiveAssetKind;
@@ -79,6 +83,20 @@ const PRIMITIVE_ASSET_CAPABILITY_DEFINITIONS: readonly PrimitiveAssetCapabilityD
       canPathKeyframe: false,
       canConvertTo3DCurve: false,
     },
+    {
+      kind: "viewMorphProfile",
+      listLabel: "View Morph",
+      renderStyle: "viewMorphProfile",
+      expectedStructuredPathClosed: true,
+      usesFillStyle: true,
+      usesStrokeStyle: false,
+      has3DSourcePath: false,
+      canUpdate2DSourcePath: false,
+      canSourcePathEdit: false,
+      canInPlacePathEdit: false,
+      canPathKeyframe: false,
+      canConvertTo3DCurve: false,
+    },
   ];
 
 export const PRIMITIVE_ASSET_CAPABILITY_REGISTRY: ReadonlyMap<
@@ -100,6 +118,9 @@ const PRIMITIVE_ASSET_CAPABILITIES: Record<PrimitiveAssetKind, PrimitiveAssetCap
   },
   bezierCurve3d: {
     ...getPrimitiveAssetCapabilityDefinition("bezierCurve3d"),
+  },
+  viewMorphProfile: {
+    ...getPrimitiveAssetCapabilityDefinition("viewMorphProfile"),
   },
 };
 

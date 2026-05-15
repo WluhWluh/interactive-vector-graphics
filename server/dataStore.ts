@@ -59,6 +59,9 @@ export type DataStore = {
     assetId: string,
     bezierPath3d: StructuredBezierPath3D,
   ) => Promise<StoredPrimitiveAsset>;
+  createViewMorphProfileAsset: (
+    projectId: string,
+  ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
   listPrefabs: (projectId: string) => PrefabRecord[];
   createPrefab: (input: CreatePrefabInput) => Promise<PrefabRecord>;
@@ -125,6 +128,7 @@ export function createDataStore(dataDir: string): DataStore {
         strokeWidth REAL,
         bezierPath TEXT,
         bezierPath3d TEXT,
+        viewMorphProfile TEXT,
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
         PRIMARY KEY (projectId, id),
@@ -161,6 +165,7 @@ export function createDataStore(dataDir: string): DataStore {
     ensurePrimitiveAssetColumn("strokeWidth", "REAL");
     ensurePrimitiveAssetColumn("bezierPath", "TEXT");
     ensurePrimitiveAssetColumn("bezierPath3d", "TEXT");
+    ensurePrimitiveAssetColumn("viewMorphProfile", "TEXT");
   }
 
   function close(): void {
@@ -263,6 +268,8 @@ export function createDataStore(dataDir: string): DataStore {
     convertPrimitiveAssetTo3DCurve:
       primitiveAssetStore.convertPrimitiveAssetTo3DCurve,
     updatePrimitiveAssetCurve3D: primitiveAssetStore.updatePrimitiveAssetCurve3D,
+    createViewMorphProfileAsset:
+      primitiveAssetStore.createViewMorphProfileAsset,
     deletePrimitiveAsset: primitiveAssetStore.deletePrimitiveAsset,
     listPrefabs: prefabStore.listPrefabs,
     createPrefab: prefabStore.createPrefab,

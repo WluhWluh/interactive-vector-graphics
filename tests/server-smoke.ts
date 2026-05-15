@@ -13,6 +13,7 @@ import {
 } from "../src/core/assets/structuredBezierPath";
 import { migratePrefabDocument } from "../src/core/documents/prefabDocumentMigration";
 import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
+import { evaluateViewMorphProfileToBezierPath } from "../src/core/assets/viewMorphProfile";
 import type { PrefabDocument, SceneDocument } from "../server/types";
 import {
   assertInvalidPrefabDocument,
@@ -127,6 +128,33 @@ try {
   assert.match(normalizedStrokeSvg, /stroke-linecap="round"/);
   assert.match(normalizedStrokeSvg, /stroke-linejoin="round"/);
 
+  const viewMorphAsset = await store.createViewMorphProfileAsset(firstProject.id);
+
+  assert.equal(viewMorphAsset.id, "view-morph-profile");
+  assert.equal(viewMorphAsset.assetKind, "viewMorphProfile");
+  assert.equal(viewMorphAsset.fill, "#ffcf4a");
+  assert.equal(viewMorphAsset.fillRule, "nonzero");
+  assert.equal(viewMorphAsset.viewMorphProfile?.version, 1);
+  assert.equal(viewMorphAsset.viewMorphProfile?.planes.length, 3);
+  assert.equal(viewMorphAsset.bezierPath.closed, true);
+  assert.equal(viewMorphAsset.bezierPath.segments.length, 4);
+  assert.deepEqual(
+    evaluateViewMorphProfileToBezierPath(viewMorphAsset.viewMorphProfile!, [
+      0,
+      0,
+      1,
+    ]),
+    viewMorphAsset.bezierPath,
+  );
+
+  const normalizedViewMorphSvg = await readFile(
+    join(tempDataDir, viewMorphAsset.sourcePath),
+    "utf8",
+  );
+
+  assert.match(normalizedViewMorphSvg, /data-ivg-asset-kind="viewMorphProfile"/);
+  assert.match(normalizedViewMorphSvg, /fill="#ffcf4a"/);
+
   const curve3dAsset = await store.convertPrimitiveAssetTo3DCurve(
     firstProject.id,
     strokeAsset.id,
@@ -152,7 +180,7 @@ try {
     await readFile(join(tempDataDir, curve3dAsset.sourcePath), "utf8"),
     /data-ivg-asset-kind="bezierCurve3d"/,
   );
-  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 4);
+  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 5);
   await assert.rejects(
     () => store.convertPrimitiveAssetTo3DCurve(firstProject.id, firstAsset.id),
     /Only strokePath assets/,
@@ -1131,6 +1159,7 @@ try {
     "leg-stroke.svg",
     "uploaded-face-2.svg",
     "uploaded-face.svg",
+    "view-morph-profile.svg",
   ]);
 
   const sceneFiles = await readdir(
@@ -1174,7 +1203,7 @@ try {
   assert.deepEqual(remainingSceneFiles, ["opening-scene-2.json"]);
 
   await store.deletePrimitiveAsset(firstProject.id, firstAsset.id);
-  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 3);
+  assert.equal(store.listPrimitiveAssets(firstProject.id).length, 4);
 
   await store.deleteProject(firstProject.id);
   assert.equal(store.listProjects().length, 1);

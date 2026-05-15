@@ -4,6 +4,10 @@ import {
 import {
   cloneStructuredBezierPath3D,
 } from "./structuredBezierPath3d";
+import {
+  cloneViewMorphProfile,
+  createDefaultViewMorphProfile,
+} from "./viewMorphProfile";
 import type {
   PrimitiveSvgAsset,
   StoredPrimitiveAssetLike,
@@ -49,6 +53,18 @@ export function hydratePrimitiveSvgAsset(
             closed: false,
             segments: [],
           },
+    };
+  }
+
+  if (asset.assetKind === "viewMorphProfile") {
+    return {
+      ...baseAsset,
+      assetKind: "viewMorphProfile",
+      fill: asset.fill,
+      fillRule: asset.fillRule,
+      viewMorphProfile: asset.viewMorphProfile
+        ? cloneViewMorphProfile(asset.viewMorphProfile)
+        : createDefaultViewMorphProfile(),
     };
   }
 

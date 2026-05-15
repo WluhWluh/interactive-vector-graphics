@@ -1,4 +1,4 @@
-import { Matrix4 } from "three";
+import { Matrix4, Vector3 } from "three";
 import type { Camera } from "three";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
@@ -8,6 +8,10 @@ import {
   type ProjectedCurveCommand,
 } from "../../core/assets/projectedBezier3d";
 import type { BezierPoint, StructuredBezierPath } from "../../core/assets/structuredBezierPath";
+import {
+  evaluateViewMorphProfileToBezierPath,
+  type ViewMorphPoint3D,
+} from "../../core/assets/viewMorphProfile";
 import type { StageSize } from "../../core/stage/canvasStage";
 import {
   createPrimitiveAssetPathPreview,
@@ -87,18 +91,7 @@ function drawBillboardNode(
   drawable: ProjectedBillboard,
   rendererContext: BillboardRendererContext,
 ): void {
-  const {
-    asset,
-    transform,
-    projected,
-    screenScale,
-    selected,
-    opacity = 1,
-    ghost = false,
-  } = drawable;
-  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
-  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
-  const assetScale = screenScale / largestDimension;
+  const { asset, ghost = false } = drawable;
   const drawAsset = drawable.pathOverride
     ? createPrimitiveAssetPathPreview(asset, drawable.pathOverride)
     : asset;
@@ -115,6 +108,44 @@ function drawBillboardNode(
     return;
   }
 
+  if (asset.assetKind === "viewMorphProfile") {
+    const evaluatedPath = evaluateViewMorphProfileToBezierPath(
+      asset.viewMorphProfile,
+      getCameraViewDirectionInDrawableLocalSpace(drawable, rendererContext),
+    );
+    const previewAsset = createPrimitiveAssetPathPreview(asset, evaluatedPath);
+
+    drawFlatBillboardPath(
+      context,
+      drawable,
+      previewAsset,
+      ghostColor ?? undefined,
+    );
+    return;
+  }
+
+  drawFlatBillboardPath(context, drawable, drawAsset, ghostColor ?? undefined);
+}
+
+function drawFlatBillboardPath(
+  context: CanvasRenderingContext2D,
+  drawable: ProjectedBillboard,
+  drawAsset: PrimitiveSvgAsset,
+  colorOverride?: string,
+): void {
+  const {
+    asset,
+    transform,
+    projected,
+    screenScale,
+    selected,
+    opacity = 1,
+    ghost = false,
+  } = drawable;
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
+  const assetScale = screenScale / largestDimension;
+
   context.save();
   context.globalAlpha *= opacity;
   context.translate(projected.x, projected.y);
@@ -124,16 +155,31 @@ function drawBillboardNode(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  drawPrimitiveAssetPath(context, drawAsset, ghostColor ?? undefined);
+  drawPrimitiveAssetPath(context, drawAsset, colorOverride);
 
   if (selected || ghost) {
     context.lineWidth = 3 / Math.max(assetScale, 0.001);
-    context.strokeStyle = ghostColor ?? "#ffcf4a";
+    context.strokeStyle = colorOverride ?? "#ffcf4a";
     context.setLineDash(ghost ? [8 / Math.max(assetScale, 0.001)] : []);
     context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
   }
 
   context.restore();
+}
+
+function getCameraViewDirectionInDrawableLocalSpace(
+  drawable: ProjectedBillboard,
+  rendererContext: BillboardRendererContext,
+): ViewMorphPoint3D {
+  const worldDirection = new Vector3();
+  rendererContext.camera.getWorldDirection(worldDirection);
+  worldDirection.negate().normalize();
+
+  const inverseLocalToWorld = getBillboardWorldMatrix(drawable, rendererContext).invert();
+  const inverseRotation = new Matrix4().extractRotation(inverseLocalToWorld);
+  const localDirection = worldDirection.applyMatrix4(inverseRotation).normalize();
+
+  return [localDirection.x, localDirection.y, localDirection.z];
 }
 
 function drawBezierCurve3DBillboard(

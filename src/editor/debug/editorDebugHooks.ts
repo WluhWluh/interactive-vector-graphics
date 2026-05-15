@@ -1,5 +1,6 @@
 import type { StructuredBezierPath } from "../../core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../../core/assets/structuredBezierPath3d";
+import type { ViewMorphProfile } from "../../core/assets/viewMorphProfile";
 import type {
   PrefabAnimation,
   PrefabNode,
@@ -33,6 +34,7 @@ export type VectorEditorDebugApi = {
     strokeWidth: number | null;
     bezierPath: StructuredBezierPath;
     bezierPath3d: StructuredBezierPath3D | null;
+    viewMorphProfile: ViewMorphProfile | null;
     pathD: string;
   }>;
   getPrefabs: () => PrefabRecord[];

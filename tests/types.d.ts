@@ -22,6 +22,19 @@ type StructuredBezierPath3DDebug = {
   }>;
 };
 
+type ViewMorphProfileDebug = {
+  version: 1;
+  center: [number, number, number];
+  planes: Array<{
+    id: string;
+    name: string;
+    normal: [number, number, number];
+    tangentU: [number, number, number];
+    tangentV: [number, number, number];
+    path: StructuredBezierPathDebug;
+  }>;
+};
+
 declare global {
   interface Window {
     __vectorStageDebug?: {
@@ -37,6 +50,7 @@ declare global {
         strokeWidth: number | null;
         bezierPath: StructuredBezierPathDebug;
         bezierPath3d: StructuredBezierPath3DDebug | null;
+        viewMorphProfile: ViewMorphProfileDebug | null;
         pathD: string;
       }>;
       getAssetLoadState: () => "loading" | "ready" | "error";
@@ -59,6 +73,8 @@ declare global {
         stroke: string | null;
         strokeWidth: number | null;
         bezierPath: StructuredBezierPathDebug;
+        bezierPath3d: StructuredBezierPath3DDebug | null;
+        viewMorphProfile: ViewMorphProfileDebug | null;
         pathD: string;
       }>;
       getSelectedProjectId: () => string | null;

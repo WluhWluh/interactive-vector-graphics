@@ -13,6 +13,7 @@ import type {
   CreatePrefabResponse,
   CreateProjectResponse,
   CreateSceneResponse,
+  CreateViewMorphProfileAssetResponse,
   HealthResponse,
   PrefabDetailResponse,
   PrefabsResponse,
@@ -144,6 +145,29 @@ server.post<{
   } catch (error) {
     reply.code(400);
     return { error: error instanceof Error ? error.message : "Import failed." };
+  }
+});
+
+server.post<{
+  Params: { projectId: string };
+  Reply: CreateViewMorphProfileAssetResponse | { error: string };
+}>("/api/projects/:projectId/assets/view-morph-profile", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const asset = await dataStore.createViewMorphProfileAsset(
+      request.params.projectId,
+    );
+
+    return { asset };
+  } catch (error) {
+    reply.code(400);
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "View morph profile creation failed.",
+    };
   }
 });
 

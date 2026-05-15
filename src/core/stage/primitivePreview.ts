@@ -1,5 +1,9 @@
 import type { PrimitiveSvgAsset } from "../assets/primitiveAssetTypes";
 import { primitiveAssetUsesStrokeStyle } from "../assets/primitiveAssetCapabilities";
+import {
+  evaluateViewMorphProfileToBezierPath,
+} from "../assets/viewMorphProfile";
+import { structuredBezierToPathD } from "../assets/structuredBezierPath";
 import type { StageLayer, StageSize } from "./canvasStage";
 
 export function drawStageGrid(layer: StageLayer, size: StageSize): void {
@@ -47,9 +51,11 @@ export function drawPrimitivePreview(
   size: StageSize,
   asset: PrimitiveSvgAsset,
 ): void {
+  const drawAsset =
+    asset.assetKind === "viewMorphProfile" ? createViewMorphPreviewAsset(asset) : asset;
   const centerX = size.cssWidth / 2;
   const centerY = size.cssHeight / 2;
-  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = drawAsset.viewBox;
   const targetSize = Math.max(84, Math.min(size.cssWidth, size.cssHeight) * 0.16);
   const assetScale = targetSize / Math.max(viewBoxWidth, viewBoxHeight);
 
@@ -60,15 +66,32 @@ export function drawPrimitivePreview(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  if (primitiveAssetUsesStrokeStyle(asset)) {
-    context.strokeStyle = asset.stroke;
-    context.lineWidth = asset.strokeWidth;
+  if (primitiveAssetUsesStrokeStyle(drawAsset)) {
+    context.strokeStyle = drawAsset.stroke;
+    context.lineWidth = drawAsset.strokeWidth;
     context.lineCap = "round";
     context.lineJoin = "round";
-    context.stroke(asset.path);
+    context.stroke(drawAsset.path);
   } else {
-    context.fillStyle = asset.fill;
-    context.fill(asset.path, asset.fillRule);
+    context.fillStyle = drawAsset.fill;
+    context.fill(drawAsset.path, drawAsset.fillRule);
   }
   context.restore();
+}
+
+function createViewMorphPreviewAsset(
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "viewMorphProfile" }>,
+): PrimitiveSvgAsset {
+  const bezierPath = evaluateViewMorphProfileToBezierPath(
+    asset.viewMorphProfile,
+    [0, 0, 1],
+  );
+  const pathD = structuredBezierToPathD(bezierPath);
+
+  return {
+    ...asset,
+    bezierPath,
+    pathD,
+    path: new Path2D(pathD),
+  };
 }

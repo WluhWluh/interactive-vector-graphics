@@ -103,6 +103,13 @@ export async function runImportPrimitiveAssetCommand(input: {
   return input.uploadAsset(input.projectId, input.file);
 }
 
+export async function runCreateViewMorphProfileAssetCommand(input: {
+  projectId: string;
+  createViewMorphProfileAsset: (projectId: string) => Promise<PrimitiveSvgAsset>;
+}): Promise<PrimitiveSvgAsset> {
+  return input.createViewMorphProfileAsset(input.projectId);
+}
+
 export async function runDeleteAssetCommand(input: {
   projectId: string;
   assetId: string;
