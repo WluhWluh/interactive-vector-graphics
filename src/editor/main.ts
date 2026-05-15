@@ -126,6 +126,7 @@ import {
   type DrawableBillboard,
 } from "./render/billboardRenderer";
 import { renderEditorFrame } from "./render/editorFrameRenderer";
+import { createRenderInvalidation } from "./render/renderInvalidation";
 import {
   drawPathEditControls,
   drawPathEditPreview,
@@ -260,6 +261,7 @@ const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
 const elements = getEditorElements();
 const collapsedModuleIds = readCollapsedModuleCookie();
+const renderInvalidation = createRenderInvalidation();
 
 let projects: ProjectRecord[] = [];
 let assets: PrimitiveSvgAsset[] = [];
@@ -298,6 +300,8 @@ let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
 let nextPrefabNodeNumber = 1;
 let pendingCameraInspectorRender = false;
+let cachedAssetAssemblyBillboards: DrawableBillboard[] = [];
+let cachedSceneLayoutBillboards: DrawableBillboard[] = [];
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
@@ -395,6 +399,11 @@ declare global {
         selectedNodeId: string | null;
         transformMode: TransformMode;
         viewportProxies: ReturnType<ThreeEditorViewport["getProxySnapshot"]>;
+      };
+      getRenderInvalidation: () => {
+        flags: typeof renderInvalidation.flags;
+        cachedAssetAssemblyBillboardCount: number;
+        cachedSceneLayoutBillboardCount: number;
       };
       getActiveEditorTool: () => EditorTool;
       getScenes: () => SceneRecord[];
@@ -672,6 +681,7 @@ function bindEditorEvents(): void {
     if (editorMode === "scene") {
       loadedSceneId = null;
     }
+    renderInvalidation.markAllDirty();
     renderEditorShell();
     exposeEditorDebugHooks();
   });
@@ -685,6 +695,7 @@ function bindEditorEvents(): void {
       } else if (editorMode === "scene") {
         selectedSceneNodeId = nodeId;
         syncSelectionFromSceneNode();
+        renderInvalidation.markSceneBillboardsDirty();
       }
 
       renderEditorShell();
@@ -708,6 +719,7 @@ function bindEditorEvents(): void {
       if (editorMode === "scene") {
         loadedSceneId = null;
       }
+      renderInvalidation.markAllDirty();
       scheduleCameraInspectorRender();
       exposeEditorDebugHooks();
     },
@@ -1621,6 +1633,7 @@ function applySceneDocument(document: SceneDocument): void {
 }
 
 function rebuildViewportProxies(): void {
+  renderInvalidation.markAllDirty();
   threeViewport.clearNodes();
 
   if (!selectedProjectId) {
@@ -1709,6 +1722,7 @@ function syncNodeFromViewport(nodeId: string): void {
       stagingPose.position = [...localTransform.position];
       stagingPose.rotation = [...localTransform.rotation];
       stagingPose.scale = [...localTransform.scale];
+      renderInvalidation.markAssetBillboardsDirty();
       return;
     }
 
@@ -1731,6 +1745,7 @@ function syncNodeFromViewport(nodeId: string): void {
      * only refresh the world-space transforms of the other prefab proxies.
      */
     syncPrefabProxyWorldTransforms(node.id);
+    renderInvalidation.markAssetBillboardsDirty();
 
     return;
   }
@@ -1743,6 +1758,7 @@ function syncNodeFromViewport(nodeId: string): void {
 
   threeViewport.syncNodeFromProxy(node);
   loadedSceneId = null;
+  renderInvalidation.markSceneBillboardsDirty();
 }
 
 function syncSelectionFromPrefabNode(): void {
@@ -1800,6 +1816,7 @@ function updateTimelinePlayback(deltaSeconds: number): void {
     timelineCurrentTimeMs = Math.round(nextTimeMs);
   }
 
+  renderInvalidation.markAssetBillboardsDirty();
   renderPrefabTimeline();
   exposeEditorDebugHooks();
 }
@@ -2412,6 +2429,7 @@ function renderCollapsibleModules(): void {
 }
 
 function renderEditorShell(): void {
+  renderInvalidation.markAllDirty();
   renderProjectList();
   renderAssetList();
   renderPathAssetList();
@@ -3217,6 +3235,7 @@ function applyTransformInput(
         id: node.id,
         ...getTimelineStagingWorldTransform(stagingPose),
       });
+      renderInvalidation.markAssetBillboardsDirty();
     } else {
       node[property] = nextValue;
       pauseTimeline();
@@ -3227,6 +3246,7 @@ function applyTransformInput(
     node[property] = nextValue;
     loadedSceneId = null;
     threeViewport.syncProxyFromNode(node);
+    renderInvalidation.markSceneBillboardsDirty();
   }
 
   renderEditorShell();
@@ -3254,14 +3274,18 @@ function tick(now: DOMHighResTimeStamp): void {
 }
 
 function renderPreviewFrame(): void {
+  const assetAssemblyBillboards =
+    editorMode === "asset" ? getCachedAssetAssemblyBillboards() : [];
+  const sceneLayoutBillboards =
+    editorMode === "scene" ? getCachedSceneLayoutBillboards() : [];
+
   renderEditorFrame({
     stage,
     mode: editorMode,
     hasSelectedProject: Boolean(selectedProjectId),
     selectedAsset: getSelectedAsset(),
-    assetAssemblyBillboards:
-      editorMode === "asset" ? getAssetAssemblyBillboards() : [],
-    sceneLayoutBillboards: editorMode === "scene" ? getSceneLayoutBillboards() : [],
+    assetAssemblyBillboards,
+    sceneLayoutBillboards,
     clearCurve3DControls: () => threeViewport.clearCurve3DControls(),
     renderThreeViewport: () => threeViewport.render(stage.size),
     renderPathEditFrame,
@@ -3269,6 +3293,8 @@ function renderPreviewFrame(): void {
     drawBillboards,
     drawSourcePathEdit3DPreview,
   });
+
+  renderInvalidation.clearFrameDirtyFlags();
 }
 
 function renderPathEditFrame(): void {
@@ -3386,6 +3412,14 @@ function getAssetAssemblyBillboards(): DrawableBillboard[] {
   ];
 }
 
+function getCachedAssetAssemblyBillboards(): DrawableBillboard[] {
+  if (renderInvalidation.flags.assetBillboards) {
+    cachedAssetAssemblyBillboards = getAssetAssemblyBillboards();
+  }
+
+  return cachedAssetAssemblyBillboards;
+}
+
 function getSelectedPrefabTimelineGhostBillboards(): DrawableBillboard[] {
   const activeClip = getActiveTimelineClip();
   const selectedNode = getSelectedPrefabNode();
@@ -3476,6 +3510,14 @@ function getSceneLayoutBillboards(): DrawableBillboard[] {
   }
 
   return drawables;
+}
+
+function getCachedSceneLayoutBillboards(): DrawableBillboard[] {
+  if (renderInvalidation.flags.sceneBillboards) {
+    cachedSceneLayoutBillboards = getSceneLayoutBillboards();
+  }
+
+  return cachedSceneLayoutBillboards;
 }
 
 function flattenPrefabBillboards(
@@ -3625,6 +3667,7 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
   };
   pathEditDragState = selectPathEditCoreControl(pathEditSession, control);
   event.preventDefault();
+  renderInvalidation.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3665,6 +3708,7 @@ function updatePathEditHoveredControl(control: PathEditControl | null): void {
   }
 
   pathEditHoveredControl = nextHover;
+  renderInvalidation.markPaperDirty();
   exposeEditorDebugHooks();
 }
 
@@ -3695,6 +3739,8 @@ function dragPathEditControl(event: PointerEvent | MouseEvent): void {
     altKey: event.altKey,
     shiftKey: event.shiftKey,
   });
+  renderInvalidation.markVectorDirty();
+  renderInvalidation.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3910,6 +3956,8 @@ function selectSourcePathEdit3DControlById(controlId: string | null): void {
   const selection = controlId ? parseSourcePathEdit3DControlId(controlId) : null;
   pathEdit3DSession.selected = selection;
   syncSourcePathEdit3DControls();
+  renderInvalidation.markVectorDirty();
+  renderInvalidation.markThreeDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -3982,6 +4030,7 @@ function selectInPlacePathEditControl(event: PointerEvent | MouseEvent): boolean
   if ("stopImmediatePropagation" in event) {
     event.stopImmediatePropagation();
   }
+  renderInvalidation.markPaperDirty();
   renderInspector();
   exposeEditorDebugHooks();
   return true;
@@ -4017,6 +4066,7 @@ function updateInPlacePathEditHoveredControl(control: PathEditControl | null): v
   }
 
   inPlacePathEditHoveredControl = nextHover;
+  renderInvalidation.markPaperDirty();
   exposeEditorDebugHooks();
 }
 
@@ -4072,6 +4122,8 @@ function dragInPlacePathEditControl(event: PointerEvent | MouseEvent): void {
   });
   syncInPlacePathSessionToStagingPose();
   event.preventDefault();
+  renderInvalidation.markAssetBillboardsDirty();
+  renderInvalidation.markPaperDirty();
   renderInspector();
   exposeEditorDebugHooks();
 }
@@ -4624,6 +4676,11 @@ function exposeEditorDebugHooks(): void {
         viewportProxies: threeViewport.getProxySnapshot(),
       };
     },
+    getRenderInvalidation: () => ({
+      flags: { ...renderInvalidation.flags },
+      cachedAssetAssemblyBillboardCount: cachedAssetAssemblyBillboards.length,
+      cachedSceneLayoutBillboardCount: cachedSceneLayoutBillboards.length,
+    }),
     getActiveEditorTool: () => activeEditorTool,
     getScenes: () => [...scenes],
     getEditorMode: () => editorMode,
