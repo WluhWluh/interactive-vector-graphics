@@ -260,6 +260,11 @@ import {
 } from "./controllers/editorCommandController";
 import { planEditorModeChange } from "./controllers/editorModeController";
 import {
+  getPrefabNodeSelectionSync,
+  getSceneNodeSelectionSync,
+  shouldClearRootPrefabAssetSelection,
+} from "./controllers/selectionController";
+import {
   createInPlacePathEditDebugState,
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
   createSourcePathEditDebugState,
@@ -954,7 +959,12 @@ async function importSelectedFile(): Promise<void> {
     );
     editorState.assets = nextAssetState.assets;
     editorState.selectedAssetId = nextAssetState.selectedAssetId;
-    if (editorState.selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
+    if (
+      shouldClearRootPrefabAssetSelection(
+        editorState.selectedPrefabNodeId,
+        PREFAB_ROOT_NODE_ID,
+      )
+    ) {
       editorState.selectedPrefabNodeId = null;
     }
     editorState.lastImportError = null;
@@ -1836,9 +1846,10 @@ function syncSelectionFromPrefabNode(): void {
   }
 
   const node = editorState.selectedPrefabNodeId ? getPrefabNode(editorState.selectedPrefabNodeId) : null;
+  const sync = getPrefabNodeSelectionSync(node);
 
-  if (node?.kind === "primitive" && node.assetId) {
-    editorState.selectedAssetId = node.assetId;
+  if (sync.selectedAssetId !== undefined) {
+    editorState.selectedAssetId = sync.selectedAssetId;
   }
 }
 
@@ -2459,15 +2470,14 @@ function pastePendingPrefabClipboard(): void {
 
 function syncSelectionFromSceneNode(): void {
   const node = editorState.selectedSceneNodeId ? getSceneNode(editorState.selectedSceneNodeId) : null;
+  const sync = getSceneNodeSelectionSync(node);
 
-  if (!node) {
-    return;
+  if (sync.selectedAssetId !== undefined) {
+    editorState.selectedAssetId = sync.selectedAssetId;
   }
 
-  if (node.kind === "primitive") {
-    editorState.selectedAssetId = node.assetId;
-  } else {
-    editorState.selectedPrefabId = node.prefabId;
+  if (sync.selectedPrefabId !== undefined) {
+    editorState.selectedPrefabId = sync.selectedPrefabId;
   }
 }
 
