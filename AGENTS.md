@@ -33,6 +33,51 @@ than to the heavier 3D/game look of Star Birds.
   demos.
 - Preserve a clear separation between the vector runtime layer, the Paper.js
   experiment layer, and the optional Three.js/WebGL layer.
+- When adding editor behavior, prefer extending the existing controller,
+  workflow, command, pose, capability, render, or store boundary instead of
+  growing `src/editor/main.ts`.
+- Keep `docs/architecture.md` aligned with any architectural boundary changes
+  that affect future feature work.
+
+## Current Architecture Boundaries
+
+- `src/editor/main.ts` is the editor shell and compatibility coordinator. New
+  user actions should move toward `EditorCommand` dispatch, controllers, or
+  workflows rather than directly mutating many `editorState` fields inline.
+- Use `src/editor/state/editorCommand.ts` for cross-cutting editor state
+  commands that need consistent invalidation such as UI shell refresh, debug
+  hook refresh, and persisted UI preferences.
+- Prefab editing has three pose layers: base pose, evaluated timeline pose, and
+  browser-only staging pose. Use `src/editor/pose/prefabPose.ts`,
+  `src/editor/pose/prefabPoseProperties.ts`, and
+  `src/editor/timeline/stagingPose.ts` instead of duplicating pose sampling or
+  staging rules.
+- Timeline tools should be equal-rank tool definitions in
+  `src/editor/tools/toolController.ts`. A new animated property should declare a
+  tool definition, a pose/property adapter, timeline evaluation/keyframe logic,
+  focused UI, and tests.
+- Primitive asset feature checks should go through
+  `src/core/assets/primitiveAssetCapabilities.ts`. New asset kinds must add
+  type definitions, capability registry entries, import/server validation,
+  hydration, rendering, inspector behavior, source serialization, and tests.
+- Source Path Edit changes project-level asset data through backend APIs.
+  In-place Path editing changes only a prefab timeline staging ghost until
+  `Add Keyframe` writes a path keyframe.
+- Rendering invalidation should use `src/editor/render/renderInvalidation.ts`
+  and `EditorRenderCache` dirty markers. Avoid using full dirty/all-cache
+  invalidation for narrow camera, pose, timeline, or UI-only changes when a
+  specific marker exists.
+- Backend route handlers should continue to use `DataStore` as a facade. Domain
+  persistence belongs in `server/stores/*`; shared file/database consistency
+  helpers belong in `server/persistence/*`.
+- File-backed create operations should use the persistence transaction helper
+  so SQLite failures clean up newly written files. More complex update/delete
+  operations should add explicit rollback or orphan-cleanup behavior before
+  being treated as production-safe.
+- Document version handling should go through migration entry points such as
+  `src/core/documents/prefabDocumentMigration.ts` and
+  `server/sceneDocumentMigration.ts` before validation. Do not add ad hoc
+  version checks in stores or routes.
 
 ## Primitive SVG Import Rules
 
@@ -117,3 +162,16 @@ than to the heavier 3D/game look of Star Birds.
   preview logic may help UX, but it must not be the persistence authority.
 - Treat runtime data as disposable experiment data until explicit export/import
   tooling exists.
+
+## Testing Expectations
+
+- Run `npm run check` for type safety after every code change.
+- Use `npm run test:unit` for fast coverage of core capability, migration, and
+  pose/property rules.
+- Use `npm run test:server` after backend, persistence, document schema,
+  migration, or import validation changes.
+- Use `npm run test:visual` after editor interaction, rendering, tool,
+  timeline, path edit, or UI changes.
+- Prefer focused unit/integration tests for new core rules before adding another
+  long end-to-end Playwright path. Shared visual SVG fixtures belong in
+  `tests/helpers/svgFixtures.ts`.
