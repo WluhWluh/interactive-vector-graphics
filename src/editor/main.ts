@@ -329,14 +329,7 @@ const appStateStore = createEditorAppStateStore(initialAppState);
 const editorState = appStateStore.getMutableState();
 
 let editorMode: EditorMode = initialAppState.editorMode;
-let prefabAnimation: PrefabAnimation = initialAppState.prefabAnimation;
-let timelineStagingPoses = initialAppState.timelineStagingPoses;
-let timelineCurrentTimeMs = initialAppState.timelineCurrentTimeMs;
-let isTimelinePlaying = initialAppState.isTimelinePlaying;
-let selectedTimelineKeyframeId: string | null =
-  initialAppState.selectedTimelineKeyframeId;
 let timelinePointerDrag: TimelinePointerDrag | null = null;
-let activeEditorTool: EditorTool = initialAppState.activeEditorTool;
 let pathEditSession: SourcePathEditSession | null = null;
 let pathEdit3DSession: SourcePathEdit3DSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
@@ -351,12 +344,6 @@ let pendingCameraInspectorRender = false;
 function syncAppStateStore(): void {
   appStateStore.patch({
     editorMode,
-    prefabAnimation,
-    timelineStagingPoses,
-    timelineCurrentTimeMs,
-    isTimelinePlaying,
-    selectedTimelineKeyframeId,
-    activeEditorTool,
   });
 }
 
@@ -1642,7 +1629,7 @@ function setActiveEditorTool(tool: EditorTool): void {
     return;
   }
 
-  activeEditorTool = tool;
+  editorState.activeEditorTool = tool;
   threeViewport.setTransformControlsVisible(definition.usesTransformControls);
 
   if (definition.usesPathOverlay) {
@@ -1727,12 +1714,12 @@ function discardInPlacePathEditSession(): void {
 
 function fallbackToTransformTool(): void {
   discardInPlacePathEditSession();
-  activeEditorTool = getFallbackTransformTool(threeViewport.currentTransformMode);
+  editorState.activeEditorTool = getFallbackTransformTool(threeViewport.currentTransformMode);
   threeViewport.setTransformControlsVisible(true);
 }
 
 function exitPathTool(): void {
-  if (activeEditorTool === "path") {
+  if (editorState.activeEditorTool === "path") {
     fallbackToTransformTool();
     return;
   }
@@ -1741,7 +1728,7 @@ function exitPathTool(): void {
 }
 
 function syncActiveToolAfterSelectionChange(): void {
-  if (activeEditorTool !== "path") {
+  if (editorState.activeEditorTool !== "path") {
     discardInPlacePathEditSession();
     return;
   }
@@ -1814,7 +1801,7 @@ function clearSceneLayout(): void {
 }
 
 function createCurrentPrefabDocument(): PrefabDocument {
-  return createPrefabDocument(editorState.prefabNodes, prefabAnimation);
+  return createPrefabDocument(editorState.prefabNodes, editorState.prefabAnimation);
 }
 
 function applyPrefabDocument(document: PrefabDocument): void {
@@ -1822,11 +1809,11 @@ function applyPrefabDocument(document: PrefabDocument): void {
   const nextState = applyPrefabDocumentState(document, PREFAB_ROOT_NODE_ID);
 
   editorState.prefabNodes = nextState.nodes;
-  prefabAnimation = nextState.animation;
-  timelineStagingPoses = new TimelineStagingPoseStore();
-  timelineCurrentTimeMs = 0;
-  isTimelinePlaying = false;
-  selectedTimelineKeyframeId = null;
+  editorState.prefabAnimation = nextState.animation;
+  editorState.timelineStagingPoses = new TimelineStagingPoseStore();
+  editorState.timelineCurrentTimeMs = 0;
+  editorState.isTimelinePlaying = false;
+  editorState.selectedTimelineKeyframeId = null;
   editorState.selectedPrefabNodeId = nextState.selectedNodeId;
   clearInvalidPrefabClipboard();
   editorState.nextPrefabNodeNumber = nextState.nextNodeNumber;
@@ -1980,11 +1967,11 @@ function syncSelectionFromPrefabNode(): void {
 }
 
 function getActiveTimelineClip(): PrefabAnimationClip | null {
-  return getActiveTimelineClipFromState(prefabAnimation);
+  return getActiveTimelineClipFromState(editorState.prefabAnimation);
 }
 
 function getActiveTimelineProperty(): PrefabTrackProperty {
-  return getTimelinePropertyForEditorTool(activeEditorTool);
+  return getTimelinePropertyForEditorTool(editorState.activeEditorTool);
 }
 
 function setActiveTimelineProperty(property: PrefabTrackProperty): void {
@@ -1992,7 +1979,7 @@ function setActiveTimelineProperty(property: PrefabTrackProperty): void {
 }
 
 function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
-  prefabAnimation = updateActiveTimelineClipForState(prefabAnimation, nextClip);
+  editorState.prefabAnimation = updateActiveTimelineClipForState(editorState.prefabAnimation, nextClip);
 }
 
 function applyTimelineStatePatch(patch: {
@@ -2003,16 +1990,16 @@ function applyTimelineStatePatch(patch: {
   timelinePointerDragCleared?: boolean;
 }): void {
   if (patch.animation) {
-    prefabAnimation = patch.animation;
+    editorState.prefabAnimation = patch.animation;
   }
   if (patch.currentTimeMs !== undefined) {
-    timelineCurrentTimeMs = patch.currentTimeMs;
+    editorState.timelineCurrentTimeMs = patch.currentTimeMs;
   }
   if (patch.isPlaying !== undefined) {
-    isTimelinePlaying = patch.isPlaying;
+    editorState.isTimelinePlaying = patch.isPlaying;
   }
   if (patch.selectedKeyframeId !== undefined) {
-    selectedTimelineKeyframeId = patch.selectedKeyframeId;
+    editorState.selectedTimelineKeyframeId = patch.selectedKeyframeId;
   }
   if (patch.timelinePointerDragCleared) {
     timelinePointerDrag = null;
@@ -2021,21 +2008,21 @@ function applyTimelineStatePatch(patch: {
 
 function updateTimelinePlayback(deltaSeconds: number): void {
   const nextPlayback = advanceTimelinePlayback({
-    isPlaying: isTimelinePlaying,
+    isPlaying: editorState.isTimelinePlaying,
     activeClip: getActiveTimelineClip(),
-    currentTimeMs: timelineCurrentTimeMs,
+    currentTimeMs: editorState.timelineCurrentTimeMs,
     deltaSeconds,
   });
 
   if (
-    nextPlayback.currentTimeMs === timelineCurrentTimeMs &&
-    nextPlayback.isPlaying === isTimelinePlaying
+    nextPlayback.currentTimeMs === editorState.timelineCurrentTimeMs &&
+    nextPlayback.isPlaying === editorState.isTimelinePlaying
   ) {
     return;
   }
 
-  timelineCurrentTimeMs = nextPlayback.currentTimeMs;
-  isTimelinePlaying = nextPlayback.isPlaying;
+  editorState.timelineCurrentTimeMs = nextPlayback.currentTimeMs;
+  editorState.isTimelinePlaying = nextPlayback.isPlaying;
 
   renderCache.markAssetBillboardsDirty();
   renderPrefabTimeline();
@@ -2054,7 +2041,7 @@ function getCurrentPrefabPoseSnapshot(): ReturnType<typeof evaluatePrefabPose> {
   return evaluatePrefabPose({
     nodes: editorState.prefabNodes,
     activeClip: getActiveTimelineClip(),
-    currentTimeMs: timelineCurrentTimeMs,
+    currentTimeMs: editorState.timelineCurrentTimeMs,
   });
 }
 
@@ -2073,7 +2060,7 @@ function createTimelineClipFromInput(): void {
 
   applyTimelineStatePatch(
     createTimelineClipCommand({
-      animation: prefabAnimation,
+      animation: editorState.prefabAnimation,
       name,
       durationMs: DEFAULT_TIMELINE_DURATION_MS,
       loop: true,
@@ -2089,7 +2076,7 @@ function createTimelineClipFromInput(): void {
 }
 
 function deleteSelectedTimelineClip(): void {
-  const result = deleteActiveTimelineClipCommand(prefabAnimation);
+  const result = deleteActiveTimelineClipCommand(editorState.prefabAnimation);
 
   if (!result.deletedClipId) {
     return;
@@ -2108,9 +2095,9 @@ function deleteSelectedTimelineClip(): void {
 
 function selectTimelineClip(clipId: string): void {
   const result = selectTimelineClipCommand({
-    animation: prefabAnimation,
+    animation: editorState.prefabAnimation,
     clipId,
-    currentTimeMs: timelineCurrentTimeMs,
+    currentTimeMs: editorState.timelineCurrentTimeMs,
   });
 
   if (!result.selectedClip) {
@@ -2118,7 +2105,7 @@ function selectTimelineClip(clipId: string): void {
   }
 
   applyTimelineStatePatch(result);
-  if (activeEditorTool === "path") {
+  if (editorState.activeEditorTool === "path") {
     startInPlacePathEditSession();
   }
   rebuildViewportProxies();
@@ -2127,8 +2114,8 @@ function selectTimelineClip(clipId: string): void {
 }
 
 function selectBasePoseTimeline(): void {
-  applyTimelineStatePatch(selectBasePoseTimelineCommand(prefabAnimation));
-  if (activeEditorTool === "path") {
+  applyTimelineStatePatch(selectBasePoseTimelineCommand(editorState.prefabAnimation));
+  if (editorState.activeEditorTool === "path") {
     exitPathTool();
   }
   rebuildViewportProxies();
@@ -2149,7 +2136,7 @@ function playTimeline(): void {
 }
 
 function pauseTimeline(): void {
-  const patch = pauseTimelineCommand({ isPlaying: isTimelinePlaying });
+  const patch = pauseTimelineCommand({ isPlaying: editorState.isTimelinePlaying });
 
   if (!patch) {
     return;
@@ -2211,11 +2198,11 @@ function applyTimelineDurationInput(): void {
     durationMs,
     tracks: activeClip.tracks.map(clonePrefabAnimationTrack),
   });
-  timelineCurrentTimeMs = clampTimelineTimeMs(
-    timelineCurrentTimeMs,
+  editorState.timelineCurrentTimeMs = clampTimelineTimeMs(
+    editorState.timelineCurrentTimeMs,
     getActiveTimelineClip(),
   );
-  isTimelinePlaying = false;
+  editorState.isTimelinePlaying = false;
   editorState.loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
@@ -2248,8 +2235,8 @@ function applyTimelineSnapFpsInput(): void {
     return;
   }
 
-  prefabAnimation = {
-    ...clonePrefabAnimation(prefabAnimation),
+  editorState.prefabAnimation = {
+    ...clonePrefabAnimation(editorState.prefabAnimation),
     snapFps: roundTimelineNumber(nextSnapFps),
   };
   editorState.loadedPrefabId = null;
@@ -2335,7 +2322,7 @@ function deleteSelectedTimelineKeyframe(): void {
 
   const nextClip = deleteTimelineKeyframe(activeClip, selected);
 
-  selectedTimelineKeyframeId = null;
+  editorState.selectedTimelineKeyframeId = null;
   updateActiveTimelineClip(nextClip);
   editorState.loadedPrefabId = null;
   rebuildViewportProxies();
@@ -2355,8 +2342,8 @@ function updateSelectedTimelineKeyframe(
 
   const result = updateTimelineKeyframe(activeClip, selected, nextKeyframe);
 
-  selectedTimelineKeyframeId = result.selectedKeyframeId;
-  timelineCurrentTimeMs = result.currentTimeMs;
+  editorState.selectedTimelineKeyframeId = result.selectedKeyframeId;
+  editorState.timelineCurrentTimeMs = result.currentTimeMs;
   updateActiveTimelineClip(result.clip);
   editorState.loadedPrefabId = null;
   rebuildViewportProxies();
@@ -2402,7 +2389,7 @@ function addKeyframeForSelectedPrefabNode(): void {
   }
 
   const property = getActiveTimelineProperty();
-  const timeMs = snapAndClampTimelineTimeMs(timelineCurrentTimeMs, activeClip);
+  const timeMs = snapAndClampTimelineTimeMs(editorState.timelineCurrentTimeMs, activeClip);
   const stagingPose = getOrCreateTimelineStagingPose(
     selectedNode,
     activeClip,
@@ -2427,12 +2414,12 @@ function addKeyframeForSelectedPrefabNode(): void {
       timeMs,
       value: pathDraft,
       easing: "linear",
-      snapFps: prefabAnimation.snapFps,
+      snapFps: editorState.prefabAnimation.snapFps,
     });
 
-    selectedTimelineKeyframeId = result.selectedKeyframeId;
+    editorState.selectedTimelineKeyframeId = result.selectedKeyframeId;
     updateActiveTimelineClip(result.clip);
-    timelineCurrentTimeMs = timeMs;
+    editorState.timelineCurrentTimeMs = timeMs;
     editorState.loadedPrefabId = null;
     editorState.lastImportError = null;
     hideError();
@@ -2452,12 +2439,12 @@ function addKeyframeForSelectedPrefabNode(): void {
     timeMs,
     value: [...stagingPose[property]],
     easing: "linear",
-    snapFps: prefabAnimation.snapFps,
+    snapFps: editorState.prefabAnimation.snapFps,
   });
 
-  selectedTimelineKeyframeId = result.selectedKeyframeId;
+  editorState.selectedTimelineKeyframeId = result.selectedKeyframeId;
   updateActiveTimelineClip(result.clip);
-  timelineCurrentTimeMs = timeMs;
+  editorState.timelineCurrentTimeMs = timeMs;
   editorState.loadedPrefabId = null;
   editorState.lastImportError = null;
   hideError();
@@ -2636,7 +2623,7 @@ function renderEditorShell(): void {
   const activeTimelineClip = getActiveTimelineClip();
   const validInPlacePathEditSession =
     editorMode === "asset" &&
-    activeEditorTool === "path" &&
+    editorState.activeEditorTool === "path" &&
     inPlacePathEditSession
       ? inPlacePathEditSession
       : null;
@@ -2656,12 +2643,12 @@ function renderEditorShell(): void {
     hasPathEdit3DSession: Boolean(pathEdit3DSession),
     hasValidInPlacePathEditSession: Boolean(validInPlacePathEditSession),
     activeTimelineClip,
-    timelineCurrentTimeMs,
-    isTimelinePlaying,
+    timelineCurrentTimeMs: editorState.timelineCurrentTimeMs,
+    isTimelinePlaying: editorState.isTimelinePlaying,
     activeTimelineProperty: getActiveTimelineProperty(),
     currentProjection: threeViewport.currentProjection,
     selectedAssetKind: getSelectedAsset()?.assetKind ?? null,
-    activeEditorTool,
+    activeEditorTool: editorState.activeEditorTool,
     canUseTool,
     renderProjectList,
     renderAssetList,
@@ -2847,8 +2834,8 @@ function renderPrefabTimeline(): void {
   if (!activeClip) {
     renderTimelinePanel({
       elements,
-      animation: prefabAnimation,
-      currentTimeMs: timelineCurrentTimeMs,
+      animation: editorState.prefabAnimation,
+      currentTimeMs: editorState.timelineCurrentTimeMs,
       defaultDurationMs: DEFAULT_TIMELINE_DURATION_MS,
       activeClip: null,
       selectedNode:
@@ -2857,7 +2844,7 @@ function renderPrefabTimeline(): void {
           : null,
       activeProperty,
       laneProperties: TIMELINE_LANE_PROPERTIES,
-      selectedKeyframeId: selectedTimelineKeyframeId,
+      selectedKeyframeId: editorState.selectedTimelineKeyframeId,
       getTrack: findTimelineTrack,
       getSelectedKeyframe: getSelectedTimelineKeyframe,
       onSelectBasePose: selectBasePoseTimeline,
@@ -2872,8 +2859,8 @@ function renderPrefabTimeline(): void {
 
   renderTimelinePanel({
     elements,
-    animation: prefabAnimation,
-    currentTimeMs: timelineCurrentTimeMs,
+    animation: editorState.prefabAnimation,
+    currentTimeMs: editorState.timelineCurrentTimeMs,
     defaultDurationMs: DEFAULT_TIMELINE_DURATION_MS,
     activeClip,
     selectedNode:
@@ -2882,7 +2869,7 @@ function renderPrefabTimeline(): void {
         : null,
     activeProperty,
     laneProperties: TIMELINE_LANE_PROPERTIES,
-    selectedKeyframeId: selectedTimelineKeyframeId,
+    selectedKeyframeId: editorState.selectedTimelineKeyframeId,
     getTrack: findTimelineTrack,
     getSelectedKeyframe: getSelectedTimelineKeyframe,
     onSelectBasePose: selectBasePoseTimeline,
@@ -2894,9 +2881,9 @@ function renderPrefabTimeline(): void {
         return;
       }
 
-      timelineCurrentTimeMs = timeMsFromTimelinePointer(event, activeClip);
-      selectedTimelineKeyframeId = null;
-      isTimelinePlaying = false;
+      editorState.timelineCurrentTimeMs = timeMsFromTimelinePointer(event, activeClip);
+      editorState.selectedTimelineKeyframeId = null;
+      editorState.isTimelinePlaying = false;
       rebuildViewportProxies();
       renderEditorShell();
       exposeEditorDebugHooks();
@@ -2908,9 +2895,9 @@ function renderPrefabTimeline(): void {
         return;
       }
 
-      selectedTimelineKeyframeId = keyframeId;
-      timelineCurrentTimeMs = timeMs;
-      isTimelinePlaying = false;
+      editorState.selectedTimelineKeyframeId = keyframeId;
+      editorState.timelineCurrentTimeMs = timeMs;
+      editorState.isTimelinePlaying = false;
       renderEditorShell();
       exposeEditorDebugHooks();
     },
@@ -2921,7 +2908,7 @@ function renderPrefabTimeline(): void {
         return;
       }
 
-      selectedTimelineKeyframeId = keyframeId;
+      editorState.selectedTimelineKeyframeId = keyframeId;
       timelinePointerDrag = {
         keyframeId,
         property,
@@ -4068,7 +4055,7 @@ function getInPlacePathEditScreenControls(): PathEditScreenControl[] {
 }
 
 function getValidInPlacePathEditSession(): InPlacePathEditSession | null {
-  if (editorMode !== "asset" || activeEditorTool !== "path" || !inPlacePathEditSession) {
+  if (editorMode !== "asset" || editorState.activeEditorTool !== "path" || !inPlacePathEditSession) {
     return null;
   }
 
@@ -4265,7 +4252,7 @@ function getSelectedTimelineKeyframe(
   track: PrefabAnimationTrack;
   keyframe: PrefabAnimationTrack["keyframes"][number];
 } | null {
-  return getSelectedTimelineKeyframeFromState(clip, selectedTimelineKeyframeId);
+  return getSelectedTimelineKeyframeFromState(clip, editorState.selectedTimelineKeyframeId);
 }
 
 function timeMsFromTimelinePointer(
@@ -4278,7 +4265,7 @@ function timeMsFromTimelinePointer(
     (event.currentTarget instanceof HTMLElement ? event.currentTarget : null);
 
   if (!target) {
-    return clampTimelineTimeMs(timelineCurrentTimeMs, clip);
+    return clampTimelineTimeMs(editorState.timelineCurrentTimeMs, clip);
   }
 
   const rect = target.getBoundingClientRect();
@@ -4289,11 +4276,11 @@ function timeMsFromTimelinePointer(
 }
 
 function resetPrefabTimelineState(): void {
-  prefabAnimation = createEmptyPrefabAnimation();
-  timelineStagingPoses = new TimelineStagingPoseStore();
-  timelineCurrentTimeMs = 0;
-  isTimelinePlaying = false;
-  selectedTimelineKeyframeId = null;
+  editorState.prefabAnimation = createEmptyPrefabAnimation();
+  editorState.timelineStagingPoses = new TimelineStagingPoseStore();
+  editorState.timelineCurrentTimeMs = 0;
+  editorState.isTimelinePlaying = false;
+  editorState.selectedTimelineKeyframeId = null;
   timelinePointerDrag = null;
   discardInPlacePathEditSession();
 }
@@ -4331,7 +4318,7 @@ function getTimelineStagingPose(
   nodeId: string,
   clip: PrefabAnimationClip | null = getActiveTimelineClip(),
 ): TimelineStagingPose | null {
-  return timelineStagingPoses.get(nodeId, clip);
+  return editorState.timelineStagingPoses.get(nodeId, clip);
 }
 
 function getOrCreateTimelineStagingPose(
@@ -4339,7 +4326,7 @@ function getOrCreateTimelineStagingPose(
   clip: PrefabAnimationClip,
   asset?: PrimitiveSvgAsset | null,
 ): TimelineStagingPose {
-  return timelineStagingPoses.getOrCreate(node, clip, asset);
+  return editorState.timelineStagingPoses.getOrCreate(node, clip, asset);
 }
 
 function getTimelineStagingWorldTransform(
@@ -4356,7 +4343,7 @@ function getSelectedTimelineStagingPose(): TimelineStagingPose | null {
     selectedNode: getSelectedPrefabNode(),
     activeClip: getActiveTimelineClip(),
     assetsById: getAssetsById(),
-    stagingPoses: timelineStagingPoses,
+    stagingPoses: editorState.timelineStagingPoses,
   });
 }
 
@@ -4365,7 +4352,7 @@ function getSelectedTimelineStagingTransform(): TransformSnapshot | null {
     selectedNode: getSelectedPrefabNode(),
     activeClip: getActiveTimelineClip(),
     assetsById: getAssetsById(),
-    stagingPoses: timelineStagingPoses,
+    stagingPoses: editorState.timelineStagingPoses,
   });
 }
 
@@ -4377,13 +4364,13 @@ function syncInPlacePathSessionToStagingPose(): void {
     return;
   }
 
-  timelineStagingPoses.syncPathDraft(session.nodeId, session.draft);
+  editorState.timelineStagingPoses.syncPathDraft(session.nodeId, session.draft);
 }
 
 function pruneTimelineStagingPoses(
   options?: TimelineStagingPruneOptions,
 ): void {
-  timelineStagingPoses.prune(options, getPrefabNode);
+  editorState.timelineStagingPoses.prune(options, getPrefabNode);
 }
 
 function createNextPrefabNodeId(): string {
@@ -4436,7 +4423,7 @@ function snapAndClampTimelineTimeMs(
   return snapAndClampTimelineTimeMsWithFps(
     timeMs,
     clip,
-    prefabAnimation.snapFps,
+    editorState.prefabAnimation.snapFps,
   );
 }
 
@@ -4498,12 +4485,12 @@ function exposeEditorDebugHooks(): void {
       const stagingPose = getSelectedTimelineStagingPose();
 
       return {
-        animation: clonePrefabAnimation(prefabAnimation),
-        currentTimeMs: timelineCurrentTimeMs,
-        isPlaying: isTimelinePlaying,
-        selectedClipId: prefabAnimation.activeClipId,
+        animation: clonePrefabAnimation(editorState.prefabAnimation),
+        currentTimeMs: editorState.timelineCurrentTimeMs,
+        isPlaying: editorState.isTimelinePlaying,
+        selectedClipId: editorState.prefabAnimation.activeClipId,
         activeTrackProperty: getActiveTimelineProperty(),
-        selectedKeyframeId: selectedTimelineKeyframeId,
+        selectedKeyframeId: editorState.selectedTimelineKeyframeId,
         evaluatedNodes: getEvaluatedPrefabNodes(),
         evaluatedPathOverrides: [...getEvaluatedPrefabPathOverrides()].map(
           ([nodeId, path]) => ({
@@ -4565,7 +4552,7 @@ function exposeEditorDebugHooks(): void {
         renderCache.getAssetAssemblyBillboardCount(),
       cachedSceneLayoutBillboardCount: renderCache.getSceneLayoutBillboardCount(),
     }),
-    getActiveEditorTool: () => activeEditorTool,
+    getActiveEditorTool: () => editorState.activeEditorTool,
     getScenes: () => [...editorState.scenes],
     getEditorMode: () => editorMode,
     getSelectedProjectId: () => editorState.selectedProjectId,
@@ -4582,6 +4569,7 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }
+
 
 
 
