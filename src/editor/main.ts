@@ -328,8 +328,6 @@ const initialAppState = createInitialEditorAppState({
 const appStateStore = createEditorAppStateStore(initialAppState);
 const editorState = appStateStore.getMutableState();
 
-let scenes: SceneRecord[] = initialAppState.scenes;
-let sceneNodes: SceneNode[] = initialAppState.sceneNodes;
 let editorMode: EditorMode = initialAppState.editorMode;
 let prefabAnimation: PrefabAnimation = initialAppState.prefabAnimation;
 let timelineStagingPoses = initialAppState.timelineStagingPoses;
@@ -339,9 +337,6 @@ let selectedTimelineKeyframeId: string | null =
   initialAppState.selectedTimelineKeyframeId;
 let timelinePointerDrag: TimelinePointerDrag | null = null;
 let activeEditorTool: EditorTool = initialAppState.activeEditorTool;
-let selectedSceneId: string | null = initialAppState.selectedSceneId;
-let loadedSceneId: string | null = initialAppState.loadedSceneId;
-let selectedSceneNodeId: string | null = initialAppState.selectedSceneNodeId;
 let pathEditSession: SourcePathEditSession | null = null;
 let pathEdit3DSession: SourcePathEdit3DSession | null = null;
 let pathEditDragState: PathEditDragState | null = null;
@@ -351,13 +346,10 @@ let inPlacePathEditDragState: PathEditDragState | null = null;
 let inPlacePathEditHoveredControl: PathEditDragState | null = null;
 let inPlacePathEditCameraDragActive = false;
 let lastFrameTime = performance.now();
-let nextSceneNodeNumber = initialAppState.nextSceneNodeNumber;
 let pendingCameraInspectorRender = false;
 
 function syncAppStateStore(): void {
   appStateStore.patch({
-    scenes,
-    sceneNodes,
     editorMode,
     prefabAnimation,
     timelineStagingPoses,
@@ -365,10 +357,6 @@ function syncAppStateStore(): void {
     isTimelinePlaying,
     selectedTimelineKeyframeId,
     activeEditorTool,
-    selectedSceneId,
-    loadedSceneId,
-    selectedSceneNodeId,
-    nextSceneNodeNumber,
   });
 }
 
@@ -749,7 +737,7 @@ function bindEditorEvents(): void {
   elements.resetViewButton.addEventListener("click", () => {
     threeViewport.resetView();
     if (editorMode === "scene") {
-      loadedSceneId = null;
+      editorState.loadedSceneId = null;
     }
     renderCache.markAllDirty();
     renderEditorShell();
@@ -763,7 +751,7 @@ function bindEditorEvents(): void {
         syncActiveToolAfterSelectionChange();
         rebuildViewportProxies();
       } else if (editorMode === "scene") {
-        selectedSceneNodeId = nodeId;
+        editorState.selectedSceneNodeId = nodeId;
         syncSelectionFromSceneNode();
         renderCache.markSceneBillboardsDirty();
       }
@@ -787,7 +775,7 @@ function bindEditorEvents(): void {
     },
     onCameraChange: () => {
       if (editorMode === "scene") {
-        loadedSceneId = null;
+        editorState.loadedSceneId = null;
       }
       renderCache.markAllDirty();
       scheduleCameraInspectorRender();
@@ -919,24 +907,24 @@ async function refreshPrefabs(): Promise<void> {
 
 async function refreshScenes(): Promise<void> {
   if (!editorState.selectedProjectId) {
-    scenes = [];
-    selectedSceneId = null;
-    loadedSceneId = null;
+    editorState.scenes = [];
+    editorState.selectedSceneId = null;
+    editorState.loadedSceneId = null;
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
   }
 
-  scenes = await listScenes(editorState.selectedProjectId);
+  editorState.scenes = await listScenes(editorState.selectedProjectId);
   const nextScene = reconcileSceneSelection(
-    selectedSceneId,
-    loadedSceneId,
-    scenes,
+    editorState.selectedSceneId,
+    editorState.loadedSceneId,
+    editorState.scenes,
   );
-  selectedSceneId = nextScene.nextSelectedSceneId;
+  editorState.selectedSceneId = nextScene.nextSelectedSceneId;
 
   if (nextScene.missingLoadedSceneId) {
-    loadedSceneId = null;
+    editorState.loadedSceneId = null;
   }
 
   renderEditorShell();
@@ -1454,14 +1442,14 @@ async function addSelectedPrefabToScene(): Promise<void> {
   }
 
   const nextSceneState = addPrefabInstanceToScene({
-    nodes: sceneNodes,
+    nodes: editorState.sceneNodes,
     prefabId: prefabResult.value,
-    nodeNumber: nextSceneNodeNumber,
+    nodeNumber: editorState.nextSceneNodeNumber,
   });
-  sceneNodes = nextSceneState.nodes;
-  selectedSceneNodeId = nextSceneState.selectedSceneNodeId;
-  nextSceneNodeNumber = nextSceneState.nextSceneNodeNumber;
-  loadedSceneId = null;
+  editorState.sceneNodes = nextSceneState.nodes;
+  editorState.selectedSceneNodeId = nextSceneState.selectedSceneNodeId;
+  editorState.nextSceneNodeNumber = nextSceneState.nextSceneNodeNumber;
+  editorState.loadedSceneId = null;
   setEditorMode("scene");
   editorState.lastImportError = null;
   hideError();
@@ -1499,8 +1487,8 @@ async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
     const nextSceneState = applyLoadedSceneDocument(result);
 
     elements.sceneNameInput.value = "";
-    selectedSceneId = nextSceneState.selectedSceneId;
-    loadedSceneId = nextSceneState.loadedSceneId;
+    editorState.selectedSceneId = nextSceneState.selectedSceneId;
+    editorState.loadedSceneId = nextSceneState.loadedSceneId;
     applySceneDocument(result.document);
     setEditorMode("scene");
     editorState.lastImportError = null;
@@ -1517,7 +1505,7 @@ async function saveSelectedScene(): Promise<void> {
     "Select a saved scene before saving.",
   );
   const sceneResult = requireCommandValue(
-    selectedSceneId,
+    editorState.selectedSceneId,
     "Select a saved scene before saving.",
   );
 
@@ -1540,8 +1528,8 @@ async function saveSelectedScene(): Promise<void> {
     });
     const nextSceneState = applySavedSceneDocument(result);
 
-    selectedSceneId = nextSceneState.selectedSceneId;
-    loadedSceneId = nextSceneState.loadedSceneId;
+    editorState.selectedSceneId = nextSceneState.selectedSceneId;
+    editorState.loadedSceneId = nextSceneState.loadedSceneId;
     editorState.lastImportError = null;
     hideError();
     await refreshScenes();
@@ -1556,7 +1544,7 @@ async function loadSelectedScene(): Promise<void> {
     "Select a saved scene before loading.",
   );
   const sceneResult = requireCommandValue(
-    selectedSceneId,
+    editorState.selectedSceneId,
     "Select a saved scene before loading.",
   );
 
@@ -1578,8 +1566,8 @@ async function loadSelectedScene(): Promise<void> {
     });
     const nextSceneState = applyLoadedSceneDocument(result);
     applySceneDocument(result.document);
-    selectedSceneId = nextSceneState.selectedSceneId;
-    loadedSceneId = nextSceneState.loadedSceneId;
+    editorState.selectedSceneId = nextSceneState.selectedSceneId;
+    editorState.loadedSceneId = nextSceneState.loadedSceneId;
     setEditorMode("scene");
     editorState.lastImportError = null;
     hideError();
@@ -1589,18 +1577,21 @@ async function loadSelectedScene(): Promise<void> {
 }
 
 async function deleteSelectedScene(): Promise<void> {
-  if (!editorState.selectedProjectId || !selectedSceneId) {
+  if (!editorState.selectedProjectId || !editorState.selectedSceneId) {
     return;
   }
 
   try {
     const deletedSceneId = await runDeleteSceneCommand({
       projectId: editorState.selectedProjectId,
-      sceneId: selectedSceneId,
+      sceneId: editorState.selectedSceneId,
       deleteScene,
     });
     const nextSceneState = applyDeletedSceneDocument(
-      { selectedSceneId, loadedSceneId },
+      {
+        selectedSceneId: editorState.selectedSceneId,
+        loadedSceneId: editorState.loadedSceneId,
+      },
       deletedSceneId,
     );
 
@@ -1608,8 +1599,8 @@ async function deleteSelectedScene(): Promise<void> {
       clearSceneLayout();
     }
 
-    selectedSceneId = nextSceneState.selectedSceneId;
-    loadedSceneId = nextSceneState.loadedSceneId;
+    editorState.selectedSceneId = nextSceneState.selectedSceneId;
+    editorState.loadedSceneId = nextSceneState.loadedSceneId;
     editorState.lastImportError = null;
     hideError();
     await refreshScenes();
@@ -1619,14 +1610,14 @@ async function deleteSelectedScene(): Promise<void> {
 }
 
 function deleteSelectedSceneNode(): void {
-  if (!selectedSceneNodeId) {
+  if (!editorState.selectedSceneNodeId) {
     return;
   }
 
-  const nextSceneState = deleteSceneNodeById(sceneNodes, selectedSceneNodeId);
-  sceneNodes = nextSceneState.nodes;
-  selectedSceneNodeId = nextSceneState.selectedSceneNodeId;
-  loadedSceneId = null;
+  const nextSceneState = deleteSceneNodeById(editorState.sceneNodes, editorState.selectedSceneNodeId);
+  editorState.sceneNodes = nextSceneState.nodes;
+  editorState.selectedSceneNodeId = nextSceneState.selectedSceneNodeId;
+  editorState.loadedSceneId = null;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1635,7 +1626,7 @@ function deleteSelectedSceneNode(): void {
 function toggleProjection(): void {
   threeViewport.toggleProjection();
   if (editorMode === "scene") {
-    loadedSceneId = null;
+    editorState.loadedSceneId = null;
   }
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1786,36 +1777,36 @@ function clearProjectWorkspace(): void {
   editorState.assets = emptyWorkspace.assets;
   editorState.prefabs = emptyWorkspace.prefabs;
   editorState.prefabDocuments = emptyWorkspace.prefabDocuments;
-  scenes = emptyWorkspace.scenes;
+  editorState.scenes = emptyWorkspace.scenes;
   editorState.prefabNodes = [];
   resetPrefabTimelineState();
-  sceneNodes = [];
+  editorState.sceneNodes = [];
   editorState.selectedAssetId = emptyWorkspace.selectedAssetId;
   editorState.selectedPrefabId = emptyWorkspace.selectedPrefabId;
   editorState.loadedPrefabId = emptyWorkspace.loadedPrefabId;
   editorState.selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
   editorState.pendingPrefabClipboard = null;
-  selectedSceneId = emptyWorkspace.selectedSceneId;
-  loadedSceneId = emptyWorkspace.loadedSceneId;
-  selectedSceneNodeId = emptyWorkspace.selectedSceneNodeId;
+  editorState.selectedSceneId = emptyWorkspace.selectedSceneId;
+  editorState.loadedSceneId = emptyWorkspace.loadedSceneId;
+  editorState.selectedSceneNodeId = emptyWorkspace.selectedSceneNodeId;
   pathEditSession = null;
   pathEdit3DSession = null;
   pathEditDragState = null;
   threeViewport.clearCurve3DControls();
   editorState.nextPrefabNodeNumber = 1;
-  nextSceneNodeNumber = 1;
+  editorState.nextSceneNodeNumber = 1;
   threeViewport.clearNodes();
 }
 
 function clearSceneLayout(): void {
-  sceneNodes = [];
-  selectedSceneNodeId = null;
-  loadedSceneId = null;
+  editorState.sceneNodes = [];
+  editorState.selectedSceneNodeId = null;
+  editorState.loadedSceneId = null;
   pathEditDragState = null;
   if (editorMode !== "path") {
     threeViewport.clearCurve3DControls();
   }
-  nextSceneNodeNumber = 1;
+  editorState.nextSceneNodeNumber = 1;
 
   if (editorMode === "scene") {
     rebuildViewportProxies();
@@ -1845,7 +1836,7 @@ function applyPrefabDocument(document: PrefabDocument): void {
 }
 
 function createCurrentSceneDocument(): SceneDocument {
-  return createSceneDocument(threeViewport.getCameraSnapshot(), sceneNodes);
+  return createSceneDocument(threeViewport.getCameraSnapshot(), editorState.sceneNodes);
 }
 
 function createEmptySceneDocument(): SceneDocument {
@@ -1856,9 +1847,9 @@ function applySceneDocument(document: SceneDocument): void {
   const nextState = applySceneDocumentState(document);
 
   threeViewport.applyCameraSnapshot(document.camera);
-  sceneNodes = nextState.nodes;
-  selectedSceneNodeId = nextState.selectedNodeId;
-  nextSceneNodeNumber = nextState.nextNodeNumber;
+  editorState.sceneNodes = nextState.nodes;
+  editorState.selectedSceneNodeId = nextState.selectedNodeId;
+  editorState.nextSceneNodeNumber = nextState.nextNodeNumber;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1896,11 +1887,11 @@ function rebuildViewportProxies(): void {
     return;
   }
 
-  for (const proxy of createSceneViewportProxyNodes(sceneNodes, getAssetById)) {
+  for (const proxy of createSceneViewportProxyNodes(editorState.sceneNodes, getAssetById)) {
     threeViewport.addOrUpdateNode(proxy.node, proxy.asset ?? undefined);
   }
 
-  threeViewport.setSelectedNode(selectedSceneNodeId);
+  threeViewport.setSelectedNode(editorState.selectedSceneNodeId);
 }
 
 function syncNodeFromViewport(nodeId: string): void {
@@ -1972,7 +1963,7 @@ function syncNodeFromViewport(nodeId: string): void {
   }
 
   threeViewport.syncNodeFromProxy(node);
-  loadedSceneId = null;
+  editorState.loadedSceneId = null;
   renderCache.markSceneBillboardsDirty();
 }
 
@@ -2604,7 +2595,7 @@ function pastePendingPrefabClipboard(): void {
 }
 
 function syncSelectionFromSceneNode(): void {
-  const node = selectedSceneNodeId ? getSceneNode(selectedSceneNodeId) : null;
+  const node = editorState.selectedSceneNodeId ? getSceneNode(editorState.selectedSceneNodeId) : null;
 
   if (!node) {
     return;
@@ -2656,8 +2647,8 @@ function renderEditorShell(): void {
     selectedProjectId: editorState.selectedProjectId,
     selectedAssetId: editorState.selectedAssetId,
     selectedPrefabId: editorState.selectedPrefabId,
-    selectedSceneId,
-    selectedSceneNodeId,
+    selectedSceneId: editorState.selectedSceneId,
+    selectedSceneNodeId: editorState.selectedSceneNodeId,
     selectedPrefabNodeId: editorState.selectedPrefabNodeId,
     prefabRootNodeId: PREFAB_ROOT_NODE_ID,
     pendingPrefabClipboard: Boolean(editorState.pendingPrefabClipboard),
@@ -2941,18 +2932,18 @@ function renderPrefabTimeline(): void {
 
 function renderSceneList(): void {
   elements.sceneList.replaceChildren(
-    ...scenes.map((scene) => {
+    ...editorState.scenes.map((scene) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
-      const loadedMarker = scene.id === loadedSceneId ? " *" : "";
+      const loadedMarker = scene.id === editorState.loadedSceneId ? " *" : "";
 
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.sceneId = scene.id;
-      button.dataset.selected = String(scene.id === selectedSceneId);
+      button.dataset.selected = String(scene.id === editorState.selectedSceneId);
       button.textContent = `${scene.name}${loadedMarker}`;
       button.addEventListener("click", () => {
-        selectedSceneId = scene.id;
+        editorState.selectedSceneId = scene.id;
         renderEditorShell();
         exposeEditorDebugHooks();
       });
@@ -2965,17 +2956,17 @@ function renderSceneList(): void {
 
 function renderSceneNodeList(): void {
   elements.sceneNodeList.replaceChildren(
-    ...sceneNodes.map((node) => {
+    ...editorState.sceneNodes.map((node) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
 
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.nodeId = node.id;
-      button.dataset.selected = String(node.id === selectedSceneNodeId);
+      button.dataset.selected = String(node.id === editorState.selectedSceneNodeId);
       button.textContent = getSceneNodeLabel(node);
       button.addEventListener("click", () => {
-        selectedSceneNodeId = node.id;
+        editorState.selectedSceneNodeId = node.id;
         syncSelectionFromSceneNode();
         if (editorMode === "scene") {
           threeViewport.setSelectedNode(node.id);
@@ -3139,8 +3130,8 @@ function renderAssetModeInspector(): void {
 function renderSceneModeInspector(): void {
   const model = createSceneModeInspectorModel({
     selectedScene: getSelectedScene(),
-    loadedSceneId,
-    selectedNodeId: selectedSceneNodeId,
+    loadedSceneId: editorState.loadedSceneId,
+    selectedNodeId: editorState.selectedSceneNodeId,
     getSceneNode,
     getAssetById,
     getPrefabNameById: (prefabId) => getPrefabRecordById(prefabId)?.name ?? null,
@@ -3401,7 +3392,7 @@ function applyTransformInput(
     }
   } else {
     node[property] = nextValue;
-    loadedSceneId = null;
+    editorState.loadedSceneId = null;
     threeViewport.syncProxyFromNode(node);
     renderCache.markSceneBillboardsDirty();
   }
@@ -3565,8 +3556,8 @@ function getCachedAssetAssemblyBillboards(): DrawableBillboard[] {
 
 function getCachedSceneLayoutBillboards(): DrawableBillboard[] {
   return renderCache.getSceneLayoutBillboards({
-    nodes: sceneNodes,
-    selectedNodeId: selectedSceneNodeId,
+    nodes: editorState.sceneNodes,
+    selectedNodeId: editorState.selectedSceneNodeId,
   });
 }
 
@@ -4224,7 +4215,7 @@ function getSelectedPrefab(): PrefabRecord | null {
 }
 
 function getSelectedScene(): SceneRecord | null {
-  return getSelectedSceneFromState(scenes, selectedSceneId);
+  return getSelectedSceneFromState(editorState.scenes, editorState.selectedSceneId);
 }
 
 function getAssetById(assetId: string): PrimitiveSvgAsset | null {
@@ -4253,7 +4244,7 @@ function getPrefabNode(nodeId: string): PrefabNode | null {
 }
 
 function getSceneNode(nodeId: string): SceneNode | null {
-  return getNodeById(sceneNodes, nodeId);
+  return getNodeById(editorState.sceneNodes, nodeId);
 }
 
 function findTimelineTrack(
@@ -4562,8 +4553,8 @@ function exposeEditorDebugHooks(): void {
           near: camera.near,
           far: camera.far,
         },
-        nodes: sceneNodes.map(cloneSceneNode),
-        selectedNodeId: selectedSceneNodeId,
+        nodes: editorState.sceneNodes.map(cloneSceneNode),
+        selectedNodeId: editorState.selectedSceneNodeId,
         transformMode: threeViewport.currentTransformMode,
         viewportProxies: threeViewport.getProxySnapshot(),
       };
@@ -4575,14 +4566,14 @@ function exposeEditorDebugHooks(): void {
       cachedSceneLayoutBillboardCount: renderCache.getSceneLayoutBillboardCount(),
     }),
     getActiveEditorTool: () => activeEditorTool,
-    getScenes: () => [...scenes],
+    getScenes: () => [...editorState.scenes],
     getEditorMode: () => editorMode,
     getSelectedProjectId: () => editorState.selectedProjectId,
     getSelectedAssetId: () => editorState.selectedAssetId,
     getSelectedPrefabId: () => editorState.selectedPrefabId,
     getLoadedPrefabId: () => editorState.loadedPrefabId,
-    getSelectedSceneId: () => selectedSceneId,
-    getLoadedSceneId: () => loadedSceneId,
+    getSelectedSceneId: () => editorState.selectedSceneId,
+    getLoadedSceneId: () => editorState.loadedSceneId,
     getLastImportError: () => editorState.lastImportError,
     getCollapsedModules: () =>
       COLLAPSIBLE_MODULE_IDS.filter((moduleId) =>
@@ -4591,5 +4582,6 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }
+
 
 
