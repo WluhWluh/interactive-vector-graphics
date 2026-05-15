@@ -127,6 +127,7 @@ import {
 } from "./render/pathEditDrawing";
 import { renderTimelinePanel } from "./ui/timelinePanel";
 import { installEditorDebugHooks } from "./debug/editorDebugHooks";
+import { createEditorRenderLoop } from "./runtime/editorRenderLoop";
 import {
   appendAssetInspectorRows as appendAssetInspectorRowsForUi,
   appendInspectorActionRow as appendInspectorActionRowForUi,
@@ -322,13 +323,16 @@ const initialAppState = createInitialEditorAppState({
 const appStateStore = createEditorAppStateStore(initialAppState);
 const editorState = appStateStore.getMutableState();
 
-let lastFrameTime = performance.now();
 let pendingCameraInspectorRender = false;
+const renderLoop = createEditorRenderLoop({
+  updateTimelinePlayback,
+  renderPreviewFrame,
+});
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
 void refreshProjects();
-requestAnimationFrame(tick);
+renderLoop.start();
 renderEditorShell();
 exposeEditorDebugHooks();
 
@@ -3263,15 +3267,6 @@ function restoreTransformInput(
   input.value = node
     ? formatTransformValue(node[property][axisIndex] ?? 0)
     : (input.dataset.previousValue ?? "");
-}
-
-function tick(now: DOMHighResTimeStamp): void {
-  const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
-  lastFrameTime = now;
-
-  updateTimelinePlayback(deltaSeconds);
-  renderPreviewFrame();
-  requestAnimationFrame(tick);
 }
 
 function renderPreviewFrame(): void {
