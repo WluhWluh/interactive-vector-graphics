@@ -24,6 +24,8 @@ import {
 import { validatePrefabDocument } from "./prefabDocument";
 import { validateSceneDocument } from "./sceneDocument";
 import { writeTextFileAtomic } from "./persistence/atomicFile";
+import { toDataRelativePath as getDataRelativePath } from "./persistence/dataPaths";
+import { writeJsonDocumentFile } from "./persistence/documentFiles";
 import {
   hydratePrimitiveAssetRow,
   type StoredPrimitiveAssetRow,
@@ -904,20 +906,18 @@ export function createDataStore(dataDir: string): DataStore {
     path: string,
     document: SceneDocument,
   ): Promise<void> {
-    await mkdir(dirname(path), { recursive: true });
-    await writeTextFileAtomic(path, `${JSON.stringify(document, null, 2)}\n`);
+    await writeJsonDocumentFile(path, document);
   }
 
   async function writePrefabDocument(
     path: string,
     document: PrefabDocument,
   ): Promise<void> {
-    await mkdir(dirname(path), { recursive: true });
-    await writeTextFileAtomic(path, `${JSON.stringify(document, null, 2)}\n`);
+    await writeJsonDocumentFile(path, document);
   }
 
   function toDataRelativePath(path: string): string {
-    return path.slice(resolvedDataDir.length + 1).replaceAll("\\", "/");
+    return getDataRelativePath(resolvedDataDir, path);
   }
 
   function ensurePrimitiveAssetColumn(name: string, definition: string): void {
