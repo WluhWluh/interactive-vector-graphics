@@ -19,6 +19,7 @@ import {
   type StructuredBezierPath3D,
 } from "../../src/core/assets/structuredBezierPath3d";
 import { writeTextFileAtomic } from "../persistence/atomicFile";
+import { runFileBackedDatabaseTransaction } from "../persistence/persistenceTransaction";
 import {
   hydratePrimitiveAssetRow,
   type StoredPrimitiveAssetRow,
@@ -147,12 +148,16 @@ export function createPrimitiveAssetStore(
       updatedAt: timestamp,
     };
 
-    await mkdir(dirname(sourcePath), { recursive: true });
-    await writeTextFileAtomic(sourcePath, normalized.svgText);
-    runDatabaseTransaction(() => {
-      database
-        .prepare(
-          `
+    await runFileBackedDatabaseTransaction({
+      writeFiles: async () => {
+        await mkdir(dirname(sourcePath), { recursive: true });
+        await writeTextFileAtomic(sourcePath, normalized.svgText);
+      },
+      writeDatabase: () =>
+        runDatabaseTransaction(() => {
+          database
+            .prepare(
+              `
         INSERT INTO primitive_assets (
           id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
           pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d, createdAt,
@@ -160,25 +165,29 @@ export function createPrimitiveAssetStore(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-        )
-        .run(
-          asset.id,
-          asset.projectId,
-          asset.name,
-          asset.sourceFilename,
-          asset.sourcePath,
-          asset.assetKind,
-          JSON.stringify(asset.viewBox),
-          asset.pathD,
-          asset.fill,
-          asset.fillRule,
-          asset.stroke,
-          asset.strokeWidth,
-          JSON.stringify(asset.bezierPath),
-          null,
-          asset.createdAt,
-          asset.updatedAt,
-        );
+            )
+            .run(
+              asset.id,
+              asset.projectId,
+              asset.name,
+              asset.sourceFilename,
+              asset.sourcePath,
+              asset.assetKind,
+              JSON.stringify(asset.viewBox),
+              asset.pathD,
+              asset.fill,
+              asset.fillRule,
+              asset.stroke,
+              asset.strokeWidth,
+              JSON.stringify(asset.bezierPath),
+              null,
+              asset.createdAt,
+              asset.updatedAt,
+            );
+        }),
+      rollbackFiles: async () => {
+        await rm(sourcePath, { force: true });
+      },
     });
 
     return asset;

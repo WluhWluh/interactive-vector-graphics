@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { PrefabDocument, PrefabRecord } from "../types";
 import { validatePrefabDocument } from "../prefabDocument";
 import { writeJsonDocumentFile } from "../persistence/documentFiles";
+import { runFileBackedDatabaseTransaction } from "../persistence/persistenceTransaction";
 
 export type CreatePrefabInput = {
   projectId: string;
@@ -82,23 +83,29 @@ export function createPrefabStore(
       updatedAt: timestamp,
     };
 
-    await writeJsonDocumentFile(dataPath, input.document);
-    runDatabaseTransaction(() => {
-      database
-        .prepare(
-          `
+    await runFileBackedDatabaseTransaction({
+      writeFiles: () => writeJsonDocumentFile(dataPath, input.document),
+      writeDatabase: () =>
+        runDatabaseTransaction(() => {
+          database
+            .prepare(
+              `
         INSERT INTO prefabs (id, projectId, name, dataPath, createdAt, updatedAt)
         VALUES (?, ?, ?, ?, ?, ?)
       `,
-        )
-        .run(
-          prefab.id,
-          prefab.projectId,
-          prefab.name,
-          prefab.dataPath,
-          prefab.createdAt,
-          prefab.updatedAt,
-        );
+            )
+            .run(
+              prefab.id,
+              prefab.projectId,
+              prefab.name,
+              prefab.dataPath,
+              prefab.createdAt,
+              prefab.updatedAt,
+            );
+        }),
+      rollbackFiles: async () => {
+        await rm(dataPath, { force: true });
+      },
     });
 
     return prefab;

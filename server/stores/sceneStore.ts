@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { SceneDocument, SceneRecord } from "../types";
 import { validateSceneDocument } from "../sceneDocument";
 import { writeJsonDocumentFile } from "../persistence/documentFiles";
+import { runFileBackedDatabaseTransaction } from "../persistence/persistenceTransaction";
 
 export type CreateSceneInput = {
   projectId: string;
@@ -82,23 +83,29 @@ export function createSceneStore(
       updatedAt: timestamp,
     };
 
-    await writeJsonDocumentFile(dataPath, input.document);
-    runDatabaseTransaction(() => {
-      database
-        .prepare(
-          `
+    await runFileBackedDatabaseTransaction({
+      writeFiles: () => writeJsonDocumentFile(dataPath, input.document),
+      writeDatabase: () =>
+        runDatabaseTransaction(() => {
+          database
+            .prepare(
+              `
         INSERT INTO scenes (id, projectId, name, dataPath, createdAt, updatedAt)
         VALUES (?, ?, ?, ?, ?, ?)
       `,
-        )
-        .run(
-          scene.id,
-          scene.projectId,
-          scene.name,
-          scene.dataPath,
-          scene.createdAt,
-          scene.updatedAt,
-        );
+            )
+            .run(
+              scene.id,
+              scene.projectId,
+              scene.name,
+              scene.dataPath,
+              scene.createdAt,
+              scene.updatedAt,
+            );
+        }),
+      rollbackFiles: async () => {
+        await rm(dataPath, { force: true });
+      },
     });
 
     return scene;
