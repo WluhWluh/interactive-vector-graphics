@@ -264,6 +264,7 @@ import {
   getSceneNodeSelectionSync,
   shouldClearRootPrefabAssetSelection,
 } from "./controllers/selectionController";
+import { bindViewportInteractions } from "./controllers/viewportInteractionController";
 import {
   createInPlacePathEditDebugState,
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
@@ -471,20 +472,15 @@ function bindEditorEvents(): void {
     throw new Error("Expected #three-overlay-canvas to be a canvas element.");
   }
 
-  paperCanvas.addEventListener("pointerdown", (event) => {
-    selectPathEditControl(event);
-  });
-  paperCanvas.addEventListener("mousemove", (event) => {
-    updatePathEditHover(event);
-  });
-  paperCanvas.addEventListener("mouseleave", () => {
-    clearPathEditHover();
-  });
-  threeOverlayCanvas.addEventListener(
-    "pointerdown",
-    (event) => {
-      const capturedPathControl = selectInPlacePathEditControl(event);
-
+  bindViewportInteractions({
+    paperCanvas,
+    threeOverlayCanvas,
+    setViewportCallbacks: (callbacks) => threeViewport.setCallbacks(callbacks),
+    selectPathEditControl,
+    updatePathEditHover,
+    clearPathEditHover,
+    selectInPlacePathEditControl,
+    onInPlacePathEditCanvasPointerDown: (capturedPathControl) => {
       editorState.inPlacePathEditCameraDragActive =
         Boolean(getValidInPlacePathEditSession()) && !capturedPathControl;
 
@@ -492,50 +488,18 @@ function bindEditorEvents(): void {
         clearInPlacePathEditHover();
       }
     },
-    { capture: true },
-  );
-  threeOverlayCanvas.addEventListener("mousemove", (event) => {
-    updateInPlacePathEditHover(event);
-  });
-  threeOverlayCanvas.addEventListener("pointermove", (event) => {
-    updateInPlacePathEditHover(event);
-  });
-  threeOverlayCanvas.addEventListener("mouseleave", () => {
-    clearInPlacePathEditHover();
-  });
-  window.addEventListener("pointerdown", (event) => {
-    if (event.target !== paperCanvas) {
-      selectPathEditControl(event);
-    }
-  });
-  window.addEventListener("mousedown", (event) => {
-    if (event.target !== paperCanvas) {
-      selectPathEditControl(event);
-    }
-  });
-  window.addEventListener("pointermove", (event) => {
-    dragSelectedTimelineKeyframe(event);
-    dragPathEditControl(event);
-    dragInPlacePathEditControl(event);
-  });
-  window.addEventListener("mousemove", (event) => {
-    dragPathEditControl(event);
-    dragInPlacePathEditControl(event);
-  });
-  window.addEventListener("pointerup", () => {
-    editorState.timelinePointerDrag = null;
-    editorState.pathEditDragState = null;
-    editorState.pathEditHoveredControl = null;
-    editorState.inPlacePathEditDragState = null;
-    editorState.inPlacePathEditHoveredControl = null;
-    editorState.inPlacePathEditCameraDragActive = false;
-  });
-  window.addEventListener("mouseup", () => {
-    editorState.pathEditDragState = null;
-    editorState.pathEditHoveredControl = null;
-    editorState.inPlacePathEditDragState = null;
-    editorState.inPlacePathEditHoveredControl = null;
-    editorState.inPlacePathEditCameraDragActive = false;
+    updateInPlacePathEditHover,
+    clearInPlacePathEditHover,
+    dragSelectedTimelineKeyframe,
+    dragPathEditControl,
+    dragInPlacePathEditControl,
+    clearPointerDragState: clearPointerDragState,
+    clearMouseDragState: clearMouseDragState,
+    onSelectionChange: handleViewportSelectionChange,
+    onObjectTransform: handleViewportObjectTransform,
+    onCurve3DControlSelection: selectSourcePathEdit3DControlById,
+    onCurve3DControlTransform: updateSourcePathEdit3DControlPosition,
+    onCameraChange: handleViewportCameraChange,
   });
   elements.createSceneButton.addEventListener("click", () => {
     void createSceneFromInput("empty");
@@ -607,45 +571,57 @@ function bindEditorEvents(): void {
     renderEditorShell();
     exposeEditorDebugHooks();
   });
-  threeViewport.setCallbacks({
-    onSelectionChange: (nodeId) => {
-      if (editorState.editorMode === "asset") {
-        editorState.selectedPrefabNodeId = nodeId;
-        syncSelectionFromPrefabNode();
-        syncActiveToolAfterSelectionChange();
-        rebuildViewportProxies();
-      } else if (editorState.editorMode === "scene") {
-        editorState.selectedSceneNodeId = nodeId;
-        syncSelectionFromSceneNode();
-        renderCache.markSceneBillboardsDirty();
-      }
+}
 
-      renderEditorShell();
-      exposeEditorDebugHooks();
-    },
-    onObjectTransform: (nodeId) => {
-      if (editorState.editorMode === "path") {
-        return;
-      }
-      syncNodeFromViewport(nodeId);
-      renderEditorShell();
-      exposeEditorDebugHooks();
-    },
-    onCurve3DControlSelection: (controlId) => {
-      selectSourcePathEdit3DControlById(controlId);
-    },
-    onCurve3DControlTransform: (controlId, position) => {
-      updateSourcePathEdit3DControlPosition(controlId, position);
-    },
-    onCameraChange: () => {
-      if (editorState.editorMode === "scene") {
-        editorState.loadedSceneId = null;
-      }
-      renderCache.markAllDirty();
-      scheduleCameraInspectorRender();
-      exposeEditorDebugHooks();
-    },
-  });
+function clearPointerDragState(): void {
+  editorState.timelinePointerDrag = null;
+  editorState.pathEditDragState = null;
+  editorState.pathEditHoveredControl = null;
+  editorState.inPlacePathEditDragState = null;
+  editorState.inPlacePathEditHoveredControl = null;
+  editorState.inPlacePathEditCameraDragActive = false;
+}
+
+function clearMouseDragState(): void {
+  editorState.pathEditDragState = null;
+  editorState.pathEditHoveredControl = null;
+  editorState.inPlacePathEditDragState = null;
+  editorState.inPlacePathEditHoveredControl = null;
+  editorState.inPlacePathEditCameraDragActive = false;
+}
+
+function handleViewportSelectionChange(nodeId: string | null): void {
+  if (editorState.editorMode === "asset") {
+    editorState.selectedPrefabNodeId = nodeId;
+    syncSelectionFromPrefabNode();
+    syncActiveToolAfterSelectionChange();
+    rebuildViewportProxies();
+  } else if (editorState.editorMode === "scene") {
+    editorState.selectedSceneNodeId = nodeId;
+    syncSelectionFromSceneNode();
+    renderCache.markSceneBillboardsDirty();
+  }
+
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function handleViewportObjectTransform(nodeId: string): void {
+  if (editorState.editorMode === "path") {
+    return;
+  }
+  syncNodeFromViewport(nodeId);
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function handleViewportCameraChange(): void {
+  if (editorState.editorMode === "scene") {
+    editorState.loadedSceneId = null;
+  }
+  renderCache.markAllDirty();
+  scheduleCameraInspectorRender();
+  exposeEditorDebugHooks();
 }
 
 function scheduleCameraInspectorRender(): void {
