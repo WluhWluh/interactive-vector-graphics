@@ -87,6 +87,10 @@ Then open:
 
 ## Architecture Direction
 
+See [docs/architecture.md](docs/architecture.md) for the current engineering
+boundaries between asset data, pose layers, tools, rendering, backend stores,
+and tests.
+
 - SVG/path assets remain the source of truth for authored graphics.
 - Canvas Path2D is the main lightweight runtime for key vector actors in the
   stage and editor preview layers.

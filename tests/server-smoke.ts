@@ -10,6 +10,7 @@ import {
   parsePathDToStructuredBezier,
   structuredBezierToPathD,
 } from "../src/core/assets/structuredBezierPath";
+import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 import type { PrefabDocument, SceneDocument } from "../server/types";
 import {
   assertInvalidPrefabDocument,
