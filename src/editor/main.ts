@@ -48,7 +48,6 @@ import {
   type PrefabAnimationTrack,
   type PrefabPathAnimationKeyframe,
   type PrefabVectorAnimationKeyframe,
-  type PrefabVectorTrackProperty,
   type PrefabTrackEasing,
   type PrefabTrackProperty,
   type PrefabDocument,
@@ -196,9 +195,12 @@ import {
 } from "./tools/pathEdit3dCore";
 import {
   canUsePathToolForSelection,
+  getToolDefinition,
   getEditorToolForTimelineProperty,
   getFallbackTransformTool,
   getTimelinePropertyForEditorTool,
+  TIMELINE_LANE_PROPERTIES,
+  TRANSFORM_TOOL_DEFINITIONS,
   type EditorTool,
   type TransformProperty,
 } from "./tools/toolController";
@@ -241,23 +243,12 @@ import {
 } from "./controllers/timelineController";
 
 type EditorMode = "asset" | "path" | "scene";
-type TimelineVectorProperty = PrefabVectorTrackProperty;
-type TimelineLaneProperty = PrefabTrackProperty;
 type TimelinePointerDrag = {
   keyframeId: string;
   property: PrefabTrackProperty;
 };
 type SceneCreateSource = "empty" | "current";
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
-const TIMELINE_VECTOR_PROPERTIES: TimelineVectorProperty[] = [
-  "position",
-  "rotation",
-  "scale",
-];
-const TIMELINE_LANE_PROPERTIES: TimelineLaneProperty[] = [
-  ...TIMELINE_VECTOR_PROPERTIES,
-  "path",
-];
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
 const PATH_EDIT_HIT_RADIUS = 10;
@@ -1405,24 +1396,28 @@ function toggleProjection(): void {
 }
 
 function setActiveEditorTool(tool: EditorTool): void {
-  if (tool === "path" && !canUsePathTool()) {
+  const definition = getToolDefinition(tool);
+
+  if (!canUseTool(tool)) {
     fallbackToTransformTool();
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
   }
 
-  if (tool === "path") {
-    activeEditorTool = "path";
-    threeViewport.setTransformControlsVisible(false);
+  activeEditorTool = tool;
+  threeViewport.setTransformControlsVisible(definition.usesTransformControls);
+
+  if (definition.usesPathOverlay) {
     threeViewport.setOrbitControlsEnabled(true);
     startInPlacePathEditSession();
     return;
   }
 
-  activeEditorTool = tool;
-  threeViewport.setTransformMode(tool);
-  threeViewport.setTransformControlsVisible(true);
+  if (isTransformEditorTool(tool)) {
+    threeViewport.setTransformMode(tool);
+  }
+
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -2544,20 +2539,15 @@ function renderEditorShell(): void {
     threeViewport.currentProjection === "perspective"
       ? "Perspective"
       : "Orthographic";
-  elements.transformTranslateButton.dataset.selected = String(
-    activeEditorTool === "translate",
-  );
-  elements.transformRotateButton.dataset.selected = String(
-    activeEditorTool === "rotate",
-  );
-  elements.transformScaleButton.dataset.selected = String(
-    activeEditorTool === "scale",
-  );
-  const canEditInPlacePath = canUsePathTool();
-  elements.transformPathButton.disabled = !canEditInPlacePath;
-  elements.transformPathButton.dataset.selected = String(
-    activeEditorTool === "path",
-  );
+  syncToolButtonState(elements.transformTranslateButton, "translate");
+  syncToolButtonState(elements.transformRotateButton, "rotate");
+  syncToolButtonState(elements.transformScaleButton, "scale");
+  syncToolButtonState(elements.transformPathButton, "path");
+}
+
+function syncToolButtonState(button: HTMLButtonElement, tool: EditorTool): void {
+  button.disabled = !canUseTool(tool);
+  button.dataset.selected = String(activeEditorTool === tool);
 }
 
 function renderProjectList(): void {
@@ -4427,6 +4417,10 @@ function getSelectedPrefabNode(): PrefabNode | null {
 }
 
 function canUsePathTool(): boolean {
+  return canUseTool("path");
+}
+
+function canUseTool(tool: EditorTool): boolean {
   const selection = getSelectedInPlacePathNodeAndAsset();
 
   return canUsePathToolForSelection({
@@ -4434,7 +4428,11 @@ function canUsePathTool(): boolean {
     hasActiveClip: Boolean(getActiveTimelineClip()),
     hasPrimitiveSelection: Boolean(selection),
     assetKind: selection?.asset.assetKind ?? null,
-  });
+  }) || tool !== "path";
+}
+
+function isTransformEditorTool(tool: EditorTool): tool is TransformMode {
+  return TRANSFORM_TOOL_DEFINITIONS.some((definition) => definition.id === tool);
 }
 
 function getTimelineStagingPose(
