@@ -183,12 +183,12 @@ import {
 import { getEditorElements } from "./ui/editorDom";
 import {
   COLLAPSIBLE_MODULE_IDS,
-  getModuleCollapseButton,
   readCollapsedModuleCookie,
   renderCollapsibleModules as renderCollapsibleModulesForState,
   writeCollapsedModuleCookie,
   type CollapsibleModuleId,
 } from "./ui/collapsibleModules";
+import { bindEditorUiEvents } from "./ui/editorEventBindings";
 import {
   getPathEdit3DComponentPoint,
   getPathEdit3DSegment,
@@ -344,126 +344,62 @@ renderEditorShell();
 exposeEditorDebugHooks();
 
 function bindEditorEvents(): void {
-  for (const moduleId of COLLAPSIBLE_MODULE_IDS) {
-    const button = getModuleCollapseButton(moduleId);
-    button.addEventListener("click", () => {
-      toggleCollapsibleModule(moduleId);
-    });
-  }
+  bindEditorUiEvents({
+    elements,
+    collapsibleModuleIds: COLLAPSIBLE_MODULE_IDS,
+    callbacks: {
+      onToggleCollapsibleModule: toggleCollapsibleModule,
+      onSetEditorMode: setEditorMode,
+      onCreateProject: () => void createProjectFromInput(),
+      onDeleteProject: () => void deleteSelectedProject(),
+      onCreatePrefab: () => void createPrefabFromInput(),
+      onLoadPrefab: () => void loadSelectedPrefab(),
+      onSavePrefab: () => void saveSelectedPrefab(),
+      onDeletePrefab: () => void deleteSelectedPrefab(),
+      onCreatePrefabGroup: createPrefabGroup,
+      onPrefabClipboardPrimary: handlePrefabClipboardPrimaryAction,
+      onPrefabClipboardSecondary: handlePrefabClipboardSecondaryAction,
+      onDeletePrefabNode: deleteSelectedPrefabNode,
+      onCreateTimelineClip: createTimelineClipFromInput,
+      onDeleteTimelineClip: deleteSelectedTimelineClip,
+      onPlayTimeline: playTimeline,
+      onPauseTimeline: pauseTimeline,
+      onStopTimeline: stopTimeline,
+      onApplyTimelineTime: applyTimelineTimeInput,
+      onApplyTimelineDuration: applyTimelineDurationInput,
+      onApplyTimelineSnapFps: applyTimelineSnapFpsInput,
+      onApplyTimelineLoop: applyTimelineLoopInput,
+      onScrubTimeline: scrubTimelineTo,
+      onAddTimelineKeyframe: addKeyframeForSelectedPrefabNode,
+      onSnapBaseToTimeline: snapSelectedPrefabBaseToTimeline,
+      onApplyTimelineKeyframeTime: applySelectedKeyframeTimeInput,
+      onApplyTimelineKeyframeValue: applySelectedKeyframeValueInput,
+      onApplyTimelineKeyframeEasing: applySelectedKeyframeEasingInput,
+      onDeleteTimelineKeyframe: deleteSelectedTimelineKeyframe,
+      onCreateScene: () => void createSceneFromInput("empty"),
+      onCloneScene: () => void createSceneFromInput("current"),
+      onLoadScene: () => void loadSelectedScene(),
+      onSaveScene: () => void saveSelectedScene(),
+      onDeleteScene: () => void deleteSelectedScene(),
+      onEditPath: () => {
+        const asset = getSelectedAsset();
 
-  elements.assetModeButton.addEventListener("click", () => {
-    setEditorMode("asset");
-  });
-  elements.pathModeButton.addEventListener("click", () => {
-    setEditorMode("path");
-  });
-  elements.sceneModeButton.addEventListener("click", () => {
-    setEditorMode("scene");
-  });
-  elements.projectForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    void createProjectFromInput();
-  });
-  elements.deleteProjectButton.addEventListener("click", () => {
-    void deleteSelectedProject();
-  });
-  elements.createPrefabButton.addEventListener("click", () => {
-    void createPrefabFromInput();
-  });
-  elements.loadPrefabButton.addEventListener("click", () => {
-    void loadSelectedPrefab();
-  });
-  elements.savePrefabButton.addEventListener("click", () => {
-    void saveSelectedPrefab();
-  });
-  elements.deletePrefabButton.addEventListener("click", () => {
-    void deleteSelectedPrefab();
-  });
-  elements.createPrefabGroupButton.addEventListener("click", () => {
-    createPrefabGroup();
-  });
-  elements.prefabCopyButton.addEventListener("click", () => {
-    handlePrefabClipboardPrimaryAction();
-  });
-  elements.prefabCutButton.addEventListener("click", () => {
-    handlePrefabClipboardSecondaryAction();
-  });
-  elements.deletePrefabNodeButton.addEventListener("click", () => {
-    deleteSelectedPrefabNode();
-  });
-  elements.timelineCreateClipButton.addEventListener("click", () => {
-    createTimelineClipFromInput();
-  });
-  elements.timelineDeleteClipButton.addEventListener("click", () => {
-    deleteSelectedTimelineClip();
-  });
-  elements.timelinePlayButton.addEventListener("click", () => {
-    playTimeline();
-  });
-  elements.timelinePauseButton.addEventListener("click", () => {
-    pauseTimeline();
-  });
-  elements.timelineStopButton.addEventListener("click", () => {
-    stopTimeline();
-  });
-  elements.timelineTimeInput.addEventListener("blur", () => {
-    applyTimelineTimeInput();
-  });
-  elements.timelineTimeInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      elements.timelineTimeInput.blur();
-    }
-  });
-  elements.timelineDurationInput.addEventListener("blur", () => {
-    applyTimelineDurationInput();
-  });
-  elements.timelineDurationInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      elements.timelineDurationInput.blur();
-    }
-  });
-  elements.timelineSnapFpsInput.addEventListener("blur", () => {
-    applyTimelineSnapFpsInput();
-  });
-  elements.timelineSnapFpsInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      elements.timelineSnapFpsInput.blur();
-    }
-  });
-  elements.timelineLoopInput.addEventListener("change", () => {
-    applyTimelineLoopInput();
-  });
-  elements.timelineScrubInput.addEventListener("input", () => {
-    scrubTimelineTo(Number(elements.timelineScrubInput.value));
-  });
-  elements.timelineAddKeyframeButton.addEventListener("click", () => {
-    addKeyframeForSelectedPrefabNode();
-  });
-  elements.timelineSnapBaseButton.addEventListener("click", () => {
-    snapSelectedPrefabBaseToTimeline();
-  });
-  elements.timelineKeyframeTimeInput.addEventListener("blur", () => {
-    applySelectedKeyframeTimeInput();
-  });
-  elements.timelineKeyframeTimeInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      elements.timelineKeyframeTimeInput.blur();
-    }
-  });
-  elements.timelineKeyframeValueXInput.addEventListener("blur", () => {
-    applySelectedKeyframeValueInput();
-  });
-  elements.timelineKeyframeValueYInput.addEventListener("blur", () => {
-    applySelectedKeyframeValueInput();
-  });
-  elements.timelineKeyframeValueZInput.addEventListener("blur", () => {
-    applySelectedKeyframeValueInput();
-  });
-  elements.timelineKeyframeEasingSelect.addEventListener("change", () => {
-    applySelectedKeyframeEasingInput();
-  });
-  elements.timelineDeleteKeyframeButton.addEventListener("click", () => {
-    deleteSelectedTimelineKeyframe();
+        if (asset) {
+          startPathEditSession(asset);
+        }
+      },
+      onSavePath: () => void savePathEditSession(),
+      onCancelPath: cancelPathEditSession,
+      onCreate3DCurve: () => void create3DCurveCopyFromSelectedAsset(),
+      onImportFile: () => void importSelectedFile(),
+      onAddNode: addSelectedAssetToPrefab,
+      onAddPrefabInstance: () => void addSelectedPrefabToScene(),
+      onDeleteAsset: () => void deleteSelectedAsset(),
+      onDeleteSceneNode: deleteSelectedSceneNode,
+      onToggleProjection: toggleProjection,
+      onSetEditorTool: setActiveEditorTool,
+      onResetView: resetViewport,
+    },
   });
   const paperCanvas = stage.getLayer("paper-canvas").canvas;
   const threeOverlayCanvas = document.getElementById("three-overlay-canvas");
@@ -500,76 +436,6 @@ function bindEditorEvents(): void {
     onCurve3DControlSelection: selectSourcePathEdit3DControlById,
     onCurve3DControlTransform: updateSourcePathEdit3DControlPosition,
     onCameraChange: handleViewportCameraChange,
-  });
-  elements.createSceneButton.addEventListener("click", () => {
-    void createSceneFromInput("empty");
-  });
-  elements.cloneSceneButton.addEventListener("click", () => {
-    void createSceneFromInput("current");
-  });
-  elements.loadSceneButton.addEventListener("click", () => {
-    void loadSelectedScene();
-  });
-  elements.saveSceneButton.addEventListener("click", () => {
-    void saveSelectedScene();
-  });
-  elements.deleteSceneButton.addEventListener("click", () => {
-    void deleteSelectedScene();
-  });
-  elements.editPathButton.addEventListener("click", () => {
-    const asset = getSelectedAsset();
-
-    if (asset) {
-      startPathEditSession(asset);
-    }
-  });
-  elements.savePathButton.addEventListener("click", () => {
-    void savePathEditSession();
-  });
-  elements.cancelPathButton.addEventListener("click", () => {
-    cancelPathEditSession();
-  });
-  elements.create3DCurveButton.addEventListener("click", () => {
-    void create3DCurveCopyFromSelectedAsset();
-  });
-  elements.fileInput.addEventListener("change", () => {
-    void importSelectedFile();
-  });
-  elements.addNodeButton.addEventListener("click", () => {
-    addSelectedAssetToPrefab();
-  });
-  elements.addPrefabInstanceButton.addEventListener("click", () => {
-    void addSelectedPrefabToScene();
-  });
-  elements.deleteAssetButton.addEventListener("click", () => {
-    void deleteSelectedAsset();
-  });
-  elements.deleteSceneNodeButton.addEventListener("click", () => {
-    deleteSelectedSceneNode();
-  });
-  elements.projectionToggleButton.addEventListener("click", () => {
-    toggleProjection();
-  });
-  elements.transformTranslateButton.addEventListener("click", () => {
-    setActiveEditorTool("translate");
-  });
-  elements.transformRotateButton.addEventListener("click", () => {
-    setActiveEditorTool("rotate");
-  });
-  elements.transformScaleButton.addEventListener("click", () => {
-    setActiveEditorTool("scale");
-  });
-  elements.transformPathButton.addEventListener("click", () => {
-    setActiveEditorTool("path");
-  });
-  elements.resetViewButton.addEventListener("click", () => {
-    threeViewport.resetView();
-    if (editorState.editorMode === "scene") {
-      editorState.loadedSceneId = null;
-    }
-    renderCache.markAllDirty();
-    renderEditorShell();
-    exposeEditorDebugHooks();
   });
 }
 
@@ -1473,6 +1339,16 @@ function toggleProjection(): void {
   if (editorState.editorMode === "scene") {
     editorState.loadedSceneId = null;
   }
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function resetViewport(): void {
+  threeViewport.resetView();
+  if (editorState.editorMode === "scene") {
+    editorState.loadedSceneId = null;
+  }
+  renderCache.markAllDirty();
   renderEditorShell();
   exposeEditorDebugHooks();
 }
