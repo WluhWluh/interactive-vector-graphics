@@ -178,6 +178,11 @@ import {
   type EditorMode,
 } from "./state/editorAppState";
 import {
+  dispatchEditorCommand,
+  type EditorCommand,
+  type EditorCommandResult,
+} from "./state/editorCommand";
+import {
   findRecordById,
   getNodeById,
   getPrefabDocumentById as getPrefabDocumentByIdFromState,
@@ -331,7 +336,7 @@ const PATH_EDIT_HIT_RADIUS = 10;
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
 const elements = getEditorElements();
-const collapsedModuleIds = readCollapsedModuleCookie();
+let collapsedModuleIds = readCollapsedModuleCookie();
 const billboardFrameDataCache = new BillboardFrameDataCache({
   getAssetById,
   getPrefabDocumentById,
@@ -2360,15 +2365,11 @@ function syncPrefabProxyWorldTransforms(exceptNodeId: string | null = null): voi
 }
 
 function toggleCollapsibleModule(moduleId: CollapsibleModuleId): void {
-  if (collapsedModuleIds.has(moduleId)) {
-    collapsedModuleIds.delete(moduleId);
-  } else {
-    collapsedModuleIds.add(moduleId);
-  }
-
-  writeCollapsedModuleCookie(collapsedModuleIds);
-  renderCollapsibleModules();
-  exposeEditorDebugHooks();
+  applyEditorCommand({
+    type: "toggleCollapsedModule",
+    moduleId,
+    collapsedModuleIds,
+  });
 }
 
 function renderCollapsibleModules(): void {
@@ -4185,18 +4186,45 @@ function snapAndClampTimelineTimeMs(
   );
 }
 
+function applyEditorCommand(command: EditorCommand): EditorCommandResult {
+  const result = dispatchEditorCommand(editorState, command);
+
+  if (result.collapsedModuleIds) {
+    collapsedModuleIds = result.collapsedModuleIds;
+  }
+
+  if (result.invalidation.persistCollapsedModules) {
+    writeCollapsedModuleCookie(collapsedModuleIds);
+    renderCollapsibleModules();
+  }
+
+  if (result.invalidation.renderShell) {
+    renderEditorShell();
+  }
+
+  if (result.invalidation.exposeDebugHooks) {
+    exposeEditorDebugHooks();
+  }
+
+  return result;
+}
+
 function setImportError(error: unknown): void {
   const message = error instanceof Error ? error.message : "Unknown error";
-  editorState.lastImportError = message;
+  applyEditorCommand({
+    type: "setLastImportError",
+    message,
+  });
   elements.importError.textContent = message;
   elements.importError.hidden = false;
   elements.fileInput.value = "";
   console.error(error);
-  renderEditorShell();
-  exposeEditorDebugHooks();
 }
 
 function hideError(): void {
+  if (editorState.lastImportError !== null) {
+    applyEditorCommand({ type: "clearLastImportError" });
+  }
   elements.importError.hidden = true;
   elements.importError.textContent = "";
 }
