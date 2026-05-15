@@ -125,6 +125,7 @@ import {
   type BillboardRendererContext,
   type DrawableBillboard,
 } from "./render/billboardRenderer";
+import { BillboardFrameDataCache } from "./render/billboardFrameData";
 import { renderEditorFrame } from "./render/editorFrameRenderer";
 import { createRenderInvalidation } from "./render/renderInvalidation";
 import {
@@ -145,7 +146,6 @@ import {
 import {
   clonePathOverrideForNode,
   evaluatePrefabPose,
-  getPrefabNodesWithStagingPose,
   getSelectedTimelineStagingPose as getSelectedTimelineStagingPoseFromLayers,
   getSelectedTimelineStagingTransform as getSelectedTimelineStagingTransformFromLayers,
   getStagingWorldTransform,
@@ -153,7 +153,6 @@ import {
 import {
   clonePrefabNode,
   cloneSceneNode,
-  getPrefabNodeAndDescendantIds as getPrefabNodeAndDescendantIdsFromNodes,
   getPrefabNodeTreeEntries as getPrefabNodeTreeEntriesFromNodes,
   type PrefabNodeTreeEntry,
 } from "./state/documentNodes";
@@ -262,6 +261,11 @@ const threeViewport = new ThreeEditorViewport();
 const elements = getEditorElements();
 const collapsedModuleIds = readCollapsedModuleCookie();
 const renderInvalidation = createRenderInvalidation();
+const billboardFrameDataCache = new BillboardFrameDataCache({
+  getAssetById,
+  getPrefabDocumentById,
+  getOrCreateTimelineStagingPose,
+});
 
 let projects: ProjectRecord[] = [];
 let assets: PrimitiveSvgAsset[] = [];
@@ -300,8 +304,6 @@ let lastFrameTime = performance.now();
 let nextSceneNodeNumber = 1;
 let nextPrefabNodeNumber = 1;
 let pendingCameraInspectorRender = false;
-let cachedAssetAssemblyBillboards: DrawableBillboard[] = [];
-let cachedSceneLayoutBillboards: DrawableBillboard[] = [];
 
 stage.getLayer("vector-canvas").canvas.dataset.visualCheck = "editor-ready";
 bindEditorEvents();
@@ -402,8 +404,8 @@ declare global {
       };
       getRenderInvalidation: () => {
         flags: typeof renderInvalidation.flags;
-        cachedAssetAssemblyBillboardCount: number;
-        cachedSceneLayoutBillboardCount: number;
+      cachedAssetAssemblyBillboardCount: number;
+      cachedSceneLayoutBillboardCount: number;
       };
       getActiveEditorTool: () => EditorTool;
       getScenes: () => SceneRecord[];
@@ -3395,163 +3397,28 @@ function renderInPlacePathEditOverlay(): void {
   }
 }
 
-function getAssetAssemblyBillboards(): DrawableBillboard[] {
-  const pathOverrides = getEvaluatedPrefabPathOverrides();
-  const evaluatedDrawables = flattenPrefabBillboards(
-    getEvaluatedPrefabNodes(),
-    new Matrix4(),
-    (nodeId) => nodeId === selectedPrefabNodeId,
-    "",
-    pathOverrides,
-  );
-  const ghostDrawables = getSelectedPrefabTimelineGhostBillboards();
-
-  return [
-    ...evaluatedDrawables,
-    ...ghostDrawables,
-  ];
-}
-
 function getCachedAssetAssemblyBillboards(): DrawableBillboard[] {
-  if (renderInvalidation.flags.assetBillboards) {
-    cachedAssetAssemblyBillboards = getAssetAssemblyBillboards();
-  }
-
-  return cachedAssetAssemblyBillboards;
-}
-
-function getSelectedPrefabTimelineGhostBillboards(): DrawableBillboard[] {
-  const activeClip = getActiveTimelineClip();
-  const selectedNode = getSelectedPrefabNode();
-
-  if (!activeClip || !selectedNode) {
-    return [];
-  }
-
-  const selectedAsset =
-    selectedNode.kind === "primitive" && selectedNode.assetId
-      ? getAssetById(selectedNode.assetId)
-      : null;
-  const stagingPose = getOrCreateTimelineStagingPose(
-    selectedNode,
-    activeClip,
-    selectedAsset,
+  return billboardFrameDataCache.getAssetAssemblyBillboards(
+    {
+      nodes: prefabNodes,
+      evaluatedNodes: getEvaluatedPrefabNodes(),
+      selectedNodeId: selectedPrefabNodeId,
+      activeClip: getActiveTimelineClip(),
+      selectedNode: getSelectedPrefabNode(),
+      pathOverrides: getEvaluatedPrefabPathOverrides(),
+    },
+    renderInvalidation.flags,
   );
-  const stagedNodes = getPrefabNodesWithStagingPose({
-    nodes: prefabNodes,
-    stagingPose,
-  });
-  const stagedWorldTransforms = getPrefabWorldTransforms(stagedNodes);
-  const selectedNodeIds =
-    selectedNode.kind === "group"
-      ? getPrefabNodeAndDescendantIds(selectedNode.id)
-      : new Set([selectedNode.id]);
-  const drawables: DrawableBillboard[] = [];
-
-  for (const node of stagedNodes) {
-    if (node.kind !== "primitive" || !selectedNodeIds.has(node.id) || !node.assetId) {
-      continue;
-    }
-
-    const asset = getAssetById(node.assetId);
-    const worldTransform = stagedWorldTransforms.get(node.id);
-
-    if (!asset || !worldTransform) {
-      continue;
-    }
-
-    drawables.push({
-      id: `${node.id}:timeline-staging-ghost`,
-      asset,
-      transform: matrixToTransform(worldTransform),
-      selected: false,
-      opacity: 0.5,
-      ghost: true,
-      pathOverride: node.id === stagingPose.nodeId ? stagingPose.pathDraft : undefined,
-    });
-  }
-
-  return drawables;
-}
-
-function getSceneLayoutBillboards(): DrawableBillboard[] {
-  const drawables: DrawableBillboard[] = [];
-
-  for (const node of sceneNodes) {
-    if (node.kind === "primitive") {
-      const asset = getAssetById(node.assetId);
-
-      if (asset) {
-        drawables.push({
-          id: node.id,
-          asset,
-          transform: cloneTransform(node),
-          selected: node.id === selectedSceneNodeId,
-        });
-      }
-
-      continue;
-    }
-
-    const document = getPrefabDocumentById(node.prefabId);
-
-    if (!document) {
-      continue;
-    }
-
-    drawables.push(
-      ...flattenPrefabBillboards(
-        document.nodes,
-        transformToMatrix(node),
-        () => node.id === selectedSceneNodeId,
-        `${node.id}/`,
-      ),
-    );
-  }
-
-  return drawables;
 }
 
 function getCachedSceneLayoutBillboards(): DrawableBillboard[] {
-  if (renderInvalidation.flags.sceneBillboards) {
-    cachedSceneLayoutBillboards = getSceneLayoutBillboards();
-  }
-
-  return cachedSceneLayoutBillboards;
-}
-
-function flattenPrefabBillboards(
-  nodes: PrefabNode[],
-  baseMatrix: Matrix4,
-  isSelected: (nodeId: string) => boolean,
-  idPrefix = "",
-  pathOverrides: Map<string, StructuredBezierPath> = new Map(),
-): DrawableBillboard[] {
-  const worldTransforms = getPrefabWorldTransforms(nodes, baseMatrix);
-  const drawables: DrawableBillboard[] = [];
-
-  for (const node of nodes) {
-    if (node.kind !== "primitive") {
-      continue;
-    }
-
-    const asset = node.assetId ? getAssetById(node.assetId) : null;
-    const matrix = worldTransforms.get(node.id);
-
-    if (!asset || !matrix) {
-      continue;
-    }
-
-    drawables.push({
-      id: `${idPrefix}${node.id}`,
-      asset,
-      transform: matrixToTransform(matrix),
-      selected: isSelected(node.id),
-      pathOverride: pathOverrides.get(node.id),
-    });
-  }
-
-  return drawables;
+  return billboardFrameDataCache.getSceneLayoutBillboards(
+    {
+      nodes: sceneNodes,
+      selectedNodeId: selectedSceneNodeId,
+    },
+    renderInvalidation.flags,
+  );
 }
 
 function drawBillboards(
@@ -4339,10 +4206,6 @@ function getSceneNode(nodeId: string): SceneNode | null {
   return getNodeById(sceneNodes, nodeId);
 }
 
-function getPrefabNodeAndDescendantIds(rootNodeId: string): Set<string> {
-  return getPrefabNodeAndDescendantIdsFromNodes(prefabNodes, rootNodeId);
-}
-
 function findTimelineTrack(
   clip: PrefabAnimationClip,
   nodeId: string,
@@ -4678,8 +4541,10 @@ function exposeEditorDebugHooks(): void {
     },
     getRenderInvalidation: () => ({
       flags: { ...renderInvalidation.flags },
-      cachedAssetAssemblyBillboardCount: cachedAssetAssemblyBillboards.length,
-      cachedSceneLayoutBillboardCount: cachedSceneLayoutBillboards.length,
+      cachedAssetAssemblyBillboardCount:
+        billboardFrameDataCache.getAssetAssemblyBillboardCount(),
+      cachedSceneLayoutBillboardCount:
+        billboardFrameDataCache.getSceneLayoutBillboardCount(),
     }),
     getActiveEditorTool: () => activeEditorTool,
     getScenes: () => [...scenes],
