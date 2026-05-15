@@ -55,6 +55,12 @@ export type PathEditSessionDraft =
       session: SourcePathEdit3DSession;
     };
 
+export type SourcePathEditState = {
+  pathEditSession: SourcePathEditSession | null;
+  pathEdit3DSession: SourcePathEdit3DSession | null;
+  pathEditDragState: PathEditDragState | null;
+};
+
 export type InPlacePathEditSessionInput = {
   selectedNode: PrefabNode | null;
   asset: PrimitiveSvgAsset | null;
@@ -93,6 +99,27 @@ export function createSourcePathEditSession(
       ...createPathEditSession(asset.bezierPath),
       assetId: asset.id,
     },
+  };
+}
+
+export function startSourcePathEditState(
+  asset: PrimitiveSvgAsset,
+): SourcePathEditState & { mode: PathEditSessionDraft["mode"] } {
+  const sessionDraft = createSourcePathEditSession(asset);
+
+  return {
+    pathEditSession: sessionDraft.mode === "2d" ? sessionDraft.session : null,
+    pathEdit3DSession: sessionDraft.mode === "3d" ? sessionDraft.session : null,
+    pathEditDragState: null,
+    mode: sessionDraft.mode,
+  };
+}
+
+export function clearSourcePathEditState(): SourcePathEditState {
+  return {
+    pathEditSession: null,
+    pathEdit3DSession: null,
+    pathEditDragState: null,
   };
 }
 

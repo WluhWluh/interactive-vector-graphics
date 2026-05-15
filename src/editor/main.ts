@@ -252,7 +252,6 @@ import {
   createInPlacePathEditDebugState,
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
   createSourcePathEditDebugState,
-  createSourcePathEditSession,
   dragPathEditSessionAtPoint,
   findPathEditControlAtPoint,
   getInPlacePathEditScreenControls as getInPlacePathEditScreenControlsForState,
@@ -263,6 +262,8 @@ import {
   isInPlacePathEditSessionValid,
   pathEditSelectionsEqual,
   selectPathEditSessionControl,
+  clearSourcePathEditState,
+  startSourcePathEditState,
   toPathEditSelection,
   type InPlacePathEditSession,
   type SourcePathEditSession,
@@ -986,9 +987,10 @@ async function savePathEditSession(): Promise<void> {
     );
     assets = nextAssetState.assets;
     selectedAssetId = nextAssetState.selectedAssetId;
-    pathEditSession = null;
-    pathEdit3DSession = null;
-    pathEditDragState = null;
+    const nextPathEditState = clearSourcePathEditState();
+    pathEditSession = nextPathEditState.pathEditSession;
+    pathEdit3DSession = nextPathEditState.pathEdit3DSession;
+    pathEditDragState = nextPathEditState.pathEditDragState;
     threeViewport.clearCurve3DControls();
     lastImportError = null;
     hideError();
@@ -1003,20 +1005,17 @@ async function savePathEditSession(): Promise<void> {
 function startPathEditSession(asset: PrimitiveSvgAsset): void {
   selectedAssetId = asset.id;
   editorMode = "path";
-  pathEditSession = null;
-  pathEdit3DSession = null;
   threeViewport.clearCurve3DControls();
-  const sessionDraft = createSourcePathEditSession(asset);
+  const nextPathEditState = startSourcePathEditState(asset);
+  pathEditSession = nextPathEditState.pathEditSession;
+  pathEdit3DSession = nextPathEditState.pathEdit3DSession;
+  pathEditDragState = nextPathEditState.pathEditDragState;
 
-  if (sessionDraft.mode === "3d") {
-    pathEdit3DSession = sessionDraft.session;
+  if (nextPathEditState.mode === "3d") {
     threeViewport.setTransformMode("translate");
     threeViewport.setTransformControlsVisible(true);
     threeViewport.setOrbitControlsEnabled(true);
-  } else {
-    pathEditSession = sessionDraft.session;
   }
-  pathEditDragState = null;
   exitPathTool();
   lastImportError = null;
   hideError();
@@ -1025,9 +1024,10 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
 }
 
 function cancelPathEditSession(): void {
-  pathEditSession = null;
-  pathEdit3DSession = null;
-  pathEditDragState = null;
+  const nextPathEditState = clearSourcePathEditState();
+  pathEditSession = nextPathEditState.pathEditSession;
+  pathEdit3DSession = nextPathEditState.pathEdit3DSession;
+  pathEditDragState = nextPathEditState.pathEditDragState;
   threeViewport.clearCurve3DControls();
   renderEditorShell();
   exposeEditorDebugHooks();
