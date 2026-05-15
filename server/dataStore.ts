@@ -10,6 +10,11 @@ import type {
   SceneRecord,
   StoredPrimitiveAsset,
 } from "./types";
+import {
+  canUpdatePrimitiveAsset2DSourcePath,
+  getPrimitiveAssetCapabilities,
+  primitiveAssetHas3DSourcePath,
+} from "../src/core/assets/primitiveAssetCapabilities";
 import { createNormalizedPrimitiveSvg } from "../src/core/assets/primitiveAssetSvg";
 import {
   validateStructuredBezierPath,
@@ -370,12 +375,14 @@ export function createDataStore(dataDir: string): DataStore {
     bezierPath: StructuredBezierPath,
   ): Promise<StoredPrimitiveAsset> {
     const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
-    if (existingAsset.assetKind === "bezierCurve3d") {
+    if (!canUpdatePrimitiveAsset2DSourcePath(existingAsset.assetKind)) {
       throw new Error("3D curve assets must be updated through the curve3d API.");
     }
-    const expectedClosed = existingAsset.assetKind === "filledPath";
+    const { expectedStructuredPathClosed } = getPrimitiveAssetCapabilities(
+      existingAsset.assetKind,
+    );
     const validatedBezierPath = validateStructuredBezierPath(bezierPath, {
-      expectedClosed,
+      expectedClosed: expectedStructuredPathClosed,
     });
     const normalized = createNormalizedPrimitiveSvg({
       assetKind: existingAsset.assetKind,
@@ -426,7 +433,7 @@ export function createDataStore(dataDir: string): DataStore {
   ): Promise<StoredPrimitiveAsset> {
     const sourceAsset = getPrimitiveAssetRecord(projectId, assetId);
 
-    if (sourceAsset.assetKind !== "strokePath") {
+    if (!getPrimitiveAssetCapabilities(sourceAsset.assetKind).canConvertTo3DCurve) {
       throw new Error("Only strokePath assets can be converted to 3D curves.");
     }
 
@@ -507,7 +514,7 @@ export function createDataStore(dataDir: string): DataStore {
   ): Promise<StoredPrimitiveAsset> {
     const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
 
-    if (existingAsset.assetKind !== "bezierCurve3d") {
+    if (!primitiveAssetHas3DSourcePath(existingAsset.assetKind)) {
       throw new Error("Only 3D curve assets can be updated through the curve3d API.");
     }
 

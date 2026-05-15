@@ -23,7 +23,7 @@ export type EditorShellRenderInput = {
   isTimelinePlaying: boolean;
   activeTimelineProperty: PrefabTrackProperty;
   currentProjection: "perspective" | "orthographic";
-  selectedAssetKind: string | null;
+  canConvertSelectedAssetTo3DCurve: boolean;
   activeEditorTool: EditorTool;
   canUseTool: (tool: EditorTool) => boolean;
   renderProjectList: () => void;
@@ -143,7 +143,7 @@ function syncEditorShellChrome(input: EditorShellRenderInput): void {
   elements.editPathButton.disabled =
     !input.selectedProjectId || !input.selectedAssetId;
   elements.create3DCurveButton.disabled =
-    !input.selectedProjectId || input.selectedAssetKind !== "strokePath";
+    !input.selectedProjectId || !input.canConvertSelectedAssetTo3DCurve;
   elements.savePathButton.disabled =
     !input.hasPathEditSession && !input.hasPathEdit3DSession;
   elements.cancelPathButton.disabled =

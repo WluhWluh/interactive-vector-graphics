@@ -1,5 +1,7 @@
 import type { PrefabTrackProperty } from "../api";
 import type { TransformMode } from "../threeEditorViewport";
+import type { PrimitiveAssetKind } from "../../core/assets/primitiveSvg";
+import { getPrimitiveAssetCapabilities } from "../../core/assets/primitiveAssetCapabilities";
 
 export type TransformProperty = "position" | "rotation" | "scale";
 export type EditorTool = TransformMode | "path";
@@ -9,7 +11,7 @@ export type ToolContext = {
   editorMode: EditorModeForTools;
   hasActiveClip: boolean;
   hasPrimitiveSelection: boolean;
-  assetKind?: string | null;
+  assetKind?: PrimitiveAssetKind | null;
 };
 
 export type ToolDefinition = {
@@ -62,7 +64,8 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         context.editorMode === "asset" &&
           context.hasActiveClip &&
           context.hasPrimitiveSelection &&
-          context.assetKind !== "bezierCurve3d",
+          context.assetKind &&
+          getPrimitiveAssetCapabilities(context.assetKind).canInPlacePathEdit,
       ),
   },
 ];

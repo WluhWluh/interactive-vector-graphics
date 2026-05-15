@@ -1,5 +1,9 @@
 import type { StoredPrimitiveAsset } from "../types";
 import {
+  getPrimitiveAssetCapabilities,
+  primitiveAssetUsesStrokeStyle,
+} from "../../src/core/assets/primitiveAssetCapabilities";
+import {
   parsePathDToStructuredBezier,
   validateStructuredBezierPath,
   type StructuredBezierPath,
@@ -27,27 +31,26 @@ export function hydratePrimitiveAssetRow(
       : row.assetKind === "strokePath"
         ? "strokePath"
         : "filledPath";
-  const expectedClosed = assetKind === "filledPath";
-  const bezierPath3d =
-    assetKind === "bezierCurve3d"
-      ? readStoredBezierPath3D(row.bezierPath3d)
-      : null;
+  const capabilities = getPrimitiveAssetCapabilities(assetKind);
+  const bezierPath3d = capabilities.has3DSourcePath
+    ? readStoredBezierPath3D(row.bezierPath3d)
+    : null;
 
   return {
     ...row,
     assetKind,
     viewBox: JSON.parse(row.viewBox) as [number, number, number, number],
     fillRule: row.fillRule === "evenodd" ? "evenodd" : "nonzero",
-    stroke:
-      assetKind === "strokePath" || assetKind === "bezierCurve3d"
-        ? row.stroke
-        : null,
+    stroke: primitiveAssetUsesStrokeStyle(assetKind) ? row.stroke : null,
     strokeWidth:
-      (assetKind === "strokePath" || assetKind === "bezierCurve3d") &&
-      typeof row.strokeWidth === "number"
+      primitiveAssetUsesStrokeStyle(assetKind) && typeof row.strokeWidth === "number"
         ? row.strokeWidth
         : null,
-    bezierPath: readStoredBezierPath(row.bezierPath, row.pathD, expectedClosed),
+    bezierPath: readStoredBezierPath(
+      row.bezierPath,
+      row.pathD,
+      capabilities.expectedStructuredPathClosed,
+    ),
     bezierPath3d,
   };
 }

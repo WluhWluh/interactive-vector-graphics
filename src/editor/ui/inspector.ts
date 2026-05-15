@@ -1,4 +1,8 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import {
+  primitiveAssetHas3DSourcePath,
+  primitiveAssetUsesStrokeStyle,
+} from "../../core/assets/primitiveAssetCapabilities";
 import type { BezierSegment } from "../../core/assets/structuredBezierPath";
 import type { BezierSegment3D } from "../../core/assets/structuredBezierPath3d";
 import type { PathEditComponent } from "../tools/pathEditCore";
@@ -86,12 +90,12 @@ export function appendAssetInspectorRows(
   );
   appendInspectorRow(elements, "Closed Path", asset.bezierPath.closed ? "true" : "false");
 
-  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
+  if (primitiveAssetUsesStrokeStyle(asset)) {
     appendInspectorRow(elements, "Stroke", asset.stroke);
     appendInspectorRow(elements, "Stroke Width", String(asset.strokeWidth));
     appendInspectorRow(elements, "Line Cap", "round");
     appendInspectorRow(elements, "Line Join", "round");
-    if (asset.assetKind === "bezierCurve3d") {
+    if (primitiveAssetHas3DSourcePath(asset)) {
       appendInspectorRow(
         elements,
         "3D Bezier Segments",

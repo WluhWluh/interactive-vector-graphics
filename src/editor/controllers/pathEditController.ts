@@ -8,6 +8,10 @@ import {
   type StructuredBezierPath3D,
 } from "../../core/assets/structuredBezierPath3d";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import {
+  canInPlaceEditPrimitiveAssetPath,
+  primitiveAssetHas3DSourcePath,
+} from "../../core/assets/primitiveAssetCapabilities";
 import type { PrefabNode } from "../api";
 import {
   dragPathEditControl,
@@ -82,7 +86,7 @@ export type InPlacePathEditSessionResult =
 export function createSourcePathEditSession(
   asset: PrimitiveSvgAsset,
 ): PathEditSessionDraft {
-  if (asset.assetKind === "bezierCurve3d") {
+  if (primitiveAssetHas3DSourcePath(asset)) {
     return {
       mode: "3d",
       session: {
@@ -135,7 +139,7 @@ export function createInPlacePathEditSession(
     };
   }
 
-  if (asset.assetKind === "bezierCurve3d") {
+  if (!canInPlaceEditPrimitiveAssetPath(asset)) {
     return {
       ok: false,
       error: "3D curve path keyframes are not supported yet.",
@@ -178,6 +182,7 @@ export function isInPlacePathEditSessionValid(input: {
       node.id === selectedNodeId &&
       asset &&
       node.assetId === asset.id &&
+      canInPlaceEditPrimitiveAssetPath(asset) &&
       stagingPose,
   );
 }

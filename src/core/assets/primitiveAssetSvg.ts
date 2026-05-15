@@ -1,3 +1,4 @@
+import { getPrimitiveAssetCapabilities } from "./primitiveAssetCapabilities";
 import { structuredBezierToPathD } from "./structuredBezierPath";
 import type { StructuredBezierPath } from "./structuredBezierPath";
 import type { StructuredBezierPath3D } from "./structuredBezierPath3d";
@@ -25,11 +26,12 @@ export function createNormalizedPrimitiveSvg(
   const pathD = structuredBezierToPathD(input.bezierPath);
   const viewBox = input.viewBox.map(formatSvgNumber).join(" ");
   const pathMarkup =
-    input.assetKind === "strokePath" || input.assetKind === "bezierCurve3d"
+    getPrimitiveAssetCapabilities(input.assetKind).usesStrokeStyle
       ? createStrokePathMarkup(input, pathD)
       : createFilledPathMarkup(input, pathD);
   const metadata =
-    input.assetKind === "bezierCurve3d" && input.bezierPath3d
+    getPrimitiveAssetCapabilities(input.assetKind).has3DSourcePath &&
+    input.bezierPath3d
       ? `  <metadata data-ivg-asset-kind="bezierCurve3d">${escapeXmlText(
           JSON.stringify(input.bezierPath3d),
         )}</metadata>`

@@ -1,6 +1,7 @@
 import { Matrix4 } from "three";
 import type { Camera } from "three";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
 import {
   drawProjectedCurveCommands,
   projectBezierPath3DToCommands,
@@ -103,7 +104,7 @@ function drawBillboardNode(
     : asset;
   const ghostColor = ghost ? getPrimitiveGhostColor(asset) : null;
 
-  if (asset.assetKind === "bezierCurve3d") {
+  if (primitiveAssetHas3DSourcePath(asset)) {
     drawBezierCurve3DBillboard(
       context,
       drawable,

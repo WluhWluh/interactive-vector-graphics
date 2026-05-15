@@ -2,6 +2,12 @@ import "../styles.css";
 import { Matrix4, Vector3 } from "three";
 import type { PrimitiveSvgAsset } from "../core/assets/primitiveSvg";
 import {
+  canConvertPrimitiveAssetTo3DCurve,
+  canKeyframePrimitiveAssetPath,
+  primitiveAssetHas3DSourcePath,
+  primitiveAssetUsesStrokeStyle,
+} from "../core/assets/primitiveAssetCapabilities";
+import {
   cloneStructuredBezierPath,
   type BezierPoint,
   type BezierSegment,
@@ -1401,7 +1407,7 @@ function startInPlacePathEditSession(): boolean {
     return false;
   }
 
-  if (asset.assetKind === "bezierCurve3d") {
+  if (!canKeyframePrimitiveAssetPath(asset)) {
     setImportError(new Error("3D curve path keyframes are not supported yet."));
     exitPathTool();
     renderEditorShell();
@@ -2384,7 +2390,9 @@ function renderEditorShell(): void {
     isTimelinePlaying: editorState.isTimelinePlaying,
     activeTimelineProperty: getActiveTimelineProperty(),
     currentProjection: threeViewport.currentProjection,
-    selectedAssetKind: getSelectedAsset()?.assetKind ?? null,
+    canConvertSelectedAssetTo3DCurve: canConvertPrimitiveAssetTo3DCurve(
+      getSelectedAsset(),
+    ),
     activeEditorTool: editorState.activeEditorTool,
     canUseTool,
     renderProjectList,
@@ -2743,7 +2751,7 @@ function renderSourcePathEditPanel(): void {
 
   if (!editorState.pathEditSession || editorState.pathEditSession.assetId !== selectedAsset.id) {
     status.textContent =
-      selectedAsset.assetKind === "bezierCurve3d"
+      primitiveAssetHas3DSourcePath(selectedAsset)
         ? "Click Edit Path to edit this 3D source curve."
         : "Click Edit Path to edit the selected asset source.";
     elements.pathEditFields.append(status);
@@ -3176,7 +3184,7 @@ function renderPathEditFrame(): void {
   if (editorState.pathEdit3DSession) {
     threeViewport.render(stage.size);
 
-    if (!asset3d || asset3d.assetKind !== "bezierCurve3d") {
+    if (!asset3d || !primitiveAssetHas3DSourcePath(asset3d)) {
       drawCenteredStatus(vectorContext, stage.size, "3D curve asset is missing");
       threeViewport.clearCurve3DControls();
       return;
@@ -3193,7 +3201,7 @@ function renderPathEditFrame(): void {
     const selectedAsset = getSelectedAsset();
 
     if (selectedAsset) {
-      if (selectedAsset.assetKind === "bezierCurve3d") {
+      if (primitiveAssetHas3DSourcePath(selectedAsset)) {
         threeViewport.render(stage.size);
         drawSourcePathEdit3DPreview(
           vectorContext,
@@ -3555,7 +3563,7 @@ function getSourcePathEdit3DProjectedCommands(): ProjectedCurveCommand[] {
   if (!editorState.pathEdit3DSession) {
     const selectedAsset = getSelectedAsset();
 
-    return selectedAsset?.assetKind === "bezierCurve3d"
+    return selectedAsset && primitiveAssetHas3DSourcePath(selectedAsset)
       ? projectBezierPath3DToCommands(selectedAsset.bezierPath3d, {
           camera: threeViewport.activeCamera,
           viewport: stage.size,
@@ -4181,19 +4189,17 @@ function exposeEditorDebugHooks(): void {
         name: asset.name,
         sourceUrl: asset.sourceUrl,
         viewBox: asset.viewBox,
-        fill: asset.assetKind === "filledPath" ? asset.fill : "none",
-        fillRule: asset.assetKind === "filledPath" ? asset.fillRule : "nonzero",
-        stroke:
-          asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
-            ? asset.stroke
-            : null,
-        strokeWidth:
-          asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
-            ? asset.strokeWidth
-            : null,
+        fill: primitiveAssetUsesStrokeStyle(asset) ? "none" : asset.fill,
+        fillRule: primitiveAssetUsesStrokeStyle(asset)
+          ? "nonzero"
+          : asset.fillRule,
+        stroke: primitiveAssetUsesStrokeStyle(asset) ? asset.stroke : null,
+        strokeWidth: primitiveAssetUsesStrokeStyle(asset)
+          ? asset.strokeWidth
+          : null,
         bezierPath: asset.bezierPath,
         bezierPath3d:
-          asset.assetKind === "bezierCurve3d"
+          primitiveAssetHas3DSourcePath(asset)
             ? cloneStructuredBezierPath3D(asset.bezierPath3d)
             : null,
         pathD: asset.pathD,

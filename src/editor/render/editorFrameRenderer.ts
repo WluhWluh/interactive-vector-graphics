@@ -1,4 +1,5 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
 import type { StructuredBezierPath3D } from "../../core/assets/structuredBezierPath3d";
 import { drawCenteredStatus, drawPrimitivePreview } from "../../core/stage/primitivePreview";
 import type { CanvasStage } from "../../core/stage/canvasStage";
@@ -65,7 +66,7 @@ function renderAssetAssemblyFrame(
   }
 
   if (input.selectedAsset) {
-    if (input.selectedAsset.assetKind === "bezierCurve3d") {
+    if (primitiveAssetHas3DSourcePath(input.selectedAsset)) {
       input.drawSourcePathEdit3DPreview(
         context,
         input.selectedAsset,

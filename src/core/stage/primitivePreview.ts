@@ -1,4 +1,5 @@
 import type { PrimitiveSvgAsset } from "../assets/primitiveSvg";
+import { primitiveAssetUsesStrokeStyle } from "../assets/primitiveAssetCapabilities";
 import type { StageLayer, StageSize } from "./canvasStage";
 
 export function drawStageGrid(layer: StageLayer, size: StageSize): void {
@@ -59,7 +60,7 @@ export function drawPrimitivePreview(
     -(viewBoxX + viewBoxWidth / 2),
     -(viewBoxY + viewBoxHeight / 2),
   );
-  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
+  if (primitiveAssetUsesStrokeStyle(asset)) {
     context.strokeStyle = asset.stroke;
     context.lineWidth = asset.strokeWidth;
     context.lineCap = "round";

@@ -1,5 +1,9 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
 import {
+  getPrimitiveAssetListLabel,
+  primitiveAssetUsesStrokeStyle,
+} from "../../core/assets/primitiveAssetCapabilities";
+import {
   structuredBezierToPathD,
   type StructuredBezierPath,
 } from "../../core/assets/structuredBezierPath";
@@ -44,7 +48,7 @@ export function drawPrimitiveAssetPath(
   asset: PrimitiveSvgAsset,
   colorOverride?: string,
 ): void {
-  if (asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d") {
+  if (primitiveAssetUsesStrokeStyle(asset)) {
     context.strokeStyle = colorOverride ?? asset.stroke;
     context.lineWidth = asset.strokeWidth;
     context.lineCap = "round";
@@ -59,18 +63,11 @@ export function drawPrimitiveAssetPath(
 }
 
 export function getAssetKindListLabel(asset: PrimitiveSvgAsset): string {
-  if (asset.assetKind === "bezierCurve3d") {
-    return "3D Curve";
-  }
-
-  return asset.assetKind === "strokePath" ? "Stroke" : "Fill";
+  return getPrimitiveAssetListLabel(asset);
 }
 
 export function getPrimitiveGhostColor(asset: PrimitiveSvgAsset): string {
-  const sourceColor =
-    asset.assetKind === "strokePath" || asset.assetKind === "bezierCurve3d"
-      ? asset.stroke
-      : asset.fill;
+  const sourceColor = primitiveAssetUsesStrokeStyle(asset) ? asset.stroke : asset.fill;
   const cachedColor = primitiveGhostColorCache.get(sourceColor);
 
   if (cachedColor) {

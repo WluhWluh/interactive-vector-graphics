@@ -1,4 +1,5 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveSvg";
+import { canConvertPrimitiveAssetTo3DCurve } from "../../core/assets/primitiveAssetCapabilities";
 import type {
   SourcePathEditSession,
 } from "./pathEditController";
@@ -43,7 +44,7 @@ export function applyDeletedAsset(
 export function canConvertAssetTo3DCurve(
   asset: PrimitiveSvgAsset | null,
 ): boolean {
-  return asset?.assetKind === "strokePath";
+  return canConvertPrimitiveAssetTo3DCurve(asset);
 }
 
 export async function runSaveSourcePathEditCommand(input: {
