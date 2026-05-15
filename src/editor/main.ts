@@ -328,17 +328,14 @@ const initialAppState = createInitialEditorAppState({
   defaultPrefabSnapFps: DEFAULT_PREFAB_SNAP_FPS,
 });
 const appStateStore = createEditorAppStateStore(initialAppState);
+const editorState = appStateStore.getMutableState();
 
-let projects: ProjectRecord[] = initialAppState.projects;
-let assets: PrimitiveSvgAsset[] = initialAppState.assets;
 let prefabs: PrefabRecord[] = initialAppState.prefabs;
 let prefabNodes: PrefabNode[] = initialAppState.prefabNodes;
 let prefabDocuments = initialAppState.prefabDocuments;
 let scenes: SceneRecord[] = initialAppState.scenes;
 let sceneNodes: SceneNode[] = initialAppState.sceneNodes;
 let editorMode: EditorMode = initialAppState.editorMode;
-let selectedProjectId: string | null = initialAppState.selectedProjectId;
-let selectedAssetId: string | null = initialAppState.selectedAssetId;
 let selectedPrefabId: string | null = initialAppState.selectedPrefabId;
 let loadedPrefabId: string | null = initialAppState.loadedPrefabId;
 let selectedPrefabNodeId: PrefabSelectionId | null =
@@ -364,7 +361,6 @@ let inPlacePathEditSession: InPlacePathEditSession | null = null;
 let inPlacePathEditDragState: PathEditDragState | null = null;
 let inPlacePathEditHoveredControl: PathEditDragState | null = null;
 let inPlacePathEditCameraDragActive = false;
-let lastImportError: string | null = initialAppState.lastImportError;
 let lastFrameTime = performance.now();
 let nextSceneNodeNumber = initialAppState.nextSceneNodeNumber;
 let nextPrefabNodeNumber = initialAppState.nextPrefabNodeNumber;
@@ -372,16 +368,12 @@ let pendingCameraInspectorRender = false;
 
 function syncAppStateStore(): void {
   appStateStore.patch({
-    projects,
-    assets,
     prefabs,
     prefabNodes,
     prefabDocuments,
     scenes,
     sceneNodes,
     editorMode,
-    selectedProjectId,
-    selectedAssetId,
     selectedPrefabId,
     loadedPrefabId,
     selectedPrefabNodeId,
@@ -395,7 +387,6 @@ function syncAppStateStore(): void {
     loadedSceneId,
     selectedSceneNodeId,
     pendingPrefabClipboard,
-    lastImportError,
     nextSceneNodeNumber,
     nextPrefabNodeNumber,
   });
@@ -849,18 +840,18 @@ function scheduleCameraInspectorRender(): void {
 
 async function refreshProjects(): Promise<void> {
   try {
-    projects = await listProjects();
-    const nextProject = reconcileProjectSelection(selectedProjectId, projects);
+    editorState.projects = await listProjects();
+    const nextProject = reconcileProjectSelection(editorState.selectedProjectId, editorState.projects);
 
     if (nextProject.shouldClearWorkspace) {
       clearProjectWorkspace();
     }
 
-    selectedProjectId = nextProject.nextSelectedProjectId;
+    editorState.selectedProjectId = nextProject.nextSelectedProjectId;
     await refreshAssets();
     await refreshPrefabs();
     await refreshScenes();
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
   } catch (error) {
     setImportError(error);
@@ -868,23 +859,23 @@ async function refreshProjects(): Promise<void> {
 }
 
 async function refreshAssets(): Promise<void> {
-  if (!selectedProjectId) {
-    assets = [];
-    selectedAssetId = null;
+  if (!editorState.selectedProjectId) {
+    editorState.assets = [];
+    editorState.selectedAssetId = null;
     renderEditorShell();
     exposeEditorDebugHooks();
     return;
   }
 
-  assets = await listAssets(selectedProjectId);
+  editorState.assets = await listAssets(editorState.selectedProjectId);
   const nextAsset = reconcileAssetSelection(
-    selectedAssetId,
-    assets,
+    editorState.selectedAssetId,
+    editorState.assets,
     pathEditSession?.assetId ?? null,
     pathEdit3DSession?.assetId ?? null,
   );
 
-  selectedAssetId = nextAsset.nextSelectedAssetId;
+  editorState.selectedAssetId = nextAsset.nextSelectedAssetId;
 
   if (nextAsset.missingPathEditAssetId) {
     pathEditSession = null;
@@ -903,7 +894,7 @@ async function refreshAssets(): Promise<void> {
 }
 
 async function refreshPrefabs(): Promise<void> {
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     prefabs = [];
     prefabDocuments = new Map();
     selectedPrefabId = null;
@@ -916,9 +907,9 @@ async function refreshPrefabs(): Promise<void> {
     return;
   }
 
-  prefabs = await listPrefabs(selectedProjectId);
+  prefabs = await listPrefabs(editorState.selectedProjectId);
   prefabDocuments = await loadPrefabDocuments({
-    projectId: selectedProjectId,
+    projectId: editorState.selectedProjectId,
     prefabs,
     getPrefab,
     onError: (error) => console.error(error),
@@ -947,7 +938,7 @@ async function refreshPrefabs(): Promise<void> {
 }
 
 async function refreshScenes(): Promise<void> {
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     scenes = [];
     selectedSceneId = null;
     loadedSceneId = null;
@@ -956,7 +947,7 @@ async function refreshScenes(): Promise<void> {
     return;
   }
 
-  scenes = await listScenes(selectedProjectId);
+  scenes = await listScenes(editorState.selectedProjectId);
   const nextScene = reconcileSceneSelection(
     selectedSceneId,
     loadedSceneId,
@@ -987,8 +978,8 @@ async function createProjectFromInput(): Promise<void> {
     const project = await createProject(nameResult.value);
     elements.projectNameInput.value = "";
     clearProjectWorkspace();
-    selectedProjectId = project.id;
-    lastImportError = null;
+    editorState.selectedProjectId = project.id;
+    editorState.lastImportError = null;
     hideError();
     await refreshProjects();
   } catch (error) {
@@ -997,15 +988,15 @@ async function createProjectFromInput(): Promise<void> {
 }
 
 async function deleteSelectedProject(): Promise<void> {
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     return;
   }
 
   try {
-    await deleteProject(selectedProjectId);
-    selectedProjectId = null;
+    await deleteProject(editorState.selectedProjectId);
+    editorState.selectedProjectId = null;
     clearProjectWorkspace();
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshProjects();
   } catch (error) {
@@ -1014,13 +1005,13 @@ async function deleteSelectedProject(): Promise<void> {
 }
 
 async function savePathEditSession(): Promise<void> {
-  if (!selectedProjectId || (!pathEditSession && !pathEdit3DSession)) {
+  if (!editorState.selectedProjectId || (!pathEditSession && !pathEdit3DSession)) {
     return;
   }
 
   try {
     const updatedAsset = await runSaveSourcePathEditCommand({
-      projectId: selectedProjectId,
+      projectId: editorState.selectedProjectId,
       pathEditSession,
       pathEdit3DSession,
       updateAssetPath,
@@ -1031,17 +1022,17 @@ async function savePathEditSession(): Promise<void> {
       return;
     }
     const nextAssetState = applyUpdatedAsset(
-      { assets, selectedAssetId },
+      { assets: editorState.assets, selectedAssetId: editorState.selectedAssetId },
       updatedAsset,
     );
-    assets = nextAssetState.assets;
-    selectedAssetId = nextAssetState.selectedAssetId;
+    editorState.assets = nextAssetState.assets;
+    editorState.selectedAssetId = nextAssetState.selectedAssetId;
     const nextPathEditState = clearSourcePathEditState();
     pathEditSession = nextPathEditState.pathEditSession;
     pathEdit3DSession = nextPathEditState.pathEdit3DSession;
     pathEditDragState = nextPathEditState.pathEditDragState;
     threeViewport.clearCurve3DControls();
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     rebuildViewportProxies();
     renderEditorShell();
@@ -1052,7 +1043,7 @@ async function savePathEditSession(): Promise<void> {
 }
 
 function startPathEditSession(asset: PrimitiveSvgAsset): void {
-  selectedAssetId = asset.id;
+  editorState.selectedAssetId = asset.id;
   editorMode = "path";
   threeViewport.clearCurve3DControls();
   const nextPathEditState = startSourcePathEditState(asset);
@@ -1066,7 +1057,7 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
     threeViewport.setOrbitControlsEnabled(true);
   }
   exitPathTool();
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   renderEditorShell();
   exposeEditorDebugHooks();
@@ -1083,7 +1074,7 @@ function cancelPathEditSession(): void {
 }
 
 async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
-  if (!selectedProjectId || !selectedAssetId) {
+  if (!editorState.selectedProjectId || !editorState.selectedAssetId) {
     return;
   }
 
@@ -1091,22 +1082,22 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
 
   try {
     const convertedAsset = await runConvertAssetTo3DCurveCommand({
-      projectId: selectedProjectId,
-      assetId: selectedAssetId,
+      projectId: editorState.selectedProjectId,
+      assetId: editorState.selectedAssetId,
       asset,
       convertAssetTo3DCurve,
     });
     const nextAssetState = applyImportedAsset(
-      { assets, selectedAssetId },
+      { assets: editorState.assets, selectedAssetId: editorState.selectedAssetId },
       convertedAsset,
     );
-    assets = nextAssetState.assets;
-    selectedAssetId = nextAssetState.selectedAssetId;
-    lastImportError = null;
+    editorState.assets = nextAssetState.assets;
+    editorState.selectedAssetId = nextAssetState.selectedAssetId;
+    editorState.lastImportError = null;
     hideError();
     startPathEditSession(convertedAsset);
     await refreshAssets();
-    selectedAssetId = convertedAsset.id;
+    editorState.selectedAssetId = convertedAsset.id;
     startPathEditSession(convertedAsset);
   } catch (error) {
     setImportError(error);
@@ -1116,9 +1107,9 @@ async function create3DCurveCopyFromSelectedAsset(): Promise<void> {
 async function importSelectedFile(): Promise<void> {
   const file = elements.fileInput.files?.[0];
 
-  if (!file || !selectedProjectId) {
+  if (!file || !editorState.selectedProjectId) {
     elements.fileInput.value = "";
-    if (!selectedProjectId) {
+    if (!editorState.selectedProjectId) {
       setImportError(new Error("Create or select a project before importing SVG."));
     }
     return;
@@ -1126,21 +1117,24 @@ async function importSelectedFile(): Promise<void> {
 
   try {
     const asset = await runImportPrimitiveAssetCommand({
-      projectId: selectedProjectId,
+      projectId: editorState.selectedProjectId,
       file,
       uploadAsset,
     });
-    const nextAssetState = applyImportedAsset({ assets, selectedAssetId }, asset);
-    assets = nextAssetState.assets;
-    selectedAssetId = nextAssetState.selectedAssetId;
+    const nextAssetState = applyImportedAsset(
+      { assets: editorState.assets, selectedAssetId: editorState.selectedAssetId },
+      asset,
+    );
+    editorState.assets = nextAssetState.assets;
+    editorState.selectedAssetId = nextAssetState.selectedAssetId;
     if (selectedPrefabNodeId === PREFAB_ROOT_NODE_ID) {
       selectedPrefabNodeId = null;
     }
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     elements.fileInput.value = "";
     await refreshAssets();
-    selectedAssetId = asset.id;
+    editorState.selectedAssetId = asset.id;
     renderEditorShell();
     exposeEditorDebugHooks();
   } catch (error) {
@@ -1149,14 +1143,14 @@ async function importSelectedFile(): Promise<void> {
 }
 
 async function deleteSelectedAsset(): Promise<void> {
-  if (!selectedProjectId || !selectedAssetId) {
+  if (!editorState.selectedProjectId || !editorState.selectedAssetId) {
     return;
   }
 
   try {
     const deletedAssetId = await runDeleteAssetCommand({
-      projectId: selectedProjectId,
-      assetId: selectedAssetId,
+      projectId: editorState.selectedProjectId,
+      assetId: editorState.selectedAssetId,
       deleteAsset,
     });
     if (pathEditSession?.assetId === deletedAssetId) {
@@ -1172,12 +1166,12 @@ async function deleteSelectedAsset(): Promise<void> {
     }
     pruneTimelineStagingPoses({ assetIds: new Set([deletedAssetId]) });
     const nextAssetState = applyDeletedAsset(
-      { assets, selectedAssetId },
+      { assets: editorState.assets, selectedAssetId: editorState.selectedAssetId },
       deletedAssetId,
     );
-    assets = nextAssetState.assets;
-    selectedAssetId = nextAssetState.selectedAssetId;
-    lastImportError = null;
+    editorState.assets = nextAssetState.assets;
+    editorState.selectedAssetId = nextAssetState.selectedAssetId;
+    editorState.lastImportError = null;
     hideError();
     await refreshAssets();
     rebuildViewportProxies();
@@ -1188,7 +1182,7 @@ async function deleteSelectedAsset(): Promise<void> {
 
 async function createPrefabFromInput(): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Create or select a project before creating a prefab.",
   );
 
@@ -1224,7 +1218,7 @@ async function createPrefabFromInput(): Promise<void> {
     loadedPrefabId = nextPrefabState.loadedPrefabId;
     prefabDocuments = nextPrefabState.prefabDocuments;
     applyPrefabDocument(result.document);
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshPrefabs();
   } catch (error) {
@@ -1234,7 +1228,7 @@ async function createPrefabFromInput(): Promise<void> {
 
 async function loadSelectedPrefab(): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Select a saved prefab before loading.",
   );
   const prefabResult = requireCommandValue(
@@ -1267,7 +1261,7 @@ async function loadSelectedPrefab(): Promise<void> {
     prefabDocuments = nextPrefabState.prefabDocuments;
     applyPrefabDocument(result.document);
     setEditorMode("asset");
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
   } catch (error) {
     setImportError(error);
@@ -1276,7 +1270,7 @@ async function loadSelectedPrefab(): Promise<void> {
 
 async function saveSelectedPrefab(): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Select a saved prefab before saving.",
   );
   const prefabResult = requireCommandValue(
@@ -1309,7 +1303,7 @@ async function saveSelectedPrefab(): Promise<void> {
     selectedPrefabId = nextPrefabState.selectedPrefabId;
     loadedPrefabId = nextPrefabState.loadedPrefabId;
     prefabDocuments = nextPrefabState.prefabDocuments;
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshPrefabs();
   } catch (error) {
@@ -1318,13 +1312,13 @@ async function saveSelectedPrefab(): Promise<void> {
 }
 
 async function deleteSelectedPrefab(): Promise<void> {
-  if (!selectedProjectId || !selectedPrefabId) {
+  if (!editorState.selectedProjectId || !selectedPrefabId) {
     return;
   }
 
   try {
     const deletedPrefabId = await runDeletePrefabCommand({
-      projectId: selectedProjectId,
+      projectId: editorState.selectedProjectId,
       prefabId: selectedPrefabId,
       deletePrefab,
     });
@@ -1343,7 +1337,7 @@ async function deleteSelectedPrefab(): Promise<void> {
       pendingPrefabClipboard = null;
     }
 
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshPrefabs();
     rebuildViewportProxies();
@@ -1353,7 +1347,7 @@ async function deleteSelectedPrefab(): Promise<void> {
 }
 
 function createPrefabGroup(): void {
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     setImportError(new Error("Create or select a project before editing a prefab."));
     return;
   }
@@ -1379,7 +1373,7 @@ function createPrefabGroup(): void {
 function addSelectedAssetToPrefab(): void {
   const selectedAsset = getSelectedAsset();
 
-  if (!selectedProjectId || !selectedAsset) {
+  if (!editorState.selectedProjectId || !selectedAsset) {
     setImportError(new Error("Select an SVG primitive asset before adding it."));
     return;
   }
@@ -1394,10 +1388,10 @@ function addSelectedAssetToPrefab(): void {
 
   prefabNodes = nextState.nodes;
   selectedPrefabNodeId = nextState.selectedNodeId;
-  selectedAssetId = selectedAsset.id;
+  editorState.selectedAssetId = selectedAsset.id;
   pauseTimeline();
   loadedPrefabId = null;
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
   renderEditorShell();
@@ -1435,7 +1429,7 @@ function deleteSelectedPrefabNode(): void {
 
 async function addSelectedPrefabToScene(): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Select a prefab before adding a scene instance.",
   );
   const prefabResult = requireCommandValue(
@@ -1473,13 +1467,13 @@ async function addSelectedPrefabToScene(): Promise<void> {
   nextSceneNodeNumber = nextSceneState.nextSceneNodeNumber;
   loadedSceneId = null;
   setEditorMode("scene");
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
 }
 
 async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Create or select a project before creating a scene.",
   );
 
@@ -1513,7 +1507,7 @@ async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
     loadedSceneId = nextSceneState.loadedSceneId;
     applySceneDocument(result.document);
     setEditorMode("scene");
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshScenes();
   } catch (error) {
@@ -1523,7 +1517,7 @@ async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
 
 async function saveSelectedScene(): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Select a saved scene before saving.",
   );
   const sceneResult = requireCommandValue(
@@ -1552,7 +1546,7 @@ async function saveSelectedScene(): Promise<void> {
 
     selectedSceneId = nextSceneState.selectedSceneId;
     loadedSceneId = nextSceneState.loadedSceneId;
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshScenes();
   } catch (error) {
@@ -1562,7 +1556,7 @@ async function saveSelectedScene(): Promise<void> {
 
 async function loadSelectedScene(): Promise<void> {
   const projectResult = requireCommandValue(
-    selectedProjectId,
+    editorState.selectedProjectId,
     "Select a saved scene before loading.",
   );
   const sceneResult = requireCommandValue(
@@ -1591,7 +1585,7 @@ async function loadSelectedScene(): Promise<void> {
     selectedSceneId = nextSceneState.selectedSceneId;
     loadedSceneId = nextSceneState.loadedSceneId;
     setEditorMode("scene");
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
   } catch (error) {
     setImportError(error);
@@ -1599,13 +1593,13 @@ async function loadSelectedScene(): Promise<void> {
 }
 
 async function deleteSelectedScene(): Promise<void> {
-  if (!selectedProjectId || !selectedSceneId) {
+  if (!editorState.selectedProjectId || !selectedSceneId) {
     return;
   }
 
   try {
     const deletedSceneId = await runDeleteSceneCommand({
-      projectId: selectedProjectId,
+      projectId: editorState.selectedProjectId,
       sceneId: selectedSceneId,
       deleteScene,
     });
@@ -1620,7 +1614,7 @@ async function deleteSelectedScene(): Promise<void> {
 
     selectedSceneId = nextSceneState.selectedSceneId;
     loadedSceneId = nextSceneState.loadedSceneId;
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     await refreshScenes();
   } catch (error) {
@@ -1729,7 +1723,7 @@ function startInPlacePathEditSession(): boolean {
   inPlacePathEditSession = sessionResult.session;
   stagingPose.pathDraft = cloneStructuredBezierPath(sessionResult.pathDraft);
   inPlacePathEditDragState = null;
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
   renderEditorShell();
@@ -1793,14 +1787,14 @@ function setEditorMode(mode: EditorMode): void {
 function clearProjectWorkspace(): void {
   exitPathTool();
   const emptyWorkspace = createEmptyProjectWorkspaceState();
-  assets = emptyWorkspace.assets;
+  editorState.assets = emptyWorkspace.assets;
   prefabs = emptyWorkspace.prefabs;
   prefabDocuments = emptyWorkspace.prefabDocuments;
   scenes = emptyWorkspace.scenes;
   prefabNodes = [];
   resetPrefabTimelineState();
   sceneNodes = [];
-  selectedAssetId = emptyWorkspace.selectedAssetId;
+  editorState.selectedAssetId = emptyWorkspace.selectedAssetId;
   selectedPrefabId = emptyWorkspace.selectedPrefabId;
   loadedPrefabId = emptyWorkspace.loadedPrefabId;
   selectedPrefabNodeId = PREFAB_ROOT_NODE_ID;
@@ -1878,7 +1872,7 @@ function rebuildViewportProxies(): void {
   renderCache.markAllDirty();
   threeViewport.clearNodes();
 
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     return;
   }
 
@@ -1994,7 +1988,7 @@ function syncSelectionFromPrefabNode(): void {
   const node = selectedPrefabNodeId ? getPrefabNode(selectedPrefabNodeId) : null;
 
   if (node?.kind === "primitive" && node.assetId) {
-    selectedAssetId = node.assetId;
+    editorState.selectedAssetId = node.assetId;
   }
 }
 
@@ -2078,7 +2072,7 @@ function getCurrentPrefabPoseSnapshot(): ReturnType<typeof evaluatePrefabPose> {
 }
 
 function createTimelineClipFromInput(): void {
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     setImportError(new Error("Create or select a project before creating a clip."));
     return;
   }
@@ -2100,7 +2094,7 @@ function createTimelineClipFromInput(): void {
   );
   loadedPrefabId = null;
   elements.timelineClipNameInput.value = "";
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
   renderEditorShell();
@@ -2453,7 +2447,7 @@ function addKeyframeForSelectedPrefabNode(): void {
     updateActiveTimelineClip(result.clip);
     timelineCurrentTimeMs = timeMs;
     loadedPrefabId = null;
-    lastImportError = null;
+    editorState.lastImportError = null;
     hideError();
     rebuildViewportProxies();
     renderEditorShell();
@@ -2478,7 +2472,7 @@ function addKeyframeForSelectedPrefabNode(): void {
   updateActiveTimelineClip(result.clip);
   timelineCurrentTimeMs = timeMs;
   loadedPrefabId = null;
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
   renderEditorShell();
@@ -2533,7 +2527,7 @@ function snapSelectedPrefabBaseToTimeline(): void {
   }
 
   pauseTimeline();
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
   renderEditorShell();
@@ -2606,7 +2600,7 @@ function pastePendingPrefabClipboard(): void {
   selectedPrefabNodeId = nextState.selectedNodeId;
   pendingPrefabClipboard = null;
   loadedPrefabId = null;
-  lastImportError = null;
+  editorState.lastImportError = null;
   hideError();
   rebuildViewportProxies();
   renderEditorShell();
@@ -2621,7 +2615,7 @@ function syncSelectionFromSceneNode(): void {
   }
 
   if (node.kind === "primitive") {
-    selectedAssetId = node.assetId;
+    editorState.selectedAssetId = node.assetId;
   } else {
     selectedPrefabId = node.prefabId;
   }
@@ -2663,8 +2657,8 @@ function renderEditorShell(): void {
   renderEditorShellFrame({
     elements,
     mode: editorMode,
-    selectedProjectId,
-    selectedAssetId,
+    selectedProjectId: editorState.selectedProjectId,
+    selectedAssetId: editorState.selectedAssetId,
     selectedPrefabId,
     selectedSceneId,
     selectedSceneNodeId,
@@ -2698,21 +2692,21 @@ function renderEditorShell(): void {
 
 function renderProjectList(): void {
   elements.projectList.replaceChildren(
-    ...projects.map((project) => {
+    ...editorState.projects.map((project) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
 
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.projectId = project.id;
-      button.dataset.selected = String(project.id === selectedProjectId);
+      button.dataset.selected = String(project.id === editorState.selectedProjectId);
       button.textContent = project.name;
       button.addEventListener("click", () => {
-        if (selectedProjectId !== project.id) {
+        if (editorState.selectedProjectId !== project.id) {
           clearProjectWorkspace();
         }
 
-        selectedProjectId = project.id;
+        editorState.selectedProjectId = project.id;
         void refreshAssets();
         void refreshPrefabs();
         void refreshScenes();
@@ -2726,17 +2720,17 @@ function renderProjectList(): void {
 
 function renderAssetList(): void {
   elements.assetList.replaceChildren(
-    ...assets.map((asset) => {
+    ...editorState.assets.map((asset) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
 
       button.type = "button";
       button.className = "asset-list-item";
       button.dataset.assetId = asset.id;
-      button.dataset.selected = String(asset.id === selectedAssetId);
+      button.dataset.selected = String(asset.id === editorState.selectedAssetId);
       button.textContent = `${getAssetKindListLabel(asset)}: ${asset.name}`;
       button.addEventListener("click", () => {
-        selectedAssetId = asset.id;
+        editorState.selectedAssetId = asset.id;
         renderEditorShell();
         exposeEditorDebugHooks();
       });
@@ -2749,16 +2743,16 @@ function renderAssetList(): void {
 
 function renderPathAssetList(): void {
   elements.pathAssetList.replaceChildren(
-    ...assets.map((asset) => {
+    ...editorState.assets.map((asset) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
 
       button.type = "button";
       button.className = "asset-list-item";
-      button.dataset.selected = String(asset.id === selectedAssetId);
+      button.dataset.selected = String(asset.id === editorState.selectedAssetId);
       button.textContent = `${getAssetKindListLabel(asset)}: ${asset.name}`;
       button.addEventListener("click", () => {
-        selectedAssetId = asset.id;
+        editorState.selectedAssetId = asset.id;
         if (pathEditSession && pathEditSession.assetId !== asset.id) {
           pathEditSession = null;
           pathEditDragState = null;
@@ -3007,7 +3001,7 @@ function renderSourcePathEditPanel(): void {
   const status = document.createElement("span");
   status.className = "path-edit-status";
 
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     status.textContent = "Create or select a project";
     elements.pathEditFields.append(status);
     return;
@@ -3449,7 +3443,7 @@ function renderPreviewFrame(): void {
   renderEditorFrame({
     stage,
     mode: editorMode,
-    hasSelectedProject: Boolean(selectedProjectId),
+    hasSelectedProject: Boolean(editorState.selectedProjectId),
     selectedAsset: getSelectedAsset(),
     assetAssemblyBillboards,
     sceneLayoutBillboards,
@@ -3472,7 +3466,7 @@ function renderPathEditFrame(): void {
     ? getAssetById(pathEdit3DSession.assetId)
     : null;
 
-  if (!selectedProjectId) {
+  if (!editorState.selectedProjectId) {
     drawCenteredStatus(vectorContext, stage.size, "Create or select a project");
     return;
   }
@@ -4222,11 +4216,11 @@ function safeBillboardScale(value: number): number {
 }
 
 function getSelectedProject(): ProjectRecord | null {
-  return getSelectedProjectFromState(projects, selectedProjectId);
+  return getSelectedProjectFromState(editorState.projects, editorState.selectedProjectId);
 }
 
 function getSelectedAsset(): PrimitiveSvgAsset | null {
-  return getSelectedAssetFromState(assets, selectedAssetId);
+  return getSelectedAssetFromState(editorState.assets, editorState.selectedAssetId);
 }
 
 function getSelectedPrefab(): PrefabRecord | null {
@@ -4238,11 +4232,11 @@ function getSelectedScene(): SceneRecord | null {
 }
 
 function getAssetById(assetId: string): PrimitiveSvgAsset | null {
-  return findRecordById(assets, assetId);
+  return findRecordById(editorState.assets, assetId);
 }
 
 function getAssetsById(): Map<string, PrimitiveSvgAsset> {
-  return new Map(assets.map((asset) => [asset.id, asset]));
+  return new Map(editorState.assets.map((asset) => [asset.id, asset]));
 }
 
 function getPrefabRecordById(prefabId: string): PrefabRecord | null {
@@ -4461,7 +4455,7 @@ function snapAndClampTimelineTimeMs(
 
 function setImportError(error: unknown): void {
   const message = error instanceof Error ? error.message : "Unknown error";
-  lastImportError = message;
+  editorState.lastImportError = message;
   elements.importError.textContent = message;
   elements.importError.hidden = false;
   elements.fileInput.value = "";
@@ -4478,9 +4472,9 @@ function hideError(): void {
 function exposeEditorDebugHooks(): void {
   syncAppStateStore();
   window.__vectorEditorDebug = {
-    getProjects: () => [...projects],
+    getProjects: () => [...editorState.projects],
     getAssets: () =>
-      assets.map((asset) => ({
+      editorState.assets.map((asset) => ({
         id: asset.id,
         assetKind: asset.assetKind,
         name: asset.name,
@@ -4587,13 +4581,13 @@ function exposeEditorDebugHooks(): void {
     getActiveEditorTool: () => activeEditorTool,
     getScenes: () => [...scenes],
     getEditorMode: () => editorMode,
-    getSelectedProjectId: () => selectedProjectId,
-    getSelectedAssetId: () => selectedAssetId,
+    getSelectedProjectId: () => editorState.selectedProjectId,
+    getSelectedAssetId: () => editorState.selectedAssetId,
     getSelectedPrefabId: () => selectedPrefabId,
     getLoadedPrefabId: () => loadedPrefabId,
     getSelectedSceneId: () => selectedSceneId,
     getLoadedSceneId: () => loadedSceneId,
-    getLastImportError: () => lastImportError,
+    getLastImportError: () => editorState.lastImportError,
     getCollapsedModules: () =>
       COLLAPSIBLE_MODULE_IDS.filter((moduleId) =>
         collapsedModuleIds.has(moduleId),
@@ -4601,3 +4595,4 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   };
 }
+

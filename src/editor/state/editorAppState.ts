@@ -91,6 +91,7 @@ export type TimelineDomainState = Pick<
 export type ToolDomainState = Pick<EditorAppState, "activeEditorTool" | "editorMode">;
 
 export type EditorAppStateStore = {
+  getMutableState: () => EditorAppState;
   getSnapshot: () => EditorAppState;
   patch: (patch: Partial<EditorAppState>) => EditorAppState;
   getProjectState: () => ProjectDomainState;
@@ -144,69 +145,52 @@ export function createInitialEditorAppState(input: {
 export function createEditorAppStateStore(
   initialState: EditorAppState,
 ): EditorAppStateStore {
-  let state = cloneEditorAppState(initialState);
+  const state = cloneEditorAppState(initialState);
+  const applyPatch = (patch: Partial<EditorAppState>): void => {
+    Object.assign(state, patch);
+  };
 
   return {
+    getMutableState: () => state,
     getSnapshot: () => cloneEditorAppState(state),
     patch: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return cloneEditorAppState(state);
     },
     getProjectState: () => cloneProjectDomainState(state),
     patchProjectState: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return cloneProjectDomainState(state);
     },
     getAssetState: () => cloneAssetDomainState(state),
     patchAssetState: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return cloneAssetDomainState(state);
     },
     getPrefabState: () => clonePrefabDomainState(state),
     patchPrefabState: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return clonePrefabDomainState(state);
     },
     getSceneState: () => cloneSceneDomainState(state),
     patchSceneState: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return cloneSceneDomainState(state);
     },
     getTimelineState: () => cloneTimelineDomainState(state),
     patchTimelineState: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return cloneTimelineDomainState(state);
     },
     getToolState: () => cloneToolDomainState(state),
     patchToolState: (patch) => {
-      state = cloneEditorAppState({
-        ...state,
-        ...patch,
-      });
+      applyPatch(patch);
 
       return cloneToolDomainState(state);
     },
