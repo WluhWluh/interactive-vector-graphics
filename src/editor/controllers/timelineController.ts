@@ -47,6 +47,16 @@ export type TimelinePlaybackResult = {
   isPlaying: boolean;
 };
 
+export type TimelineStatePatch = {
+  animation?: PrefabAnimation;
+  currentTimeMs?: number;
+  isPlaying?: boolean;
+  selectedKeyframeId?: string | null;
+  timelinePointerDragCleared?: boolean;
+  deletedClipId?: string | null;
+  selectedClip?: PrefabAnimationClip | null;
+};
+
 export function getActiveTimelineClip(
   animation: PrefabAnimation,
 ): PrefabAnimationClip | null {
@@ -258,6 +268,115 @@ export function parseTimelineEasingInput(
   return value === "linear" || value === "step" || value === "easeInOut"
     ? value
     : null;
+}
+
+export function createTimelineClipCommand(input: {
+  animation: PrefabAnimation;
+  name: string;
+  durationMs: number;
+  loop: boolean;
+}): TimelineStatePatch {
+  const result = createTimelineClip(input.animation, {
+    name: input.name,
+    durationMs: input.durationMs,
+    loop: input.loop,
+  });
+
+  return {
+    animation: result.animation,
+    currentTimeMs: 0,
+    isPlaying: false,
+    selectedKeyframeId: null,
+  };
+}
+
+export function deleteActiveTimelineClipCommand(
+  animation: PrefabAnimation,
+): TimelineStatePatch {
+  const result = deleteActiveTimelineClip(animation);
+
+  if (!result.deletedClipId) {
+    return {
+      deletedClipId: null,
+    };
+  }
+
+  return {
+    animation: result.animation,
+    currentTimeMs: 0,
+    isPlaying: false,
+    selectedKeyframeId: null,
+    deletedClipId: result.deletedClipId,
+  };
+}
+
+export function selectTimelineClipCommand(input: {
+  animation: PrefabAnimation;
+  clipId: string;
+  currentTimeMs: number;
+}): TimelineStatePatch {
+  const result = selectTimelineClip(input.animation, input.clipId);
+
+  if (!result.clip) {
+    return {
+      selectedClip: null,
+    };
+  }
+
+  return {
+    animation: result.animation,
+    currentTimeMs: clampTimelineTimeMs(input.currentTimeMs, result.clip),
+    isPlaying: false,
+    selectedClip: result.clip,
+  };
+}
+
+export function selectBasePoseTimelineCommand(
+  animation: PrefabAnimation,
+): TimelineStatePatch {
+  return {
+    animation: selectBasePoseTimeline(animation),
+    currentTimeMs: 0,
+    isPlaying: false,
+    selectedKeyframeId: null,
+    timelinePointerDragCleared: true,
+  };
+}
+
+export function playTimelineCommand(input: {
+  activeClip: PrefabAnimationClip | null;
+}): TimelineStatePatch | null {
+  return input.activeClip && input.activeClip.durationMs > 0
+    ? { isPlaying: true }
+    : null;
+}
+
+export function pauseTimelineCommand(input: {
+  isPlaying: boolean;
+}): TimelineStatePatch | null {
+  return input.isPlaying ? { isPlaying: false } : null;
+}
+
+export function stopTimelineCommand(): TimelineStatePatch {
+  return {
+    currentTimeMs: 0,
+    isPlaying: false,
+    selectedKeyframeId: null,
+  };
+}
+
+export function scrubTimelineCommand(input: {
+  activeClip: PrefabAnimationClip | null;
+  timeMs: number;
+}): TimelineStatePatch | null {
+  if (!input.activeClip || !Number.isFinite(input.timeMs)) {
+    return null;
+  }
+
+  return {
+    currentTimeMs: clampTimelineTimeMs(Math.round(input.timeMs), input.activeClip),
+    isPlaying: false,
+  };
 }
 
 export function upsertPrefabVectorKeyframe(

@@ -282,8 +282,8 @@ import {
 } from "./controllers/pathEditController";
 import {
   advanceTimelinePlayback,
-  createTimelineClip,
-  deleteActiveTimelineClip,
+  createTimelineClipCommand,
+  deleteActiveTimelineClipCommand,
   deleteTimelineKeyframe,
   getActiveTimelineClip as getActiveTimelineClipFromState,
   getSelectedTimelineKeyframe as getSelectedTimelineKeyframeFromState,
@@ -291,8 +291,12 @@ import {
   parseTimelineEasingInput,
   parseTimelineSnapFpsInput,
   parseVectorKeyframeValueInput,
-  selectBasePoseTimeline as selectBasePoseTimelineForState,
-  selectTimelineClip as selectTimelineClipForState,
+  pauseTimelineCommand,
+  playTimelineCommand,
+  scrubTimelineCommand,
+  selectBasePoseTimelineCommand,
+  selectTimelineClipCommand,
+  stopTimelineCommand,
   updateActiveTimelineClip as updateActiveTimelineClipForState,
   updateTimelineKeyframe,
   upsertPrefabPathKeyframe,
@@ -2010,6 +2014,30 @@ function updateActiveTimelineClip(nextClip: PrefabAnimationClip): void {
   prefabAnimation = updateActiveTimelineClipForState(prefabAnimation, nextClip);
 }
 
+function applyTimelineStatePatch(patch: {
+  animation?: PrefabAnimation;
+  currentTimeMs?: number;
+  isPlaying?: boolean;
+  selectedKeyframeId?: string | null;
+  timelinePointerDragCleared?: boolean;
+}): void {
+  if (patch.animation) {
+    prefabAnimation = patch.animation;
+  }
+  if (patch.currentTimeMs !== undefined) {
+    timelineCurrentTimeMs = patch.currentTimeMs;
+  }
+  if (patch.isPlaying !== undefined) {
+    isTimelinePlaying = patch.isPlaying;
+  }
+  if (patch.selectedKeyframeId !== undefined) {
+    selectedTimelineKeyframeId = patch.selectedKeyframeId;
+  }
+  if (patch.timelinePointerDragCleared) {
+    timelinePointerDrag = null;
+  }
+}
+
 function updateTimelinePlayback(deltaSeconds: number): void {
   const nextPlayback = advanceTimelinePlayback({
     isPlaying: isTimelinePlaying,
@@ -2062,16 +2090,14 @@ function createTimelineClipFromInput(): void {
     return;
   }
 
-  const result = createTimelineClip(prefabAnimation, {
-    name,
-    durationMs: DEFAULT_TIMELINE_DURATION_MS,
-    loop: true,
-  });
-
-  prefabAnimation = result.animation;
-  timelineCurrentTimeMs = 0;
-  isTimelinePlaying = false;
-  selectedTimelineKeyframeId = null;
+  applyTimelineStatePatch(
+    createTimelineClipCommand({
+      animation: prefabAnimation,
+      name,
+      durationMs: DEFAULT_TIMELINE_DURATION_MS,
+      loop: true,
+    }),
+  );
   loadedPrefabId = null;
   elements.timelineClipNameInput.value = "";
   lastImportError = null;
@@ -2082,20 +2108,17 @@ function createTimelineClipFromInput(): void {
 }
 
 function deleteSelectedTimelineClip(): void {
-  const result = deleteActiveTimelineClip(prefabAnimation);
+  const result = deleteActiveTimelineClipCommand(prefabAnimation);
 
   if (!result.deletedClipId) {
     return;
   }
 
-  prefabAnimation = result.animation;
+  applyTimelineStatePatch(result);
   pruneTimelineStagingPoses({ clipIds: new Set([result.deletedClipId]) });
   if (inPlacePathEditSession) {
     exitPathTool();
   }
-  timelineCurrentTimeMs = 0;
-  isTimelinePlaying = false;
-  selectedTimelineKeyframeId = null;
   loadedPrefabId = null;
   rebuildViewportProxies();
   renderEditorShell();
@@ -2103,15 +2126,17 @@ function deleteSelectedTimelineClip(): void {
 }
 
 function selectTimelineClip(clipId: string): void {
-  const result = selectTimelineClipForState(prefabAnimation, clipId);
+  const result = selectTimelineClipCommand({
+    animation: prefabAnimation,
+    clipId,
+    currentTimeMs: timelineCurrentTimeMs,
+  });
 
-  if (!result.clip) {
+  if (!result.selectedClip) {
     return;
   }
 
-  prefabAnimation = result.animation;
-  timelineCurrentTimeMs = clampTimelineTimeMs(timelineCurrentTimeMs, result.clip);
-  isTimelinePlaying = false;
+  applyTimelineStatePatch(result);
   if (activeEditorTool === "path") {
     startInPlacePathEditSession();
   }
@@ -2121,11 +2146,7 @@ function selectTimelineClip(clipId: string): void {
 }
 
 function selectBasePoseTimeline(): void {
-  prefabAnimation = selectBasePoseTimelineForState(prefabAnimation);
-  timelineCurrentTimeMs = 0;
-  isTimelinePlaying = false;
-  selectedTimelineKeyframeId = null;
-  timelinePointerDrag = null;
+  applyTimelineStatePatch(selectBasePoseTimelineCommand(prefabAnimation));
   if (activeEditorTool === "path") {
     exitPathTool();
   }
@@ -2135,45 +2156,47 @@ function selectBasePoseTimeline(): void {
 }
 
 function playTimeline(): void {
-  const activeClip = getActiveTimelineClip();
+  const patch = playTimelineCommand({ activeClip: getActiveTimelineClip() });
 
-  if (!activeClip || activeClip.durationMs <= 0) {
+  if (!patch) {
     return;
   }
 
-  isTimelinePlaying = true;
+  applyTimelineStatePatch(patch);
   renderEditorShell();
   exposeEditorDebugHooks();
 }
 
 function pauseTimeline(): void {
-  if (!isTimelinePlaying) {
+  const patch = pauseTimelineCommand({ isPlaying: isTimelinePlaying });
+
+  if (!patch) {
     return;
   }
 
-  isTimelinePlaying = false;
+  applyTimelineStatePatch(patch);
   renderEditorShell();
   exposeEditorDebugHooks();
 }
 
 function stopTimeline(): void {
-  isTimelinePlaying = false;
-  timelineCurrentTimeMs = 0;
-  selectedTimelineKeyframeId = null;
+  applyTimelineStatePatch(stopTimelineCommand());
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
 }
 
 function scrubTimelineTo(timeMs: number): void {
-  const activeClip = getActiveTimelineClip();
+  const patch = scrubTimelineCommand({
+    activeClip: getActiveTimelineClip(),
+    timeMs,
+  });
 
-  if (!activeClip || !Number.isFinite(timeMs)) {
+  if (!patch) {
     return;
   }
 
-  timelineCurrentTimeMs = clampTimelineTimeMs(Math.round(timeMs), activeClip);
-  isTimelinePlaying = false;
+  applyTimelineStatePatch(patch);
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
