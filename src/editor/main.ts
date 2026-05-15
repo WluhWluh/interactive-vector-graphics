@@ -258,6 +258,7 @@ import {
   readRequiredInputValue,
   requireCommandValue,
 } from "./controllers/editorCommandController";
+import { planEditorModeChange } from "./controllers/editorModeController";
 import {
   createInPlacePathEditDebugState,
   createInPlacePathEditSession as createInPlacePathEditSessionForState,
@@ -1613,17 +1614,21 @@ function syncActiveToolAfterSelectionChange(): void {
 }
 
 function setEditorMode(mode: EditorMode): void {
-  if (mode !== "asset" || editorState.editorMode !== "asset") {
+  const modeChange = planEditorModeChange(editorState.editorMode, mode);
+
+  if (modeChange.shouldExitPathTool) {
     exitPathTool();
   }
-  if (mode !== "path") {
+  if (modeChange.shouldClearSourcePathEdit) {
     editorState.pathEditSession = null;
     editorState.pathEdit3DSession = null;
     editorState.pathEditDragState = null;
     editorState.pathEditHoveredControl = null;
+  }
+  if (modeChange.shouldClearCurve3DControls) {
     threeViewport.clearCurve3DControls();
   }
-  editorState.editorMode = mode;
+  editorState.editorMode = modeChange.nextMode;
   rebuildViewportProxies();
   renderEditorShell();
   exposeEditorDebugHooks();
