@@ -55,7 +55,6 @@ import {
   type ProjectRecord,
   type SceneDocument,
   type SceneNode,
-  type ScenePrefabInstanceNode,
   type SceneRecord,
 } from "./api";
 import {
@@ -237,6 +236,14 @@ import {
   applyUpdatedAsset,
   canConvertAssetTo3DCurve,
 } from "./controllers/assetCommandController";
+import {
+  addPrefabInstanceToScene,
+  applyDeletedSceneDocument,
+  applyLoadedSceneDocument,
+  applySavedSceneDocument,
+  cachePrefabDocumentForScene,
+  deleteSceneNodeById,
+} from "./controllers/sceneCommandController";
 import {
   readRequiredInputValue,
   requireCommandValue,
@@ -1386,21 +1393,22 @@ async function addSelectedPrefabToScene(): Promise<void> {
 
   if (!prefabDocuments.has(prefabResult.value)) {
     const result = await getPrefab(projectResult.value, prefabResult.value);
-    prefabDocuments.set(result.prefab.id, result.document);
+    const nextCache = cachePrefabDocumentForScene(
+      { prefabDocuments },
+      result.prefab.id,
+      result.document,
+    );
+    prefabDocuments = nextCache.prefabDocuments;
   }
 
-  const node: ScenePrefabInstanceNode = {
-    id: `node-${nextSceneNodeNumber}`,
-    kind: "prefabInstance",
+  const nextSceneState = addPrefabInstanceToScene({
+    nodes: sceneNodes,
     prefabId: prefabResult.value,
-    position: [0, 1, 0],
-    rotation: [0, 0, 0],
-    scale: [1, 1, 1],
-  };
-
-  nextSceneNodeNumber += 1;
-  sceneNodes = [...sceneNodes, node];
-  selectedSceneNodeId = node.id;
+    nodeNumber: nextSceneNodeNumber,
+  });
+  sceneNodes = nextSceneState.nodes;
+  selectedSceneNodeId = nextSceneState.selectedSceneNodeId;
+  nextSceneNodeNumber = nextSceneState.nextSceneNodeNumber;
   loadedSceneId = null;
   setEditorMode("scene");
   lastImportError = null;
@@ -1434,10 +1442,11 @@ async function createSceneFromInput(source: SceneCreateSource): Promise<void> {
       nameResult.value,
       source === "empty" ? createEmptySceneDocument() : createCurrentSceneDocument(),
     );
+    const nextSceneState = applyLoadedSceneDocument(result);
 
     elements.sceneNameInput.value = "";
-    selectedSceneId = result.scene.id;
-    loadedSceneId = result.scene.id;
+    selectedSceneId = nextSceneState.selectedSceneId;
+    loadedSceneId = nextSceneState.loadedSceneId;
     applySceneDocument(result.document);
     setEditorMode("scene");
     lastImportError = null;
@@ -1474,9 +1483,10 @@ async function saveSelectedScene(): Promise<void> {
       sceneResult.value,
       createCurrentSceneDocument(),
     );
+    const nextSceneState = applySavedSceneDocument(result);
 
-    selectedSceneId = result.scene.id;
-    loadedSceneId = result.scene.id;
+    selectedSceneId = nextSceneState.selectedSceneId;
+    loadedSceneId = nextSceneState.loadedSceneId;
     lastImportError = null;
     hideError();
     await refreshScenes();
@@ -1507,9 +1517,10 @@ async function loadSelectedScene(): Promise<void> {
 
   try {
     const result = await getScene(projectResult.value, sceneResult.value);
+    const nextSceneState = applyLoadedSceneDocument(result);
     applySceneDocument(result.document);
-    selectedSceneId = result.scene.id;
-    loadedSceneId = result.scene.id;
+    selectedSceneId = nextSceneState.selectedSceneId;
+    loadedSceneId = nextSceneState.loadedSceneId;
     setEditorMode("scene");
     lastImportError = null;
     hideError();
@@ -1526,12 +1537,17 @@ async function deleteSelectedScene(): Promise<void> {
   try {
     const deletedSceneId = selectedSceneId;
     await deleteScene(selectedProjectId, deletedSceneId);
+    const nextSceneState = applyDeletedSceneDocument(
+      { selectedSceneId, loadedSceneId },
+      deletedSceneId,
+    );
 
-    if (loadedSceneId === deletedSceneId) {
+    if (nextSceneState.deletedLoadedScene) {
       clearSceneLayout();
     }
 
-    selectedSceneId = null;
+    selectedSceneId = nextSceneState.selectedSceneId;
+    loadedSceneId = nextSceneState.loadedSceneId;
     lastImportError = null;
     hideError();
     await refreshScenes();
@@ -1545,8 +1561,9 @@ function deleteSelectedSceneNode(): void {
     return;
   }
 
-  sceneNodes = sceneNodes.filter((node) => node.id !== selectedSceneNodeId);
-  selectedSceneNodeId = null;
+  const nextSceneState = deleteSceneNodeById(sceneNodes, selectedSceneNodeId);
+  sceneNodes = nextSceneState.nodes;
+  selectedSceneNodeId = nextSceneState.selectedSceneNodeId;
   loadedSceneId = null;
   rebuildViewportProxies();
   renderEditorShell();
