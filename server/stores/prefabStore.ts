@@ -5,6 +5,7 @@ import type { PrefabDocument, PrefabRecord } from "../types";
 import { validatePrefabDocument } from "../prefabDocument";
 import { writeJsonDocumentFile } from "../persistence/documentFiles";
 import { runFileBackedDatabaseTransaction } from "../persistence/persistenceTransaction";
+import { migratePrefabDocument } from "../../src/core/documents/prefabDocumentMigration";
 
 export type CreatePrefabInput = {
   projectId: string;
@@ -119,10 +120,15 @@ export function createPrefabStore(
     const rawDocument = JSON.parse(
       await readFile(join(resolvedDataDir, prefab.dataPath), "utf8"),
     ) as unknown;
+    const migration = migratePrefabDocument(rawDocument);
+
+    if (!migration.ok) {
+      throw new Error(migration.reason);
+    }
 
     return {
       prefab,
-      document: validatePrefabDocument(rawDocument, { projectId, prefabId }),
+      document: validatePrefabDocument(migration.document, { projectId, prefabId }),
     };
   }
 

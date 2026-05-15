@@ -3,6 +3,7 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { SceneDocument, SceneRecord } from "../types";
 import { validateSceneDocument } from "../sceneDocument";
+import { migrateSceneDocument } from "../sceneDocumentMigration";
 import { writeJsonDocumentFile } from "../persistence/documentFiles";
 import { runFileBackedDatabaseTransaction } from "../persistence/persistenceTransaction";
 
@@ -119,10 +120,15 @@ export function createSceneStore(
     const rawDocument = JSON.parse(
       await readFile(join(resolvedDataDir, scene.dataPath), "utf8"),
     ) as unknown;
+    const migration = migrateSceneDocument(rawDocument);
+
+    if (!migration.ok) {
+      throw new Error(migration.reason);
+    }
 
     return {
       scene,
-      document: validateSceneDocument(rawDocument, { projectId, sceneId }),
+      document: validateSceneDocument(migration.document, { projectId, sceneId }),
     };
   }
 

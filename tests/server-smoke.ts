@@ -6,10 +6,12 @@ import { createDataStore } from "../server/dataStore";
 import { importPrimitiveSvgOnServer } from "../server/primitiveSvgImport";
 import { validatePrefabDocument } from "../server/prefabDocument";
 import { validateSceneDocument } from "../server/sceneDocument";
+import { migrateSceneDocument } from "../server/sceneDocumentMigration";
 import {
   parsePathDToStructuredBezier,
   structuredBezierToPathD,
 } from "../src/core/assets/structuredBezierPath";
+import { migratePrefabDocument } from "../src/core/documents/prefabDocumentMigration";
 import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 import type { PrefabDocument, SceneDocument } from "../server/types";
 import {
@@ -517,6 +519,19 @@ try {
   validatePrefabDocument(validPrefabDocument, { projectId: firstProject.id });
   validatePrefabDocument(animatedPrefabDocument, { projectId: firstProject.id });
   validatePrefabDocument(pathAnimatedPrefabDocument, { projectId: firstProject.id });
+  assert.deepEqual(migratePrefabDocument(validPrefabDocument), {
+    ok: true,
+    document: validPrefabDocument,
+    fromVersion: 4,
+    toVersion: 4,
+    migrated: false,
+  });
+  const unsupportedPrefabMigration = migratePrefabDocument({
+    ...validPrefabDocument,
+    version: 3,
+  });
+  assert.equal(unsupportedPrefabMigration.ok, false);
+  assert.match(unsupportedPrefabMigration.reason, /cannot be migrated/);
   assert.throws(
     () =>
       validatePrefabDocument(
@@ -928,6 +943,19 @@ try {
     },
   };
   validateSceneDocument(animatedSceneDocument, { projectId: firstProject.id });
+  assert.deepEqual(migrateSceneDocument(validSceneDocument), {
+    ok: true,
+    document: validSceneDocument,
+    fromVersion: 2,
+    toVersion: 2,
+    migrated: false,
+  });
+  const unsupportedSceneMigration = migrateSceneDocument({
+    ...validSceneDocument,
+    version: 1,
+  });
+  assert.equal(unsupportedSceneMigration.ok, false);
+  assert.match(unsupportedSceneMigration.reason, /cannot be migrated/);
   assertInvalidSceneDocument(
     {
       ...validSceneDocument,
