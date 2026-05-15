@@ -125,6 +125,7 @@ import {
   type BillboardRendererContext,
   type DrawableBillboard,
 } from "./render/billboardRenderer";
+import { renderEditorFrame } from "./render/editorFrameRenderer";
 import {
   drawPathEditControls,
   drawPathEditPreview,
@@ -3253,57 +3254,21 @@ function tick(now: DOMHighResTimeStamp): void {
 }
 
 function renderPreviewFrame(): void {
-  stage.clearAll();
-  if (editorMode === "path") {
-    renderPathEditFrame();
-    return;
-  }
-
-  threeViewport.clearCurve3DControls();
-  threeViewport.render(stage.size);
-
-  const context = stage.getLayer("vector-canvas").context;
-
-  if (!selectedProjectId) {
-    drawCenteredStatus(context, stage.size, "Create or select a project");
-    return;
-  }
-
-  if (editorMode === "asset") {
-    const drawables = getAssetAssemblyBillboards();
-
-    if (drawables.length > 0) {
-      drawBillboards(context, drawables);
-      renderInPlacePathEditOverlay();
-      return;
-    }
-
-    const selectedAsset = getSelectedAsset();
-    if (selectedAsset) {
-      if (selectedAsset.assetKind === "bezierCurve3d") {
-        drawSourcePathEdit3DPreview(
-          context,
-          selectedAsset,
-          selectedAsset.bezierPath3d,
-        );
-      } else {
-        drawPrimitivePreview(context, stage.size, selectedAsset);
-      }
-      return;
-    }
-
-    drawCenteredStatus(context, stage.size, "Import SVG primitives and assemble a prefab");
-    return;
-  }
-
-  const drawables = getSceneLayoutBillboards();
-
-  if (drawables.length === 0) {
-    drawCenteredStatus(context, stage.size, "Add a prefab instance to the scene");
-    return;
-  }
-
-  drawBillboards(context, drawables);
+  renderEditorFrame({
+    stage,
+    mode: editorMode,
+    hasSelectedProject: Boolean(selectedProjectId),
+    selectedAsset: getSelectedAsset(),
+    assetAssemblyBillboards:
+      editorMode === "asset" ? getAssetAssemblyBillboards() : [],
+    sceneLayoutBillboards: editorMode === "scene" ? getSceneLayoutBillboards() : [],
+    clearCurve3DControls: () => threeViewport.clearCurve3DControls(),
+    renderThreeViewport: () => threeViewport.render(stage.size),
+    renderPathEditFrame,
+    renderInPlacePathEditOverlay,
+    drawBillboards,
+    drawSourcePathEdit3DPreview,
+  });
 }
 
 function renderPathEditFrame(): void {
