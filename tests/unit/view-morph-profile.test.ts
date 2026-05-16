@@ -315,7 +315,7 @@ export function runViewMorphProfileUnitTests(): void {
       );
 
       assert.ok(
-        getApproximateHausdorffDistance(previousEvaluation, evaluated) < 5,
+        getApproximateHausdorffDistance(previousEvaluation, evaluated) < 3,
         `asymmetric view morph should avoid large geometry jumps at pitch ${pitchDegrees}, yaw ${yawDegrees}`,
       );
       previousEvaluation = evaluated;

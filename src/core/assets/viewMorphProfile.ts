@@ -212,6 +212,8 @@ export function evaluateViewMorphProfile(
     validatedProfile.verticalPlanes,
     horizontalViewDirection,
   );
+  const horizontalRotationRad = getHorizontalRotationForView(horizontalBasis.right);
+  const horizontalSeamOffset = getContinuousHorizontalSeamOffset(horizontalBasis);
   const rotatedHorizontalPath = rotateHorizontalPolylineForView(
     validatedProfile.horizontalPlane.path,
     horizontalBasis,
@@ -230,12 +232,13 @@ export function evaluateViewMorphProfile(
       rotatedHorizontalPath,
       normalizedVerticalWeight,
       normalizedHorizontalWeight,
+      horizontalSeamOffset,
     ),
     debug: {
       verticalBlend: verticalBlend.debug,
       horizontalWeight: roundNumber(normalizedHorizontalWeight),
       verticalWeight: roundNumber(normalizedVerticalWeight),
-      horizontalRotationRad: getHorizontalRotationForView(horizontalBasis.right),
+      horizontalRotationRad,
     },
   };
 }
@@ -663,6 +666,7 @@ function blendSmoothedViewMorphPaths(
   horizontalPath: ViewMorphClosedPolyline,
   verticalWeight: number,
   horizontalWeight: number,
+  horizontalSeamOffset: number,
 ): StructuredBezierPath {
   const verticalBlendPath = createSmoothPaperPath(verticalPath);
   const horizontalBlendPath = createSmoothPaperPath(horizontalPath);
@@ -680,6 +684,7 @@ function blendSmoothedViewMorphPaths(
       correspondenceSegmentCount,
       verticalWeight,
       horizontalWeight,
+      horizontalSeamOffset,
     );
   } finally {
     verticalBlendPath.remove();
@@ -713,6 +718,7 @@ function blendPaperPathsByCubicCorrespondence(
   segmentCount: number,
   verticalWeight: number,
   horizontalWeight: number,
+  horizontalSeamOffset: number,
 ): StructuredBezierPath {
   const targetSegmentCount = Math.max(
     4,
@@ -727,6 +733,7 @@ function blendPaperPathsByCubicCorrespondence(
   const horizontalSegments = resamplePaperPathByReferenceSegments(
     horizontalPath,
     verticalSegments,
+    horizontalSeamOffset,
   );
 
   return {
@@ -763,6 +770,7 @@ function blendPaperPathsByCubicCorrespondence(
 function resamplePaperPathByReferenceSegments(
   path: paper.Path,
   reference: CubicSegment2D[],
+  horizontalSeamOffset: number,
 ): CubicSegment2D[] {
   const pointCount = reference.length;
 
@@ -771,13 +779,12 @@ function resamplePaperPathByReferenceSegments(
   }
 
   const referenceOffsets = getReferenceSegmentOffsets(reference);
-  const seamOffset = getTopmostPaperPathOffset(path);
   const sampleDirection =
     getReferenceOrientation(reference) === getPaperPathOrientation(path) ? 1 : -1;
   const candidateSamples = referenceOffsets.map((offset, index) =>
     getPaperPathSampleAtNormalizedOffset(
       path,
-      seamOffset + offset * sampleDirection,
+      horizontalSeamOffset + offset * sampleDirection,
       `point-${index + 1}`,
       sampleDirection,
     ),
@@ -841,23 +848,22 @@ function getPaperPathSampleAtNormalizedOffset(
   };
 }
 
-function getTopmostPaperPathOffset(path: paper.Path): number {
-  const sampleCount = 128;
-  let bestOffset = 0;
-  let bestScore = Number.POSITIVE_INFINITY;
+function getContinuousHorizontalSeamOffset(
+  basis: ViewMorphHorizontalBasis2D,
+): number {
+  const screenYFromSourceX = basis.right[1];
+  const screenYFromSourceY = basis.up[1];
 
-  for (let index = 0; index < sampleCount; index += 1) {
-    const offset = index / sampleCount;
-    const point = path.getPointAt(offset * path.length);
-    const score = point.y + Math.abs(point.x) * 0.0001;
-
-    if (score < bestScore) {
-      bestScore = score;
-      bestOffset = offset;
-    }
+  if (
+    Math.abs(screenYFromSourceX) <= EPSILON &&
+    Math.abs(screenYFromSourceY) <= EPSILON
+  ) {
+    return 0.75;
   }
 
-  return bestOffset;
+  return normalizeUnitOffset(
+    (Math.atan2(-screenYFromSourceY, -screenYFromSourceX) / (Math.PI * 2)),
+  );
 }
 
 function getReferenceOrientation(reference: CubicSegment2D[]): number {
