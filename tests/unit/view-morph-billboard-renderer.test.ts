@@ -59,6 +59,33 @@ export function runViewMorphBillboardRendererUnitTests(): void {
   });
   assertRotatedScaleAwareProjection();
   assertNestedMatrixScaleAwareProjection();
+  assertRotatedEvaluationDoesNotFlattenDefaultProfile(profile);
+}
+
+function assertRotatedEvaluationDoesNotFlattenDefaultProfile(
+  profile: ReturnType<typeof createDefaultViewMorphProfile>,
+): void {
+  for (const rotationY of [0, Math.PI / 4, Math.PI / 2, Math.PI]) {
+    const matrix = composeMatrix({
+      rotation: [0, rotationY, 0],
+      scale: [2, 3, 4],
+    });
+
+    for (const direction of getRegressionViewDirections()) {
+      const camera = createCameraLookingFrom(direction);
+      const evaluated = evaluateViewMorphProfileForCamera(profile, camera, matrix);
+      const extents = getPathExtents(evaluated);
+
+      assert.ok(
+        extents.width > 94,
+        `rotated default view morph should not flatten horizontally at rotation ${rotationY}, direction ${direction.join(",")}`,
+      );
+      assert.ok(
+        extents.height > 94,
+        `rotated default view morph should not flatten vertically at rotation ${rotationY}, direction ${direction.join(",")}`,
+      );
+    }
+  }
 }
 
 function assertScaleAwareProjection(
@@ -271,4 +298,17 @@ function getDominantScaleRatio(
 
 function getAxisScale(axis: "x" | "y" | "z"): number {
   return { x: 2, y: 3, z: 4 }[axis];
+}
+
+function getPathExtents(path: ReturnType<typeof evaluateViewMorphProfileForCamera>): {
+  width: number;
+  height: number;
+} {
+  const xs = path.segments.map((segment) => segment.anchor[0]);
+  const ys = path.segments.map((segment) => segment.anchor[1]);
+
+  return {
+    width: Math.max(...xs) - Math.min(...xs),
+    height: Math.max(...ys) - Math.min(...ys),
+  };
 }

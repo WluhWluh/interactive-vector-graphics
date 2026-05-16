@@ -1,4 +1,4 @@
-import { Matrix4, Quaternion, Vector3 } from "three";
+import { Matrix4, Vector3 } from "three";
 import type { Camera } from "three";
 import type { StructuredBezierPath } from "../../core/assets/structuredBezierPath";
 import {
@@ -294,14 +294,39 @@ function getViewMorphTransformBasis(matrix: Matrix4): {
   scale: Vector3;
 } {
   const rotationMatrix = new Matrix4().extractRotation(matrix);
-  const scale = new Vector3();
-
-  matrix.decompose(new Vector3(), new Quaternion(), scale);
+  const rotationOnlyColumns = getMatrixBasisColumns(rotationMatrix);
+  const fullColumns = getMatrixBasisColumns(matrix);
+  const scale = new Vector3(
+    getSignedAxisScale(fullColumns.x, rotationOnlyColumns.x),
+    getSignedAxisScale(fullColumns.y, rotationOnlyColumns.y),
+    getSignedAxisScale(fullColumns.z, rotationOnlyColumns.z),
+  );
 
   return {
     inverseRotationMatrix: rotationMatrix.clone().invert(),
     scale,
   };
+}
+
+function getMatrixBasisColumns(matrix: Matrix4): {
+  x: Vector3;
+  y: Vector3;
+  z: Vector3;
+} {
+  const elements = matrix.elements;
+
+  return {
+    x: new Vector3(elements[0], elements[1], elements[2]),
+    y: new Vector3(elements[4], elements[5], elements[6]),
+    z: new Vector3(elements[8], elements[9], elements[10]),
+  };
+}
+
+function getSignedAxisScale(axis: Vector3, rotationAxis: Vector3): number {
+  const length = axis.length();
+  const sign = axis.dot(rotationAxis) < 0 ? -1 : 1;
+
+  return length * sign;
 }
 
 function getScaledLocalBillboardDisplacement(
