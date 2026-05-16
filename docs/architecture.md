@@ -32,6 +32,9 @@ The supported asset kinds are:
 - `filledPath`: closed 2D fill primitives.
 - `strokePath`: open 2D stroke primitives with fixed round cap/join rendering.
 - `bezierCurve3d`: open 3D curve copies created from `strokePath` assets.
+- `viewMorphProfile`: editor-created 2.5D filled profile assets. Their source
+  data is multiple view-responsive polylines; runtime rendering evaluates a
+  camera-facing filled path instead of drawing carrier planes or a mesh.
 
 New asset kinds should start by adding type and capability entries, then extend
 server validation, hydration, rendering, inspector rows, and tests.
@@ -82,6 +85,13 @@ Shared 2D edit logic lives under `src/editor/tools/pathEditCore.ts` and
 - `billboardFrameData.ts` prepares per-frame evaluated/staging drawing data.
 - `viewportProxySync.ts` keeps Three.js proxy objects aligned with editor state.
 - `editorFrameRenderer.ts` coordinates vector, overlay, and Three.js rendering.
+
+`viewMorphProfile` rendering intentionally does not use the ordinary flat
+billboard scale path. `src/editor/render/viewMorphBillboardRenderer.ts` owns its
+camera-direction, non-uniform scale, and full world-matrix adaptation so Source
+Path Edit final previews and prefab/scene rendering stay aligned. Preserve the
+full `worldMatrix` in billboard frame data when adding new nested transform
+paths.
 
 Rendering changes should prefer adding renderer inputs or caches over reaching
 back into global editor state.
