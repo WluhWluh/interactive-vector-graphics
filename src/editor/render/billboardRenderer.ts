@@ -14,11 +14,7 @@ import {
   drawPrimitiveAssetPath,
   getPrimitiveGhostColor,
 } from "./primitiveAssetDrawing";
-import {
-  createViewMorphBillboardProjector,
-  drawViewMorphBillboardPath,
-  getViewMorphBillboardScreenBounds,
-} from "./viewMorphBillboardRenderer";
+import { drawViewMorphBillboardPath } from "./viewMorphBillboardRenderer";
 import { transformToMatrix, type TransformSnapshot } from "../tools/prefabTransform";
 
 export type DrawableBillboard = {
@@ -129,8 +125,6 @@ function drawBillboardNode(
       drawViewMorphBillboardSelectionBounds(
         context,
         drawable,
-        rendererContext,
-        worldMatrix,
         ghostColor ?? undefined,
       );
     }
@@ -183,34 +177,27 @@ function drawFlatBillboardPath(
 function drawViewMorphBillboardSelectionBounds(
   context: CanvasRenderingContext2D,
   drawable: ProjectedBillboard,
-  rendererContext: BillboardRendererContext,
-  worldMatrix: Matrix4,
   colorOverride?: string,
 ): void {
   const { selected, ghost = false } = drawable;
-  const projector = createViewMorphBillboardProjector({
-    camera: rendererContext.camera,
-    projectWorldPosition: rendererContext.projectWorldPosition,
-    localToWorldMatrix: worldMatrix,
-  });
-  const bounds = getViewMorphBillboardScreenBounds(drawable.asset.viewBox, projector);
-
-  if (!bounds) {
-    return;
-  }
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = drawable.asset.viewBox;
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
+  const assetScale = drawable.screenScale / largestDimension;
 
   context.save();
-  context.lineWidth = 3;
+  context.translate(drawable.projected.x, drawable.projected.y);
+  context.rotate(drawable.transform.rotation[2]);
+  context.scale(assetScale * drawable.transform.scale[0], assetScale * drawable.transform.scale[1]);
+  context.translate(
+    -(viewBoxX + viewBoxWidth / 2),
+    -(viewBoxY + viewBoxHeight / 2),
+  );
+  context.lineWidth = 3 / Math.max(assetScale, 0.001);
   context.strokeStyle = colorOverride ?? "#ffcf4a";
-  context.setLineDash(ghost ? [8] : []);
+  context.setLineDash(ghost ? [8 / Math.max(assetScale, 0.001)] : []);
 
   if (selected || ghost) {
-    context.strokeRect(
-      bounds.minX,
-      bounds.minY,
-      bounds.maxX - bounds.minX,
-      bounds.maxY - bounds.minY,
-    );
+    context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
   }
 
   context.restore();

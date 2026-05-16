@@ -25,13 +25,6 @@ export type ViewMorphBillboardProjector = {
   pathToScreen: (point: ViewMorphPoint2D) => [number, number] | null;
 };
 
-export type ViewMorphScreenBounds = {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-};
-
 export type ViewMorphBillboardTransformAdapter = {
   origin: Vector3Tuple;
   localToWorldMatrix: Matrix4;
@@ -273,38 +266,6 @@ export function drawStructuredBezierPathWithProjector(
   if (fillRule) {
     context.fill(fillRule);
   }
-}
-
-export function getViewMorphBillboardScreenBounds(
-  viewBox: [number, number, number, number],
-  projector: ViewMorphBillboardProjector,
-): ViewMorphScreenBounds | null {
-  const [x, y, width, height] = viewBox;
-  const points = [
-    projector.pathToScreen([x, y]),
-    projector.pathToScreen([x + width, y]),
-    projector.pathToScreen([x + width, y + height]),
-    projector.pathToScreen([x, y + height]),
-  ].filter((point): point is [number, number] => Boolean(point));
-
-  if (points.length === 0) {
-    return null;
-  }
-
-  return points.reduce(
-    (bounds, point) => ({
-      minX: Math.min(bounds.minX, point[0]),
-      minY: Math.min(bounds.minY, point[1]),
-      maxX: Math.max(bounds.maxX, point[0]),
-      maxY: Math.max(bounds.maxY, point[1]),
-    }),
-    {
-      minX: points[0]?.[0] ?? 0,
-      minY: points[0]?.[1] ?? 0,
-      maxX: points[0]?.[0] ?? 0,
-      maxY: points[0]?.[1] ?? 0,
-    },
-  );
 }
 
 export function getCameraScreenRightWorldVector(camera: Camera): Vector3 {
