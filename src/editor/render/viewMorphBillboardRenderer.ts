@@ -1,4 +1,4 @@
-import { Matrix4, Vector3 } from "three";
+import { Matrix4, Quaternion, Vector3 } from "three";
 import type { Camera } from "three";
 import type { StructuredBezierPath } from "../../core/assets/structuredBezierPath";
 import {
@@ -124,26 +124,27 @@ export function createViewMorphBillboardProjector(
   const right = getCameraScreenRightWorldVector(input.camera);
   const up = getCameraScreenUpWorldVector(input.camera);
   const transformBasis = getViewMorphTransformBasis(localToWorldMatrix);
-  const cameraInput = getViewMorphCameraEvaluationInput(
-    input.camera,
-    localToWorldMatrix,
-  );
-  const localBillboardBasis = getViewMorphLocalBillboardBasis(cameraInput);
+  const rightLocal = right
+    .clone()
+    .applyMatrix4(transformBasis.inverseRotationMatrix)
+    .normalize();
+  const upLocal = up
+    .clone()
+    .applyMatrix4(transformBasis.inverseRotationMatrix)
+    .normalize();
   const unitsPerPathUnit =
     input.unitsPerPathUnit ?? VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT;
 
   return {
     pathToScreen: (point) => {
-      const localDisplacement = getLocalBillboardDisplacement(
+      const scaledLocal = getScaledLocalBillboardDisplacement(
         point,
-        localBillboardBasis.right,
-        localBillboardBasis.up,
+        rightLocal,
+        upLocal,
+        transformBasis.scale,
       );
-      const worldDisplacement = localDisplacement.applyMatrix4(
-        transformBasis.linearMatrix,
-      );
-      const screenX = worldDisplacement.dot(right);
-      const screenY = worldDisplacement.dot(up);
+      const screenX = scaledLocal.dot(rightLocal);
+      const screenY = scaledLocal.dot(upLocal);
       const worldPoint = origin
         .clone()
         .add(right.clone().multiplyScalar(screenX * unitsPerPathUnit))
@@ -290,62 +291,33 @@ function getMatrixOrigin(matrix: Matrix4): Vector3Tuple {
 
 function getViewMorphTransformBasis(matrix: Matrix4): {
   inverseRotationMatrix: Matrix4;
-  linearMatrix: Matrix4;
+  scale: Vector3;
 } {
   const rotationMatrix = new Matrix4().extractRotation(matrix);
-  const linearMatrix = matrix.clone();
-  const elements = linearMatrix.elements;
+  const scale = new Vector3();
 
-  elements[12] = 0;
-  elements[13] = 0;
-  elements[14] = 0;
+  matrix.decompose(new Vector3(), new Quaternion(), scale);
 
   return {
     inverseRotationMatrix: rotationMatrix.clone().invert(),
-    linearMatrix,
+    scale,
   };
 }
 
-function getLocalBillboardDisplacement(
+function getScaledLocalBillboardDisplacement(
   point: ViewMorphPoint2D,
   rightLocal: Vector3,
   upLocal: Vector3,
+  scale: Vector3,
 ): Vector3 {
-  return rightLocal
+  const unscaledLocal = rightLocal
     .clone()
     .multiplyScalar(point[0])
     .add(upLocal.clone().multiplyScalar(-point[1]));
-}
 
-function getViewMorphLocalBillboardBasis(
-  input: ViewMorphCameraEvaluationInput,
-): { right: Vector3; up: Vector3 } {
-  const view = new Vector3(...input.viewDirectionLocal).normalize();
-  const localUp = new Vector3(0, 1, 0);
-  const right = new Vector3().crossVectors(localUp, view);
-
-  if (right.lengthSq() > 0.000001) {
-    return {
-      right: right.normalize(),
-      up: localUp,
-    };
-  }
-
-  const fallbackRight = projectToHorizontalPlane(
-    new Vector3(...input.horizontalRotationReferenceLocal),
-  ) ?? new Vector3(1, 0, 0);
-  const fallbackUp = projectToHorizontalPlane(
-    new Vector3(...input.screenUpReferenceLocal),
-  ) ?? new Vector3(-fallbackRight.z, 0, fallbackRight.x).normalize();
-
-  return {
-    right: fallbackRight,
-    up: fallbackUp,
-  };
-}
-
-function projectToHorizontalPlane(vector: Vector3): Vector3 | null {
-  const projected = new Vector3(vector.x, 0, vector.z);
-
-  return projected.lengthSq() > 0.000001 ? projected.normalize() : null;
+  return new Vector3(
+    unscaledLocal.x * scale.x,
+    unscaledLocal.y * scale.y,
+    unscaledLocal.z * scale.z,
+  );
 }

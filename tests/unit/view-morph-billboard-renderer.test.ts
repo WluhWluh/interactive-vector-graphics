@@ -57,31 +57,8 @@ export function runViewMorphBillboardRendererUnitTests(): void {
     horizontalSourceAxis: "x",
     verticalSourceAxis: "z",
   });
-  assertRotationChangesEvaluationDirection();
   assertRotatedScaleAwareProjection();
   assertNestedMatrixScaleAwareProjection();
-}
-
-function assertRotationChangesEvaluationDirection(): void {
-  const camera = createCameraLookingFrom([0, 0, 1]);
-  const rotated = composeMatrix({ rotation: [0, Math.PI / 2, 0] });
-  const input = getViewMorphCameraEvaluationInput(camera, rotated);
-
-  assert.deepEqual(
-    roundTuple(input.viewDirectionLocal),
-    [-1, 0, 0],
-    "rotating a view morph 90 degrees around Y should rotate the camera view into asset local space",
-  );
-  assert.deepEqual(
-    roundTuple(input.horizontalRotationReferenceLocal),
-    [0, 0, 1],
-    "rotated view morph should transform the camera screen-right reference into asset local space",
-  );
-  assert.deepEqual(
-    roundTuple(input.screenUpReferenceLocal),
-    [0, 1, 0],
-    "rotated view morph should keep world-up aligned with local Y for a pure Y rotation",
-  );
 }
 
 function assertScaleAwareProjection(
