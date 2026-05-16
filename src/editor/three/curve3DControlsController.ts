@@ -5,6 +5,7 @@ import {
   type Scene,
 } from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+import { getPathControlBaseScreenSizePx } from "../tools/pathControlStyle";
 import { tupleToVector } from "./viewportMath";
 import {
   createCurve3DControlProxy,
@@ -65,6 +66,7 @@ export function createCurve3DControlsController(input: {
 
       proxy.segmentId = control.segmentId;
       proxy.component = control.component;
+      proxy.baseScreenSizePx = getPathControlBaseScreenSizePx(control.component);
       proxy.root.position.fromArray(control.position);
       proxy.root.userData.curveControlId = control.id;
       proxy.root.userData.segmentId = control.segmentId;

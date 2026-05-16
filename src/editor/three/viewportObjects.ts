@@ -17,7 +17,10 @@ import {
   type Object3D,
 } from "three";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
-import { getPathControl3DStyle } from "../tools/pathControlStyle";
+import {
+  getPathControl3DStyle,
+  getPathControlBaseScreenSizePx,
+} from "../tools/pathControlStyle";
 import type { Vector3Tuple } from "./viewportMath";
 
 export type TransformProxyNode = {
@@ -56,10 +59,11 @@ export type Curve3DControlProxy = {
   root: Group;
   fillMesh: Mesh;
   outlineMesh: Mesh;
+  baseScreenSizePx: number;
 };
 
-const CURVE_3D_ANCHOR_GEOMETRY = new SphereGeometry(0.035, 18, 12);
-const CURVE_3D_HANDLE_GEOMETRY = new BoxGeometry(0.07, 0.07, 0.07);
+const CURVE_3D_ANCHOR_GEOMETRY = new SphereGeometry(0.5, 18, 12);
+const CURVE_3D_HANDLE_GEOMETRY = new BoxGeometry(1, 1, 1);
 
 export function createTransparentRenderer(
   canvas: HTMLCanvasElement,
@@ -177,6 +181,7 @@ export function createCurve3DControlProxy(
     root,
     fillMesh,
     outlineMesh,
+    baseScreenSizePx: getPathControlBaseScreenSizePx(control.component),
   };
 
   updateCurve3DControlMaterial(proxy, {

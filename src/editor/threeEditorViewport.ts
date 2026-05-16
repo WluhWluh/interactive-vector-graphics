@@ -313,6 +313,7 @@ export class ThreeEditorViewport {
     if (this.orbitInteractionActive && !this.transformControls.dragging) {
       this.transformControls.axis = null;
     }
+    this.updateCurve3DControlScreenScales(size);
     this.backgroundRenderer.render(this.backgroundScene, this.activeCamera);
     this.overlayRenderer.render(this.overlayScene, this.activeCamera);
   }
@@ -662,6 +663,26 @@ export class ThreeEditorViewport {
     this.curve3DControlsController.setHoveredControlId(controlId ?? null);
   }
 
+  private updateCurve3DControlScreenScales(size: StageSize): void {
+    if (this.curve3DControls.size === 0) {
+      return;
+    }
+
+    const camera = this.activeCamera;
+
+    for (const proxy of this.curve3DControls.values()) {
+      const worldSize = getWorldSizeForScreenPixels(
+        proxy.root.position,
+        proxy.baseScreenSizePx,
+        camera,
+        size,
+      );
+
+      proxy.root.scale.setScalar(worldSize);
+      proxy.root.updateMatrixWorld();
+    }
+  }
+
   private lookAtDefaultTarget(): void {
     this.perspectiveCamera.lookAt(DEFAULT_CAMERA_TARGET);
     this.orthographicCamera.lookAt(DEFAULT_CAMERA_TARGET);
@@ -704,4 +725,21 @@ function getRequiredCanvas(id: string): HTMLCanvasElement {
   }
 
   return canvas;
+}
+
+function getWorldSizeForScreenPixels(
+  worldPosition: Vector3,
+  screenSizePx: number,
+  camera: Camera,
+  size: StageSize,
+): number {
+  if (screenSizePx <= 0) {
+    return 0;
+  }
+
+  const projected = worldPosition.clone().project(camera);
+  const ndcStep = (screenSizePx / Math.max(size.cssHeight, 1)) * 2;
+  const cameraShift = new Vector3(projected.x, projected.y + ndcStep, projected.z);
+  const worldAbove = cameraShift.unproject(camera);
+  return worldAbove.distanceTo(worldPosition);
 }

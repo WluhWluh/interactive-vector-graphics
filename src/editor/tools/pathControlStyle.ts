@@ -56,6 +56,15 @@ export function getPathControl2DStyle(
   };
 }
 
+export function getPathControlBaseScreenSizePx(component: PathEditComponent): number {
+  const style = getPathControl2DStyle(component, {
+    selected: false,
+    hovered: false,
+  });
+
+  return component === "anchor" ? style.radius * 2 : style.size;
+}
+
 export function getPolylineControl2DStyle(
   state: PathControlVisualState,
 ): PathControl2DStyle {
@@ -66,7 +75,9 @@ export function getPathControl3DStyle(
   component: PathEditComponent,
   state: PathControlVisualState,
 ): PathControl3DStyle {
-  const emphasized = state.selected || state.hovered;
+  const style = getPathControl2DStyle(component, state);
+  const baseScreenSize = getPathControlBaseScreenSizePx(component);
+  const fillScreenSize = component === "anchor" ? style.radius * 2 : style.size;
 
   return {
     fill: state.selected
@@ -77,7 +88,7 @@ export function getPathControl3DStyle(
     outline: state.hovered
       ? PATH_CONTROL_COLORS.hoverOutline3D
       : PATH_CONTROL_COLORS.outline3D,
-    scale: emphasized ? 1.16 : 1,
-    outlineScale: state.hovered ? 1.48 : 1.32,
+    scale: fillScreenSize / baseScreenSize,
+    outlineScale: (fillScreenSize + style.lineWidth) / baseScreenSize,
   };
 }
