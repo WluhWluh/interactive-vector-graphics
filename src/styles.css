@@ -711,8 +711,15 @@ body[data-path-edit-active="true"] #paper-canvas {
   pointer-events: auto;
 }
 
+body[data-view-morph-profile-edit-active="true"] #paper-canvas {
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
 body[data-path-edit-active="true"] #three-background-canvas,
-body[data-path-edit-active="true"] #three-overlay-canvas {
+body[data-path-edit-active="true"] #three-overlay-canvas,
+body[data-view-morph-profile-edit-active="true"] #three-background-canvas,
+body[data-view-morph-profile-edit-active="true"] #three-overlay-canvas {
   opacity: 0;
   pointer-events: none;
 }

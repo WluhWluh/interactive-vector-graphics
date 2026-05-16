@@ -41,6 +41,35 @@ export function runViewMorphProfileUnitTests(): void {
   assert.equal(topEvaluation.debug.horizontalWeight, 1);
   assert.equal(topEvaluation.debug.verticalWeight, 0);
 
+  const asymmetricTopProfile = createDefaultViewMorphProfile();
+  asymmetricTopProfile.horizontalPlane.path.points =
+    asymmetricTopProfile.horizontalPlane.path.points.map((point) => ({
+      id: point.id,
+      point: [point.point[0] * 1.6, point.point[1] * 0.6],
+    }));
+  const topWithRightwardScreenUp = evaluateViewMorphProfile(
+    asymmetricTopProfile,
+    [0, 1, 0],
+    { horizontalRotationReferenceLocal: [1, 0, 0] },
+  );
+  const topWithForwardScreenUp = evaluateViewMorphProfile(
+    asymmetricTopProfile,
+    [0, 1, 0],
+    { horizontalRotationReferenceLocal: [0, 0, 1] },
+  );
+  const rightAnchorWithRightwardScreenUp =
+    topWithRightwardScreenUp.path.segments[2]?.anchor;
+  const rightAnchorWithForwardScreenUp =
+    topWithForwardScreenUp.path.segments[2]?.anchor;
+
+  assert.ok(rightAnchorWithRightwardScreenUp, "expected a right-side anchor");
+  assert.ok(rightAnchorWithForwardScreenUp, "expected a right-side anchor");
+  assert.ok(
+    Math.abs(rightAnchorWithRightwardScreenUp[0]) >
+      Math.abs(rightAnchorWithForwardScreenUp[0]) + 20,
+    "top view should rotate the horizontal profile from the screen orientation reference",
+  );
+
   for (let index = 0; index < 8; index += 1) {
     const angle = (index * Math.PI) / 4;
     const evaluated = evaluateViewMorphProfileToBezierPath(profile, [

@@ -20,6 +20,7 @@ export type EditorShellRenderInput = {
   pendingPrefabClipboard: boolean;
   hasPathEditSession: boolean;
   hasPathEdit3DSession: boolean;
+  hasViewMorphProfileEditSession: boolean;
   hasValidInPlacePathEditSession: boolean;
   activeTimelineClip: { durationMs: number } | null;
   timelineCurrentTimeMs: number;
@@ -71,6 +72,9 @@ function syncEditorShellChrome(input: EditorShellRenderInput): void {
   );
   document.body.dataset.pathEdit3dActive = String(
     input.mode === "path" && input.hasPathEdit3DSession,
+  );
+  document.body.dataset.viewMorphProfileEditActive = String(
+    input.mode === "path" && input.hasViewMorphProfileEditSession,
   );
   document.body.dataset.inPlacePathEditActive = String(
     input.hasValidInPlacePathEditSession,
@@ -152,9 +156,13 @@ function syncEditorShellChrome(input: EditorShellRenderInput): void {
   elements.create3DCurveButton.disabled =
     !input.selectedProjectId || !input.canConvertSelectedAssetTo3DCurve;
   elements.savePathButton.disabled =
-    !input.hasPathEditSession && !input.hasPathEdit3DSession;
+    !input.hasPathEditSession &&
+    !input.hasPathEdit3DSession &&
+    !input.hasViewMorphProfileEditSession;
   elements.cancelPathButton.disabled =
-    !input.hasPathEditSession && !input.hasPathEdit3DSession;
+    !input.hasPathEditSession &&
+    !input.hasPathEdit3DSession &&
+    !input.hasViewMorphProfileEditSession;
   elements.projectionToggleButton.textContent =
     input.currentProjection === "perspective" ? "Perspective" : "Orthographic";
 

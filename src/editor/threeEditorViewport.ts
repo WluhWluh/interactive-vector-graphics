@@ -237,6 +237,9 @@ export class ThreeEditorViewport {
     this.overlayCanvas.addEventListener("pointerdown", (event) => {
       this.pointerDownPosition.set(event.clientX, event.clientY);
     });
+    this.overlayCanvas.addEventListener("pointermove", (event) => {
+      this.updateCurve3DControlHover(event);
+    });
     this.overlayCanvas.addEventListener("pointerup", (event) => {
       if (this.orbitDisabledForTransformPointer && !this.transformControls.dragging) {
         this.orbitControls.enabled = true;
@@ -371,6 +374,7 @@ export class ThreeEditorViewport {
       this.selectedNodeId = null;
     }
 
+    this.curve3DControlsController.refreshControlStyles();
     this.attachCurrentTransformTarget();
   }
 
@@ -595,7 +599,10 @@ export class ThreeEditorViewport {
     this.raycaster.setFromCamera(this.pointer, this.activeCamera);
 
     const curveIntersection = this.raycaster.intersectObjects(
-      [...this.curve3DControls.values()].map((proxy) => proxy.mesh),
+      [...this.curve3DControls.values()].flatMap((proxy) => [
+        proxy.fillMesh,
+        proxy.outlineMesh,
+      ]),
       false,
     )[0];
     const curveControlId = curveIntersection?.object.userData.curveControlId as
@@ -622,6 +629,37 @@ export class ThreeEditorViewport {
       this.setSelectedNode(nodeId);
       this.onSelectionChange?.(nodeId);
     }
+  }
+
+  private updateCurve3DControlHover(event: PointerEvent): void {
+    if (
+      this.curve3DControls.size === 0 ||
+      this.transformControls.dragging ||
+      this.orbitInteractionActive
+    ) {
+      this.curve3DControlsController.setHoveredControlId(null);
+      return;
+    }
+
+    const rect = this.overlayCanvas.getBoundingClientRect();
+    this.pointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(this.pointer, this.activeCamera);
+
+    const intersection = this.raycaster.intersectObjects(
+      [...this.curve3DControls.values()].flatMap((proxy) => [
+        proxy.fillMesh,
+        proxy.outlineMesh,
+      ]),
+      false,
+    )[0];
+    const controlId = intersection?.object.userData.curveControlId as
+      | string
+      | undefined;
+
+    this.curve3DControlsController.setHoveredControlId(controlId ?? null);
   }
 
   private lookAtDefaultTarget(): void {

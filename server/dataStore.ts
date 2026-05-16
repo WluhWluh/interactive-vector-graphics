@@ -12,6 +12,7 @@ import type {
 } from "./types";
 import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
+import type { ViewMorphProfile } from "../src/core/assets/viewMorphProfile";
 import { toDataRelativePath as getDataRelativePath } from "./persistence/dataPaths";
 import {
   createPrimitiveAssetStore,
@@ -61,6 +62,11 @@ export type DataStore = {
   ) => Promise<StoredPrimitiveAsset>;
   createViewMorphProfileAsset: (
     projectId: string,
+  ) => Promise<StoredPrimitiveAsset>;
+  updatePrimitiveAssetViewMorphProfile: (
+    projectId: string,
+    assetId: string,
+    viewMorphProfile: ViewMorphProfile,
   ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
   listPrefabs: (projectId: string) => PrefabRecord[];
@@ -270,6 +276,8 @@ export function createDataStore(dataDir: string): DataStore {
     updatePrimitiveAssetCurve3D: primitiveAssetStore.updatePrimitiveAssetCurve3D,
     createViewMorphProfileAsset:
       primitiveAssetStore.createViewMorphProfileAsset,
+    updatePrimitiveAssetViewMorphProfile:
+      primitiveAssetStore.updatePrimitiveAssetViewMorphProfile,
     deletePrimitiveAsset: primitiveAssetStore.deletePrimitiveAsset,
     listPrefabs: prefabStore.listPrefabs,
     createPrefab: prefabStore.createPrefab,

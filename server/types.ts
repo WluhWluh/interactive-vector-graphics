@@ -175,6 +175,10 @@ export type UpdateAssetCurve3DResponse = {
   asset: StoredPrimitiveAsset;
 };
 
+export type UpdateViewMorphProfileResponse = {
+  asset: StoredPrimitiveAsset;
+};
+
 export type PrefabsResponse = {
   prefabs: PrefabRecord[];
 };

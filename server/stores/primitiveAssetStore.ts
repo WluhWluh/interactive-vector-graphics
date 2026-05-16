@@ -22,6 +22,7 @@ import {
   createDefaultViewMorphProfile,
   createViewMorphPreviewPath,
   validateViewMorphProfile,
+  type ViewMorphProfile,
   VIEW_MORPH_PROFILE_DEFAULT_VIEW_BOX,
 } from "../../src/core/assets/viewMorphProfile";
 import { writeTextFileAtomic } from "../persistence/atomicFile";
@@ -67,6 +68,11 @@ export type PrimitiveAssetStore = {
   ) => Promise<StoredPrimitiveAsset>;
   createViewMorphProfileAsset: (
     projectId: string,
+  ) => Promise<StoredPrimitiveAsset>;
+  updatePrimitiveAssetViewMorphProfile: (
+    projectId: string,
+    assetId: string,
+    viewMorphProfile: ViewMorphProfile,
   ) => Promise<StoredPrimitiveAsset>;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
 };
@@ -493,6 +499,65 @@ export function createPrimitiveAssetStore(
     return asset;
   }
 
+  async function updatePrimitiveAssetViewMorphProfile(
+    projectId: string,
+    assetId: string,
+    viewMorphProfile: ViewMorphProfile,
+  ): Promise<StoredPrimitiveAsset> {
+    const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
+
+    if (existingAsset.assetKind !== "viewMorphProfile") {
+      throw new Error("Only view morph profile assets can be updated through this API.");
+    }
+
+    const validatedProfile = validateViewMorphProfile(viewMorphProfile);
+    const previewPath = createViewMorphPreviewPath(validatedProfile);
+    const normalized = createNormalizedPrimitiveSvg({
+      assetKind: "viewMorphProfile",
+      viewBox: existingAsset.viewBox,
+      bezierPath: previewPath,
+      bezierPath3d: null,
+      viewMorphProfile: validatedProfile,
+      fill: existingAsset.fill,
+      fillRule: existingAsset.fillRule,
+      stroke: null,
+      strokeWidth: null,
+    });
+    const timestamp = new Date().toISOString();
+    const updatedAsset: StoredPrimitiveAsset = {
+      ...existingAsset,
+      pathD: normalized.pathD,
+      bezierPath: previewPath,
+      viewMorphProfile: validatedProfile,
+      updatedAt: timestamp,
+    };
+
+    await writeTextFileAtomic(
+      join(resolvedDataDir, existingAsset.sourcePath),
+      normalized.svgText,
+    );
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          `
+        UPDATE primitive_assets
+        SET pathD = ?, bezierPath = ?, viewMorphProfile = ?, updatedAt = ?
+        WHERE projectId = ? AND id = ?
+      `,
+        )
+        .run(
+          updatedAsset.pathD,
+          JSON.stringify(updatedAsset.bezierPath),
+          JSON.stringify(updatedAsset.viewMorphProfile),
+          updatedAsset.updatedAt,
+          projectId,
+          assetId,
+        );
+    });
+
+    return updatedAsset;
+  }
+
   async function deletePrimitiveAsset(
     projectId: string,
     assetId: string,
@@ -558,6 +623,7 @@ export function createPrimitiveAssetStore(
     convertPrimitiveAssetTo3DCurve,
     updatePrimitiveAssetCurve3D,
     createViewMorphProfileAsset,
+    updatePrimitiveAssetViewMorphProfile,
     deletePrimitiveAsset,
   };
 }

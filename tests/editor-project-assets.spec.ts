@@ -1134,10 +1134,17 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
   await expect.poll(() => countWarmYellowPixels(vectorCanvas)).toBeGreaterThan(50);
 
   await page.getByRole("button", { name: "Source Path Edit" }).click();
-  await expect(page.locator("#edit-path-button")).toBeDisabled();
-  await expect(page.locator("#path-edit-fields")).toContainText(
-    "View morph profiles do not support Source Path Edit yet.",
+  await expect(page.locator("#edit-path-button")).toBeEnabled();
+  await page.locator("#edit-path-button").click();
+  await expect(page.locator("#path-edit-fields")).toContainText("Front");
+
+  const pathEditState = await page.evaluate(
+    () => window.__vectorEditorDebug?.getPathEditState() ?? null,
   );
+
+  expect(pathEditState?.isViewMorphProfile).toBe(true);
+  expect(pathEditState?.draftViewMorphProfile?.version).toBe(1);
+  expect(pathEditState?.viewMorphControls.length).toBeGreaterThan(0);
 
   await page.getByRole("button", { name: "Asset Assembly" }).click();
   await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();

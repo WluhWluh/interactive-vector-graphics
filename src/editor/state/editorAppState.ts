@@ -20,6 +20,12 @@ import type {
 } from "../controllers/sourcePathEditController";
 import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
 import type { PathEditDragState } from "../tools/pathEditCore";
+import type {
+  ViewMorphEditSelection,
+  ViewMorphProfileEditDragState,
+  ViewMorphProfileEditSession,
+} from "../tools/viewMorphProfileEditCore";
+import { cloneViewMorphProfileEditSession } from "../tools/viewMorphProfileEditCore";
 import {
   createEmptyPrefabAnimation,
   type PrefabSelectionId,
@@ -61,8 +67,11 @@ export type EditorAppState = {
   pendingPrefabClipboard: PendingPrefabClipboard | null;
   pathEditSession: SourcePathEditSession | null;
   pathEdit3DSession: SourcePathEdit3DSession | null;
+  viewMorphProfileEditSession: ViewMorphProfileEditSession | null;
   pathEditDragState: PathEditDragState | null;
   pathEditHoveredControl: PathEditDragState | null;
+  viewMorphProfileEditDragState: ViewMorphProfileEditDragState | null;
+  viewMorphProfileEditHoveredControl: ViewMorphEditSelection | null;
   inPlacePathEditSession: InPlacePathEditSession | null;
   inPlacePathEditDragState: PathEditDragState | null;
   inPlacePathEditHoveredControl: PathEditDragState | null;
@@ -120,8 +129,11 @@ export type PathEditDomainState = Pick<
   EditorAppState,
   | "pathEditSession"
   | "pathEdit3DSession"
+  | "viewMorphProfileEditSession"
   | "pathEditDragState"
   | "pathEditHoveredControl"
+  | "viewMorphProfileEditDragState"
+  | "viewMorphProfileEditHoveredControl"
   | "inPlacePathEditSession"
   | "inPlacePathEditDragState"
   | "inPlacePathEditHoveredControl"
@@ -179,8 +191,11 @@ export function createInitialEditorAppState(input: {
     pendingPrefabClipboard: null,
     pathEditSession: null,
     pathEdit3DSession: null,
+    viewMorphProfileEditSession: null,
     pathEditDragState: null,
     pathEditHoveredControl: null,
+    viewMorphProfileEditDragState: null,
+    viewMorphProfileEditHoveredControl: null,
     inPlacePathEditSession: null,
     inPlacePathEditDragState: null,
     inPlacePathEditHoveredControl: null,
@@ -265,8 +280,17 @@ export function cloneEditorAppState(state: EditorAppState): EditorAppState {
     timelinePointerDrag: cloneTimelinePointerDrag(state.timelinePointerDrag),
     pathEditSession: cloneSourcePathEditSession(state.pathEditSession),
     pathEdit3DSession: cloneSourcePathEdit3DSession(state.pathEdit3DSession),
+    viewMorphProfileEditSession: state.viewMorphProfileEditSession
+      ? cloneViewMorphProfileEditSession(state.viewMorphProfileEditSession)
+      : null,
     pathEditDragState: clonePathEditDragState(state.pathEditDragState),
     pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
+    viewMorphProfileEditDragState: cloneViewMorphProfileEditSelection(
+      state.viewMorphProfileEditDragState,
+    ),
+    viewMorphProfileEditHoveredControl: cloneViewMorphProfileEditSelection(
+      state.viewMorphProfileEditHoveredControl,
+    ),
     inPlacePathEditSession: cloneInPlacePathEditSession(
       state.inPlacePathEditSession,
     ),
@@ -342,8 +366,17 @@ function clonePathEditDomainState(state: EditorAppState): PathEditDomainState {
   return {
     pathEditSession: cloneSourcePathEditSession(state.pathEditSession),
     pathEdit3DSession: cloneSourcePathEdit3DSession(state.pathEdit3DSession),
+    viewMorphProfileEditSession: state.viewMorphProfileEditSession
+      ? cloneViewMorphProfileEditSession(state.viewMorphProfileEditSession)
+      : null,
     pathEditDragState: clonePathEditDragState(state.pathEditDragState),
     pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
+    viewMorphProfileEditDragState: cloneViewMorphProfileEditSelection(
+      state.viewMorphProfileEditDragState,
+    ),
+    viewMorphProfileEditHoveredControl: cloneViewMorphProfileEditSelection(
+      state.viewMorphProfileEditHoveredControl,
+    ),
     inPlacePathEditSession: cloneInPlacePathEditSession(
       state.inPlacePathEditSession,
     ),
@@ -398,6 +431,12 @@ function clonePathEditDragState(
   dragState: PathEditDragState | null,
 ): PathEditDragState | null {
   return dragState ? { ...dragState } : null;
+}
+
+function cloneViewMorphProfileEditSelection<T extends ViewMorphEditSelection>(
+  selection: T | null,
+): T | null {
+  return selection ? ({ ...selection } as T) : null;
 }
 
 function cloneTimelinePointerDrag(

@@ -6,6 +6,7 @@ import { importPrimitiveSvgOnServer } from "./primitiveSvgImport";
 import { validateSceneDocument } from "./sceneDocument";
 import type { StructuredBezierPath } from "../src/core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
+import type { ViewMorphProfile } from "../src/core/assets/viewMorphProfile";
 import type {
   AssetsResponse,
   ConvertAssetTo3DCurveResponse,
@@ -22,6 +23,7 @@ import type {
   ScenesResponse,
   UpdateAssetCurve3DResponse,
   UpdateAssetPathResponse,
+  UpdateViewMorphProfileResponse,
 } from "./types";
 
 const dataStore = createDataStore(getDefaultDataDir());
@@ -262,6 +264,35 @@ server.put<{
     };
   }
 });
+
+server.put<{
+  Params: { projectId: string; assetId: string };
+  Body: { viewMorphProfile?: unknown };
+  Reply: UpdateViewMorphProfileResponse | { error: string };
+}>(
+  "/api/projects/:projectId/assets/:assetId/view-morph-profile",
+  async (request, reply) => {
+    await dataStore.ensureReady();
+
+    try {
+      const asset = await dataStore.updatePrimitiveAssetViewMorphProfile(
+        request.params.projectId,
+        request.params.assetId,
+        request.body?.viewMorphProfile as ViewMorphProfile,
+      );
+
+      return { asset };
+    } catch (error) {
+      reply.code(400);
+      return {
+        error:
+          error instanceof Error
+            ? error.message
+            : "View morph profile update failed.",
+      };
+    }
+  },
+);
 
 server.get<{
   Params: { projectId: string };

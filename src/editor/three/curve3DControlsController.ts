@@ -5,9 +5,7 @@ import {
   type Scene,
 } from "three";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import {
-  tupleToVector,
-} from "./viewportMath";
+import { tupleToVector } from "./viewportMath";
 import {
   createCurve3DControlProxy,
   disposeObject,
@@ -24,6 +22,8 @@ export type Curve3DControlsController = {
   ) => void;
   clear: () => void;
   setHandleLines: (lines: Curve3DHandleLineDescriptor[]) => void;
+  setHoveredControlId: (controlId: string | null) => void;
+  refreshControlStyles: () => void;
 };
 
 export function createCurve3DControlsController(input: {
@@ -36,6 +36,7 @@ export function createCurve3DControlsController(input: {
   attachCurrentTransformTarget: () => void;
 }): Curve3DControlsController {
   let curve3DHandleLines: LineSegments | null = null;
+  let hoveredCurveControlId: string | null = null;
 
   function setControls(
     controls: Curve3DControlDescriptor[],
@@ -48,8 +49,8 @@ export function createCurve3DControlsController(input: {
         continue;
       }
 
-      input.overlayScene.remove(proxy.mesh);
-      disposeObject(proxy.mesh);
+      input.overlayScene.remove(proxy.root);
+      disposeObject(proxy.root);
       input.curve3DControls.delete(controlId);
 
       if (input.getSelectedCurve3DControlId() === controlId) {
@@ -64,15 +65,24 @@ export function createCurve3DControlsController(input: {
 
       proxy.segmentId = control.segmentId;
       proxy.component = control.component;
-      proxy.mesh.position.fromArray(control.position);
-      proxy.mesh.userData.curveControlId = control.id;
-      proxy.mesh.userData.segmentId = control.segmentId;
-      proxy.mesh.userData.component = control.component;
-      updateCurve3DControlMaterial(proxy, control.selected);
+      proxy.root.position.fromArray(control.position);
+      proxy.root.userData.curveControlId = control.id;
+      proxy.root.userData.segmentId = control.segmentId;
+      proxy.root.userData.component = control.component;
+      proxy.fillMesh.userData.curveControlId = control.id;
+      proxy.fillMesh.userData.segmentId = control.segmentId;
+      proxy.fillMesh.userData.component = control.component;
+      proxy.outlineMesh.userData.curveControlId = control.id;
+      proxy.outlineMesh.userData.segmentId = control.segmentId;
+      proxy.outlineMesh.userData.component = control.component;
+      updateCurve3DControlMaterial(proxy, {
+        selected: control.selected,
+        hovered: hoveredCurveControlId === control.id,
+      });
 
       if (!existing) {
         input.curve3DControls.set(control.id, proxy);
-        input.overlayScene.add(proxy.mesh);
+        input.overlayScene.add(proxy.root);
       }
     }
 
@@ -85,17 +95,18 @@ export function createCurve3DControlsController(input: {
       const proxy = input.curve3DControls.get(selectedCurveControlId);
 
       if (proxy) {
-        input.transformControls.attach(proxy.mesh);
+        input.transformControls.attach(proxy.root);
       }
     }
   }
 
   function clear(): void {
     input.setSelectedCurve3DControlId(null);
+    hoveredCurveControlId = null;
 
     for (const proxy of input.curve3DControls.values()) {
-      input.overlayScene.remove(proxy.mesh);
-      disposeObject(proxy.mesh);
+      input.overlayScene.remove(proxy.root);
+      disposeObject(proxy.root);
     }
 
     input.curve3DControls.clear();
@@ -131,9 +142,46 @@ export function createCurve3DControlsController(input: {
     input.overlayScene.add(curve3DHandleLines);
   }
 
+  function setHoveredControlId(controlId: string | null): void {
+    if (hoveredCurveControlId === controlId) {
+      return;
+    }
+
+    const previousHoveredId = hoveredCurveControlId;
+    hoveredCurveControlId = controlId;
+
+    for (const id of [previousHoveredId, hoveredCurveControlId]) {
+      if (!id) {
+        continue;
+      }
+
+      const proxy = input.curve3DControls.get(id);
+
+      if (!proxy) {
+        continue;
+      }
+
+      updateCurve3DControlMaterial(proxy, {
+        selected: input.getSelectedCurve3DControlId() === id,
+        hovered: hoveredCurveControlId === id,
+      });
+    }
+  }
+
+  function refreshControlStyles(): void {
+    for (const [id, proxy] of input.curve3DControls) {
+      updateCurve3DControlMaterial(proxy, {
+        selected: input.getSelectedCurve3DControlId() === id,
+        hovered: hoveredCurveControlId === id,
+      });
+    }
+  }
+
   return {
     setControls,
     clear,
     setHandleLines,
+    setHoveredControlId,
+    refreshControlStyles,
   };
 }

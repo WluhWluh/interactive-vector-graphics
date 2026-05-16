@@ -7,6 +7,17 @@ import {
   type PathEditSession,
   type PathEditViewportAdapter,
 } from "../tools/pathEditCore";
+import {
+  PATH_CONTROL_COLORS,
+  getPathControl2DStyle,
+} from "../tools/pathControlStyle";
+import {
+  getViewMorphProfileEditControls,
+  viewMorphProfileEditSelectionsEqual,
+  type ViewMorphEditSelection,
+  type ViewMorphProfileEditSession,
+  type ViewMorphProfileEditViewportAdapter,
+} from "../tools/viewMorphProfileEditCore";
 import { drawPrimitiveAssetPath } from "./primitiveAssetDrawing";
 
 export type SourcePathEditViewTransform = {
@@ -81,13 +92,72 @@ export function drawPathEditPreview(
   context.restore();
 }
 
+export function drawViewMorphProfileEditControls(
+  context: CanvasRenderingContext2D,
+  session: ViewMorphProfileEditSession,
+  adapter: ViewMorphProfileEditViewportAdapter,
+  hoveredControl: ViewMorphEditSelection | null = null,
+): void {
+  const controls = getViewMorphProfileEditControls(session);
+
+  if (controls.length === 0) {
+    return;
+  }
+
+  context.save();
+  context.strokeStyle = PATH_CONTROL_COLORS.handleLine;
+  context.lineWidth = 1;
+  context.beginPath();
+
+  controls.forEach((control, index) => {
+    const point = adapter.pathToScreen(control.point);
+
+    if (!point) {
+      return;
+    }
+
+    if (index === 0) {
+      context.moveTo(point[0], point[1]);
+    } else {
+      context.lineTo(point[0], point[1]);
+    }
+  });
+
+  context.closePath();
+  context.stroke();
+
+  for (const control of controls) {
+    const screenPoint = adapter.pathToScreen(control.point);
+
+    if (!screenPoint) {
+      continue;
+    }
+
+    const selection = {
+      kind: control.kind,
+      planeId: control.planeId,
+      pointId: control.pointId,
+    };
+
+    drawPathEditControlPoint(
+      context,
+      screenPoint,
+      "anchor",
+      viewMorphProfileEditSelectionsEqual(session.selected, selection),
+      viewMorphProfileEditSelectionsEqual(hoveredControl, selection),
+    );
+  }
+
+  context.restore();
+}
+
 function drawPathEditHandleLine(
   context: CanvasRenderingContext2D,
   anchor: [number, number],
   handle: [number, number],
 ): void {
   context.save();
-  context.strokeStyle = "rgba(238, 244, 255, 0.44)";
+  context.strokeStyle = PATH_CONTROL_COLORS.handleLine;
   context.lineWidth = 1;
   context.beginPath();
   context.moveTo(anchor[0], anchor[1]);
@@ -104,17 +174,18 @@ function drawPathEditControlPoint(
   hovered: boolean,
 ): void {
   context.save();
-  context.fillStyle = selected ? "#ffcf4a" : "#5bc4bf";
-  context.strokeStyle = hovered ? "#ffffff" : "rgba(17, 24, 39, 0.86)";
-  context.lineWidth = hovered ? 3 : 2;
+  const style = getPathControl2DStyle(component, { selected, hovered });
+  context.fillStyle = style.fill;
+  context.strokeStyle = style.stroke;
+  context.lineWidth = style.lineWidth;
 
   if (component === "anchor") {
     context.beginPath();
-    context.arc(point[0], point[1], selected || hovered ? 6 : 5, 0, Math.PI * 2);
+    context.arc(point[0], point[1], style.radius, 0, Math.PI * 2);
     context.fill();
     context.stroke();
   } else {
-    const size = selected || hovered ? 10 : 8;
+    const size = style.size;
     context.fillRect(point[0] - size / 2, point[1] - size / 2, size, size);
     context.strokeRect(point[0] - size / 2, point[1] - size / 2, size, size);
   }

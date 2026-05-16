@@ -129,9 +129,7 @@ export function appendAssetInspectorRows(
   appendInspectorRow(
     elements,
     "Source Path Edit",
-    asset.assetKind === "viewMorphProfile"
-      ? "Not supported for view morph profiles"
-      : "Use the Source Path Edit mode",
+    "Use the Source Path Edit mode",
   );
 }
 

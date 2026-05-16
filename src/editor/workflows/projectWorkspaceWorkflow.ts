@@ -24,6 +24,7 @@ export type AssetRecordsWorkflowResult = {
   nextSelectedAssetId: string | null;
   missingPathEditAssetId: string | null;
   missingPathEdit3DAssetId: string | null;
+  missingViewMorphProfileEditAssetId: string | null;
 };
 
 export type PrefabRecordsWorkflowResult = {
@@ -58,6 +59,7 @@ export async function loadAssetRecords(input: {
   selectedAssetId: string | null;
   pathEditAssetId: string | null;
   pathEdit3DAssetId: string | null;
+  viewMorphProfileEditAssetId: string | null;
   listAssets: (projectId: string) => Promise<PrimitiveSvgAsset[]>;
 }): Promise<AssetRecordsWorkflowResult> {
   const assets = await input.listAssets(input.projectId);
@@ -66,6 +68,7 @@ export async function loadAssetRecords(input: {
     assets,
     input.pathEditAssetId,
     input.pathEdit3DAssetId,
+    input.viewMorphProfileEditAssetId,
   );
 
   return {
@@ -73,6 +76,8 @@ export async function loadAssetRecords(input: {
     nextSelectedAssetId: selection.nextSelectedAssetId,
     missingPathEditAssetId: selection.missingPathEditAssetId,
     missingPathEdit3DAssetId: selection.missingPathEdit3DAssetId,
+    missingViewMorphProfileEditAssetId:
+      selection.missingViewMorphProfileEditAssetId,
   };
 }
 

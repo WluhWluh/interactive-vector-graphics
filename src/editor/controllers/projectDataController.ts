@@ -16,6 +16,7 @@ export type AssetRefreshResult = {
   nextSelectedAssetId: string | null;
   missingPathEditAssetId: string | null;
   missingPathEdit3DAssetId: string | null;
+  missingViewMorphProfileEditAssetId: string | null;
 };
 
 export type PrefabRefreshResult = {
@@ -48,6 +49,7 @@ export function reconcileAssetSelection(
   assets: PrimitiveSvgAsset[],
   pathEditAssetId: string | null,
   pathEdit3DAssetId: string | null,
+  viewMorphProfileEditAssetId: string | null,
 ): AssetRefreshResult {
   const nextSelectedAssetId = chooseStableSelection(
     selectedAssetId,
@@ -62,6 +64,10 @@ export function reconcileAssetSelection(
     missingPathEdit3DAssetId:
       pathEdit3DAssetId && !assetIds.has(pathEdit3DAssetId)
         ? pathEdit3DAssetId
+        : null,
+    missingViewMorphProfileEditAssetId:
+      viewMorphProfileEditAssetId && !assetIds.has(viewMorphProfileEditAssetId)
+        ? viewMorphProfileEditAssetId
         : null,
   };
 }

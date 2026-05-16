@@ -76,10 +76,10 @@ export function createTransformControlsController(input: {
         const proxy = input.curve3DControls.get(selectedCurveControlId);
 
         if (proxy) {
-          proxy.mesh.updateMatrixWorld();
+          proxy.root.updateMatrixWorld();
           input.onCurve3DControlTransform(
             selectedCurveControlId,
-            vectorToTuple(proxy.mesh.position),
+            vectorToTuple(proxy.root.position),
           );
         }
         return;
@@ -159,7 +159,7 @@ export function createTransformControlsController(input: {
       : null;
 
     if (curveProxy) {
-      input.transformControls.attach(curveProxy.mesh);
+      input.transformControls.attach(curveProxy.root);
       return;
     }
 

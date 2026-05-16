@@ -92,7 +92,7 @@ const PRIMITIVE_ASSET_CAPABILITY_DEFINITIONS: readonly PrimitiveAssetCapabilityD
       usesStrokeStyle: false,
       has3DSourcePath: false,
       canUpdate2DSourcePath: false,
-      canSourcePathEdit: false,
+      canSourcePathEdit: true,
       canInPlacePathEdit: false,
       canPathKeyframe: false,
       canConvertTo3DCurve: false,

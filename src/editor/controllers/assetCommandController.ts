@@ -1,7 +1,9 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { canConvertPrimitiveAssetTo3DCurve } from "../../core/assets/primitiveAssetCapabilities";
+import type { ViewMorphProfile } from "../../core/assets/viewMorphProfile";
 import type { SourcePathEditSession } from "./sourcePathEditController";
 import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
+import type { ViewMorphProfileEditSession } from "../tools/viewMorphProfileEditCore";
 
 export type AssetSelectionState = {
   assets: PrimitiveSvgAsset[];
@@ -49,6 +51,7 @@ export async function runSaveSourcePathEditCommand(input: {
   projectId: string;
   pathEditSession: SourcePathEditSession | null;
   pathEdit3DSession: SourcePathEdit3DSession | null;
+  viewMorphProfileEditSession: ViewMorphProfileEditSession | null;
   updateAssetPath: (
     projectId: string,
     assetId: string,
@@ -59,7 +62,20 @@ export async function runSaveSourcePathEditCommand(input: {
     assetId: string,
     draft: SourcePathEdit3DSession["draft"],
   ) => Promise<PrimitiveSvgAsset>;
+  updateViewMorphProfile: (
+    projectId: string,
+    assetId: string,
+    draft: ViewMorphProfile,
+  ) => Promise<PrimitiveSvgAsset>;
 }): Promise<PrimitiveSvgAsset | null> {
+  if (input.viewMorphProfileEditSession) {
+    return input.updateViewMorphProfile(
+      input.projectId,
+      input.viewMorphProfileEditSession.assetId,
+      input.viewMorphProfileEditSession.draft,
+    );
+  }
+
   if (input.pathEdit3DSession) {
     return input.updateAssetCurve3D(
       input.projectId,

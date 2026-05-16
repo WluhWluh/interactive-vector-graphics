@@ -323,6 +323,34 @@ export async function updateAssetCurve3D(
   return hydratePrimitiveAsset(body.asset);
 }
 
+export async function updateViewMorphProfile(
+  projectId: string,
+  assetId: string,
+  viewMorphProfile: ViewMorphProfile,
+): Promise<PrimitiveSvgAsset> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/view-morph-profile`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ viewMorphProfile }),
+    },
+  );
+  const body = (await response.json()) as {
+    asset?: StoredPrimitiveAssetDto;
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.asset) {
+    throw new Error("Asset API did not return an updated view morph profile.");
+  }
+
+  return hydratePrimitiveAsset(body.asset);
+}
+
 export async function listPrefabs(projectId: string): Promise<PrefabRecord[]> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/prefabs`,

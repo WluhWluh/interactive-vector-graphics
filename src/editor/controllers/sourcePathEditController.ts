@@ -16,6 +16,11 @@ import {
   type PathEditViewportAdapter,
 } from "../tools/pathEditCore";
 import type { SourcePathEdit3DSession } from "../tools/pathEdit3dCore";
+import {
+  createViewMorphProfileEditSession,
+  type ViewMorphProfileEditDragState,
+  type ViewMorphProfileEditSession,
+} from "../tools/viewMorphProfileEditCore";
 import { getInitialPathEditSelection } from "./pathEditSessionControls";
 
 export type SourcePathEditSession = PathEditSession & {
@@ -30,12 +35,18 @@ export type PathEditSessionDraft =
   | {
       mode: "3d";
       session: SourcePathEdit3DSession;
+    }
+  | {
+      mode: "viewMorphProfile";
+      session: ViewMorphProfileEditSession;
     };
 
 export type SourcePathEditState = {
   pathEditSession: SourcePathEditSession | null;
   pathEdit3DSession: SourcePathEdit3DSession | null;
+  viewMorphProfileEditSession: ViewMorphProfileEditSession | null;
   pathEditDragState: PathEditDragState | null;
+  viewMorphProfileEditDragState: ViewMorphProfileEditDragState | null;
 };
 
 export function createSourcePathEditSession(
@@ -43,6 +54,16 @@ export function createSourcePathEditSession(
 ): PathEditSessionDraft {
   if (!getPrimitiveAssetCapabilities(asset).canSourcePathEdit) {
     throw new Error("This asset kind does not support Source Path Edit.");
+  }
+
+  if (asset.assetKind === "viewMorphProfile") {
+    return {
+      mode: "viewMorphProfile",
+      session: createViewMorphProfileEditSession({
+        assetId: asset.id,
+        profile: asset.viewMorphProfile,
+      }),
+    };
   }
 
   if (primitiveAssetHas3DSourcePath(asset)) {
@@ -73,7 +94,10 @@ export function startSourcePathEditState(
   return {
     pathEditSession: sessionDraft.mode === "2d" ? sessionDraft.session : null,
     pathEdit3DSession: sessionDraft.mode === "3d" ? sessionDraft.session : null,
+    viewMorphProfileEditSession:
+      sessionDraft.mode === "viewMorphProfile" ? sessionDraft.session : null,
     pathEditDragState: null,
+    viewMorphProfileEditDragState: null,
     mode: sessionDraft.mode,
   };
 }
@@ -82,7 +106,9 @@ export function clearSourcePathEditState(): SourcePathEditState {
   return {
     pathEditSession: null,
     pathEdit3DSession: null,
+    viewMorphProfileEditSession: null,
     pathEditDragState: null,
+    viewMorphProfileEditDragState: null,
   };
 }
 

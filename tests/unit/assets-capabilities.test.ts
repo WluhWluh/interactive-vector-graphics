@@ -42,7 +42,7 @@ export function runAssetCapabilityUnitTests(): void {
   assert.equal(viewMorph.usesFillStyle, true);
   assert.equal(viewMorph.expectedStructuredPathClosed, true);
   assert.equal(viewMorph.canUpdate2DSourcePath, false);
-  assert.equal(viewMorph.canSourcePathEdit, false);
+  assert.equal(viewMorph.canSourcePathEdit, true);
   assert.equal(viewMorph.canInPlacePathEdit, false);
   assert.equal(viewMorph.canPathKeyframe, false);
 }

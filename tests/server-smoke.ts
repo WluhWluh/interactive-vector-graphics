@@ -159,6 +159,26 @@ try {
   assert.match(normalizedViewMorphSvg, /data-ivg-asset-kind="viewMorphProfile"/);
   assert.match(normalizedViewMorphSvg, /fill="#ffcf4a"/);
 
+  const editedViewMorphProfile = structuredClone(
+    viewMorphAsset.viewMorphProfile!,
+  );
+  editedViewMorphProfile.verticalPlanes[0]!.path.points[2]!.point = [62, 0];
+  const updatedViewMorphAsset = await store.updatePrimitiveAssetViewMorphProfile(
+    firstProject.id,
+    viewMorphAsset.id,
+    editedViewMorphProfile,
+  );
+
+  assert.equal(
+    updatedViewMorphAsset.viewMorphProfile?.verticalPlanes[0]?.path.points[2]?.point[0],
+    62,
+  );
+  assert.equal(updatedViewMorphAsset.bezierPath.closed, true);
+  assert.match(
+    await readFile(join(tempDataDir, updatedViewMorphAsset.sourcePath), "utf8"),
+    /data-ivg-asset-kind="viewMorphProfile"/,
+  );
+
   const curve3dAsset = await store.convertPrimitiveAssetTo3DCurve(
     firstProject.id,
     strokeAsset.id,

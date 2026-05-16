@@ -112,6 +112,10 @@ function drawBillboardNode(
     const evaluatedPath = evaluateViewMorphProfileToBezierPath(
       asset.viewMorphProfile,
       getCameraViewDirectionInDrawableLocalSpace(drawable, rendererContext),
+      {
+        horizontalRotationReferenceLocal:
+          getCameraScreenUpInDrawableLocalSpace(drawable, rendererContext),
+      },
     );
     const previewAsset = createPrimitiveAssetPathPreview(asset, evaluatedPath);
 
@@ -178,6 +182,21 @@ function getCameraViewDirectionInDrawableLocalSpace(
   const inverseLocalToWorld = getBillboardWorldMatrix(drawable, rendererContext).invert();
   const inverseRotation = new Matrix4().extractRotation(inverseLocalToWorld);
   const localDirection = worldDirection.applyMatrix4(inverseRotation).normalize();
+
+  return [localDirection.x, localDirection.y, localDirection.z];
+}
+
+function getCameraScreenUpInDrawableLocalSpace(
+  drawable: ProjectedBillboard,
+  rendererContext: BillboardRendererContext,
+): ViewMorphPoint3D {
+  const worldUp = new Vector3().setFromMatrixColumn(
+    rendererContext.camera.matrixWorld,
+    1,
+  );
+  const inverseLocalToWorld = getBillboardWorldMatrix(drawable, rendererContext).invert();
+  const inverseRotation = new Matrix4().extractRotation(inverseLocalToWorld);
+  const localDirection = worldUp.applyMatrix4(inverseRotation).normalize();
 
   return [localDirection.x, localDirection.y, localDirection.z];
 }

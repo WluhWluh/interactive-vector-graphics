@@ -14,6 +14,9 @@ import type { CameraProjection, ThreeEditorViewport } from "../threeEditorViewpo
 import type { TransformSnapshot } from "../tools/prefabTransform";
 import type { EditorTool } from "../tools/toolController";
 import type { PathEditComponent, PathEditScreenControl } from "../tools/pathEditCore";
+import type {
+  ViewMorphProfileEditScreenControl,
+} from "../tools/viewMorphProfileEditCore";
 import type { Curve3DControlDescriptor } from "../three/viewportObjects";
 import type { PrefabClipboardMode } from "../controllers/prefabAssemblyController";
 import type { EditorMode } from "../state/editorAppState";
@@ -70,16 +73,23 @@ export type VectorEditorDebugApi = {
   };
   getPathEditState: () => {
     is3d: boolean;
+    isViewMorphProfile: boolean;
     assetId: string | null;
     selectedSegmentId: string | null;
     selectedComponent: PathEditComponent | null;
+    selectedPlaneId: string | null;
+    selectedPointId: string | null;
     hoveredSegmentId: string | null;
     hoveredComponent: PathEditComponent | null;
+    hoveredPlaneId: string | null;
+    hoveredPointId: string | null;
     hasDraft: boolean;
     draftBezierPath: StructuredBezierPath | null;
     draftBezierPath3d: StructuredBezierPath3D | null;
+    draftViewMorphProfile: ViewMorphProfile | null;
     controls: PathEditScreenControl[];
     controls3d: Curve3DControlDescriptor[];
+    viewMorphControls: ViewMorphProfileEditScreenControl[];
     projectedCommandCount: number;
   };
   getInPlacePathEditState: () => {

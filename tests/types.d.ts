@@ -186,14 +186,20 @@ declare global {
       };
       getPathEditState: () => {
         is3d: boolean;
+        isViewMorphProfile: boolean;
         assetId: string | null;
         selectedSegmentId: string | null;
         selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
+        selectedPlaneId: string | null;
+        selectedPointId: string | null;
         hoveredSegmentId: string | null;
         hoveredComponent: "anchor" | "handleIn" | "handleOut" | null;
+        hoveredPlaneId: string | null;
+        hoveredPointId: string | null;
         hasDraft: boolean;
         draftBezierPath: StructuredBezierPathDebug | null;
         draftBezierPath3d: StructuredBezierPath3DDebug | null;
+        draftViewMorphProfile: ViewMorphProfileDebug | null;
         controls: Array<{
           segmentId: string;
           component: "anchor" | "handleIn" | "handleOut";
@@ -206,6 +212,13 @@ declare global {
           component: "anchor" | "handleIn" | "handleOut";
           position: [number, number, number];
           selected: boolean;
+        }>;
+        viewMorphControls: Array<{
+          kind: "vertical" | "horizontal";
+          planeId: string;
+          pointId: string;
+          x: number;
+          y: number;
         }>;
         projectedCommandCount: number;
       };

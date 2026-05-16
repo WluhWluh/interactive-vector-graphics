@@ -53,6 +53,10 @@ export type ViewMorphProfileEvaluationDebug = {
   horizontalRotationRad: number;
 };
 
+export type ViewMorphProfileEvaluationOptions = {
+  horizontalRotationReferenceLocal?: ViewMorphPoint3D;
+};
+
 export class ViewMorphProfileError extends Error {
   constructor(reason: string) {
     super(reason);
@@ -177,13 +181,15 @@ export function validateViewMorphProfile(profile: unknown): ViewMorphProfile {
 export function evaluateViewMorphProfileToBezierPath(
   profile: ViewMorphProfile,
   viewDirectionLocal: ViewMorphPoint3D,
+  options: ViewMorphProfileEvaluationOptions = {},
 ): StructuredBezierPath {
-  return evaluateViewMorphProfile(profile, viewDirectionLocal).path;
+  return evaluateViewMorphProfile(profile, viewDirectionLocal, options).path;
 }
 
 export function evaluateViewMorphProfile(
   profile: ViewMorphProfile,
   viewDirectionLocal: ViewMorphPoint3D,
+  options: ViewMorphProfileEvaluationOptions = {},
 ): { path: StructuredBezierPath; debug: ViewMorphProfileEvaluationDebug } {
   const validatedProfile = validateViewMorphProfile(profile);
   const viewDirection = normalizePoint3D(viewDirectionLocal, "viewDirectionLocal");
@@ -191,13 +197,17 @@ export function evaluateViewMorphProfile(
     [viewDirection[0], viewDirection[2]],
     [0, 1],
   );
+  const horizontalRotationDirection = resolveHorizontalRotationDirection(
+    viewDirection,
+    options.horizontalRotationReferenceLocal,
+  );
   const verticalBlend = blendVerticalPlanes(
     validatedProfile.verticalPlanes,
     horizontalViewDirection,
   );
   const rotatedHorizontalPath = rotateHorizontalPolylineForView(
     validatedProfile.horizontalPlane.path,
-    horizontalViewDirection,
+    horizontalRotationDirection,
     viewDirection[1],
   );
   const smoothedHorizontalPath = smoothPolylineToBezierPath(rotatedHorizontalPath);
@@ -231,13 +241,19 @@ export function evaluateViewMorphProfile(
       verticalBlend: verticalBlend.debug,
       horizontalWeight: roundNumber(normalizedHorizontalWeight),
       verticalWeight: roundNumber(normalizedVerticalWeight),
-      horizontalRotationRad: getHorizontalRotationForView(horizontalViewDirection),
+      horizontalRotationRad: getHorizontalRotationForView(horizontalRotationDirection),
     },
   };
 }
 
 export function createViewMorphPreviewPath(profile: ViewMorphProfile): StructuredBezierPath {
   return evaluateViewMorphProfileToBezierPath(profile, [0, 0, 1]);
+}
+
+export function smoothViewMorphPolylineToBezierPath(
+  path: ViewMorphClosedPolyline,
+): StructuredBezierPath {
+  return smoothPolylineToBezierPath(path);
 }
 
 function validateVerticalPlane(
@@ -594,6 +610,36 @@ function rotateHorizontalPolylineForView(
       ),
     })),
   };
+}
+
+function resolveHorizontalRotationDirection(
+  viewDirection: ViewMorphPoint3D,
+  horizontalRotationReferenceLocal: ViewMorphPoint3D | undefined,
+): ViewMorphPoint2D {
+  const horizontalViewDirection = normalizePoint2D(
+    [viewDirection[0], viewDirection[2]],
+    null,
+  );
+
+  if (horizontalViewDirection) {
+    return horizontalViewDirection;
+  }
+
+  if (horizontalRotationReferenceLocal) {
+    const horizontalReference = normalizePoint2D(
+      [
+        horizontalRotationReferenceLocal[0],
+        horizontalRotationReferenceLocal[2],
+      ],
+      null,
+    );
+
+    if (horizontalReference) {
+      return horizontalReference;
+    }
+  }
+
+  return [0, 1];
 }
 
 function getHorizontalRotationForView(horizontalViewDirection: ViewMorphPoint2D): number {
