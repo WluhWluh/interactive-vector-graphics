@@ -3,6 +3,7 @@ import {
   createDefaultViewMorphProfile,
   evaluateViewMorphProfile,
   evaluateViewMorphProfileToBezierPath,
+  smoothViewMorphPolylineToBezierPath,
 } from "../../src/core/assets/viewMorphProfile";
 
 type PathExtents = {
@@ -168,15 +169,47 @@ export function runViewMorphProfileUnitTests(): void {
   );
 
   assert.equal(mixedPointCountEvaluation.closed, true);
-  assert.equal(
-    mixedPointCountEvaluation.segments.length,
-    mixedPointCountProfile.verticalPlanes[0]!.path.points.length +
-      mixedPointCountProfile.horizontalPlane.path.points.length,
-  );
+  assert.equal(mixedPointCountEvaluation.segments.length, 16);
   assert.ok(
     mixedPointCountEvaluation.segments.every((segment) =>
       [...segment.anchor, ...segment.handleIn, ...segment.handleOut].every(Number.isFinite),
     ),
+  );
+
+  const concaveProfile = createDefaultViewMorphProfile();
+  const concaveVerticalPoints = [
+    [0, -36],
+    [42, -68],
+    [68, -25],
+    [48, 34],
+    [0, 64],
+    [-48, 34],
+    [-68, -25],
+    [-42, -68],
+  ] as Array<[number, number]>;
+
+  for (const plane of concaveProfile.verticalPlanes) {
+    plane.path.points = plane.path.points.map((point, index) => ({
+      id: point.id,
+      point: concaveVerticalPoints[index] ?? point.point,
+    }));
+  }
+
+  const concaveFrontSourcePath = smoothViewMorphPolylineToBezierPath(
+    concaveProfile.verticalPlanes[0]!.path,
+  );
+  const concaveFrontEvaluatedPath = evaluateViewMorphProfileToBezierPath(
+    concaveProfile,
+    [0, 0, 1],
+    getOrbitLikeScreenBasis([0, 0, 1]),
+  );
+
+  assert.ok(
+    getApproximateHausdorffDistance(
+      concaveFrontSourcePath,
+      concaveFrontEvaluatedPath,
+    ) < 0.05,
+    "front-facing concave profile should preserve the edited vertical path",
   );
 
   for (const pitchDegrees of [-75, -45, -20, 20, 45, 75]) {
@@ -207,6 +240,32 @@ export function runViewMorphProfileUnitTests(): void {
       );
     }
   }
+
+  let previousPath = evaluateViewMorphProfileToBezierPath(
+    concaveProfile,
+    [0, 0, 1],
+    getOrbitLikeScreenBasis([0, 0, 1]),
+  );
+
+  for (let pitchDegrees = 5; pitchDegrees <= 85; pitchDegrees += 5) {
+    const pitch = (pitchDegrees * Math.PI) / 180;
+    const direction: [number, number, number] = [
+      0,
+      Math.sin(pitch),
+      Math.cos(pitch),
+    ];
+    const evaluated = evaluateViewMorphProfileToBezierPath(
+      concaveProfile,
+      direction,
+      getOrbitLikeScreenBasis(direction),
+    );
+
+    assert.ok(
+      getAverageAnchorDistance(previousPath, evaluated) < 16,
+      `concave profile should transition smoothly near pitch ${pitchDegrees}`,
+    );
+    previousPath = evaluated;
+  }
 }
 
 function getPathExtents(path: ViewMorphProfileEvaluationPath): PathExtents {
@@ -226,6 +285,82 @@ function getPathExtents(path: ViewMorphProfileEvaluationPath): PathExtents {
     width: Number((maxX - minX).toFixed(4)),
     height: Number((maxY - minY).toFixed(4)),
   };
+}
+
+function getApproximateHausdorffDistance(
+  left: ViewMorphProfileEvaluationPath,
+  right: ViewMorphProfileEvaluationPath,
+): number {
+  const leftPoints = samplePath(left);
+  const rightPoints = samplePath(right);
+
+  return Math.max(
+    Math.max(...leftPoints.map((point) => getNearestPointDistance(point, rightPoints))),
+    Math.max(...rightPoints.map((point) => getNearestPointDistance(point, leftPoints))),
+  );
+}
+
+function getAverageAnchorDistance(
+  left: ViewMorphProfileEvaluationPath,
+  right: ViewMorphProfileEvaluationPath,
+): number {
+  const count = Math.min(left.segments.length, right.segments.length);
+  let total = 0;
+
+  for (let index = 0; index < count; index += 1) {
+    const leftAnchor = left.segments[index]!.anchor;
+    const rightAnchor = right.segments[index]!.anchor;
+
+    total += Math.hypot(leftAnchor[0] - rightAnchor[0], leftAnchor[1] - rightAnchor[1]);
+  }
+
+  return count > 0 ? total / count : 0;
+}
+
+function getNearestPointDistance(
+  point: [number, number],
+  candidates: Array<[number, number]>,
+): number {
+  return Math.min(
+    ...candidates.map((candidate) =>
+      Math.hypot(point[0] - candidate[0], point[1] - candidate[1]),
+    ),
+  );
+}
+
+function samplePath(
+  path: ViewMorphProfileEvaluationPath,
+  totalSamples = 1024,
+): Array<[number, number]> {
+  return Array.from({ length: totalSamples }, (_, sampleIndex): [number, number] => {
+    const scaledIndex = (sampleIndex / totalSamples) * path.segments.length;
+    const segmentIndex = Math.floor(scaledIndex) % path.segments.length;
+    const segment = path.segments[segmentIndex]!;
+    const nextSegment = path.segments[(segmentIndex + 1) % path.segments.length]!;
+    const p0 = segment.anchor;
+    const p1: [number, number] = [
+      segment.anchor[0] + segment.handleOut[0],
+      segment.anchor[1] + segment.handleOut[1],
+    ];
+    const p2: [number, number] = [
+      nextSegment.anchor[0] + nextSegment.handleIn[0],
+      nextSegment.anchor[1] + nextSegment.handleIn[1],
+    ];
+    const p3 = nextSegment.anchor;
+    const t = scaledIndex - segmentIndex;
+    const inverseT = 1 - t;
+
+    return [
+      inverseT ** 3 * p0[0] +
+        3 * inverseT ** 2 * t * p1[0] +
+        3 * inverseT * t ** 2 * p2[0] +
+        t ** 3 * p3[0],
+      inverseT ** 3 * p0[1] +
+        3 * inverseT ** 2 * t * p1[1] +
+        3 * inverseT * t ** 2 * p2[1] +
+        t ** 3 * p3[1],
+    ];
+  });
 }
 
 type ViewMorphProfileEvaluationPath = ReturnType<

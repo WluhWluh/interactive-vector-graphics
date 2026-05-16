@@ -668,10 +668,16 @@ function blendSmoothedViewMorphPaths(
   const horizontalBlendPath = createSmoothPaperPath(horizontalPath);
 
   try {
-    return blendPaperPathsByRadialSamples(
+    const correspondenceSegmentCount = getCubicCorrespondenceSegmentCount(
       verticalBlendPath,
       horizontalBlendPath,
       verticalPath.points.length + horizontalPath.points.length,
+    );
+
+    return blendPaperPathsByCubicCorrespondence(
+      verticalBlendPath,
+      horizontalBlendPath,
+      correspondenceSegmentCount,
       verticalWeight,
       horizontalWeight,
     );
@@ -694,92 +700,307 @@ function createSmoothPaperPath(path: ViewMorphClosedPolyline): paper.Path {
   return paperPath;
 }
 
-function blendPaperPathsByRadialSamples(
+type CubicSegment2D = {
+  id: string;
+  anchor: ViewMorphPoint2D;
+  handleIn: ViewMorphPoint2D;
+  handleOut: ViewMorphPoint2D;
+};
+
+function blendPaperPathsByCubicCorrespondence(
   verticalPath: paper.Path,
   horizontalPath: paper.Path,
   segmentCount: number,
   verticalWeight: number,
   horizontalWeight: number,
 ): StructuredBezierPath {
-  const sampleCount = Math.max(4, segmentCount);
-  const finalPolyline: ViewMorphClosedPolyline = {
-    points: Array.from({ length: sampleCount }, (_, index) => {
-      const angle = -Math.PI / 2 + (index / sampleCount) * Math.PI * 2;
-      const direction: ViewMorphPoint2D = [Math.cos(angle), Math.sin(angle)];
-      const verticalPoint = findFirstRayIntersectionWithPaperPath(direction, verticalPath);
-      const horizontalPoint = findFirstRayIntersectionWithPaperPath(
-        direction,
-        horizontalPath,
-      );
+  const targetSegmentCount = Math.max(
+    4,
+    segmentCount,
+    verticalPath.segments.length,
+    horizontalPath.segments.length,
+  );
+  const verticalSegments = splitPaperPathIntoCubicSegments(
+    verticalPath,
+    targetSegmentCount,
+  );
+  const horizontalSegments = splitPaperPathIntoCubicSegments(
+    horizontalPath,
+    targetSegmentCount,
+  );
+  const alignedHorizontalSegments = alignClosedCubicSegments(
+    verticalSegments,
+    horizontalSegments,
+  );
+
+  return {
+    version: 1,
+    closed: true,
+    segments: verticalSegments.map((verticalSegment, index) => {
+      const horizontalSegment =
+        alignedHorizontalSegments[index] ?? verticalSegment;
 
       return {
         id: `point-${index + 1}`,
-        point: blend2DPoints(
-          verticalPoint,
-          horizontalPoint,
+        anchor: blend2DPoints(
+          verticalSegment.anchor,
+          horizontalSegment.anchor,
+          verticalWeight,
+          horizontalWeight,
+        ),
+        handleIn: blend2DPoints(
+          verticalSegment.handleIn,
+          horizontalSegment.handleIn,
+          verticalWeight,
+          horizontalWeight,
+        ),
+        handleOut: blend2DPoints(
+          verticalSegment.handleOut,
+          horizontalSegment.handleOut,
           verticalWeight,
           horizontalWeight,
         ),
       };
     }),
   };
-
-  return smoothPolylineToBezierPath(finalPolyline);
 }
 
-function findFirstRayIntersectionWithPaperPath(
-  direction: ViewMorphPoint2D,
-  targetPath: paper.Path,
-): ViewMorphPoint2D {
-  const normalizedDirection = normalizePoint2D(direction, [1, 0]);
-  const rayPath = new paper.Path.Line(
-    new paper.Point(0, 0),
-    new paper.Point(normalizedDirection[0] * 10000, normalizedDirection[1] * 10000),
-  );
-
-  try {
-    const intersections = rayPath
-      .getIntersections(targetPath)
-      .map((intersection) => ({
-        point: intersection.point,
-        distance: intersection.point.getDistance(new paper.Point(0, 0)),
-      }))
-      .filter((intersection) => intersection.distance > EPSILON)
-      .sort((left, right) => left.distance - right.distance);
-    const [firstIntersection] = intersections;
-
-    if (firstIntersection) {
-      return roundPoint2D([firstIntersection.point.x, firstIntersection.point.y]);
-    }
-
-    return samplePaperPathAlongRayFallback(normalizedDirection, targetPath);
-  } finally {
-    rayPath.remove();
-  }
-}
-
-function samplePaperPathAlongRayFallback(
-  direction: ViewMorphPoint2D,
+function splitPaperPathIntoCubicSegments(
   path: paper.Path,
-): ViewMorphPoint2D {
-  const sampleCount = 96;
-  let bestPoint: ViewMorphPoint2D = [0, 0];
+  segmentCount: number,
+): CubicSegment2D[] {
+  const output: CubicSegment2D[] = [];
+  const inputCurveCount = Math.max(1, path.curves.length);
+  const subdivisionsPerCurve = Math.max(
+    1,
+    Math.round(Math.max(segmentCount, inputCurveCount) / inputCurveCount),
+  );
+  const handleIns: ViewMorphPoint2D[] = [];
+
+  for (const curve of path.curves) {
+    const cubic = paperCurveToAbsoluteCubicSegment(curve);
+
+    for (let index = 0; index < subdivisionsPerCurve; index += 1) {
+      const splitCurve = splitCubicSegment(
+        cubic,
+        index / subdivisionsPerCurve,
+        (index + 1) / subdivisionsPerCurve,
+      );
+      const segmentIndex = output.length;
+
+      output.push({
+        id: `point-${segmentIndex + 1}`,
+        anchor: splitCurve.start,
+        handleIn: [0, 0],
+        handleOut: roundPoint2D([
+          splitCurve.handle1[0] - splitCurve.start[0],
+          splitCurve.handle1[1] - splitCurve.start[1],
+        ]),
+      });
+      handleIns[(segmentIndex + 1) % segmentCount] = roundPoint2D([
+        splitCurve.handle2[0] - splitCurve.end[0],
+        splitCurve.handle2[1] - splitCurve.end[1],
+      ]);
+    }
+  }
+
+  output.forEach((segment, index) => {
+    segment.handleIn = handleIns[index] ?? [0, 0];
+  });
+
+  return output;
+}
+
+function getCubicCorrespondenceSegmentCount(
+  verticalPath: paper.Path,
+  horizontalPath: paper.Path,
+  minimumSegmentCount: number,
+): number {
+  const verticalCurveCount = Math.max(1, verticalPath.curves.length);
+  const horizontalCurveCount = Math.max(1, horizontalPath.curves.length);
+  const commonCurveCount = leastCommonMultiple(
+    verticalCurveCount,
+    horizontalCurveCount,
+  );
+  const multiplier = Math.max(1, Math.ceil(minimumSegmentCount / commonCurveCount));
+
+  return commonCurveCount * multiplier;
+}
+
+function alignClosedCubicSegments(
+  reference: CubicSegment2D[],
+  candidate: CubicSegment2D[],
+): CubicSegment2D[] {
+  if (reference.length !== candidate.length || reference.length === 0) {
+    return candidate;
+  }
+
+  let bestOffset = 0;
+  let bestReversed = false;
   let bestScore = Number.POSITIVE_INFINITY;
 
-  for (let index = 0; index < sampleCount; index += 1) {
-    const point = path.getPointAt((index / sampleCount) * path.length);
-    const candidate: ViewMorphPoint2D = [point.x, point.y];
-    const angleDistance = Math.abs(crossPoint2D(direction, candidate));
-    const behindPenalty = dotPoint2D(direction, candidate) < 0 ? 100000 : 0;
-    const score = angleDistance + behindPenalty;
+  for (const reversed of [false, true]) {
+    const orientedCandidate = reversed
+      ? reverseClosedCubicSegments(candidate)
+      : candidate;
 
-    if (score < bestScore) {
-      bestScore = score;
-      bestPoint = candidate;
+    for (let offset = 0; offset < orientedCandidate.length; offset += 1) {
+      const score = getClosedCubicAlignmentScore(
+        reference,
+        rotateCubicSegments(orientedCandidate, offset),
+      );
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestOffset = offset;
+        bestReversed = reversed;
+      }
     }
   }
 
-  return roundPoint2D(bestPoint);
+  return rotateCubicSegments(
+    bestReversed ? reverseClosedCubicSegments(candidate) : candidate,
+    bestOffset,
+  );
+}
+
+function getClosedCubicAlignmentScore(
+  reference: CubicSegment2D[],
+  candidate: CubicSegment2D[],
+): number {
+  return reference.reduce((score, segment, index) => {
+    const other = candidate[index] ?? segment;
+
+    return (
+      score +
+      Math.hypot(segment.anchor[0] - other.anchor[0], segment.anchor[1] - other.anchor[1]) +
+      getDirectionDifference(segment.handleOut, other.handleOut) * 8
+    );
+  }, 0);
+}
+
+function rotateCubicSegments(
+  segments: CubicSegment2D[],
+  offset: number,
+): CubicSegment2D[] {
+  return segments.map((_, index) => ({
+    ...segments[(index + offset) % segments.length]!,
+  }));
+}
+
+function reverseClosedCubicSegments(segments: CubicSegment2D[]): CubicSegment2D[] {
+  return segments.map((_, index) => {
+    const sourceIndex = (segments.length - index) % segments.length;
+    const source = segments[sourceIndex]!;
+
+    return {
+      id: source.id,
+      anchor: source.anchor,
+      handleIn: source.handleOut,
+      handleOut: source.handleIn,
+    };
+  });
+}
+
+function getDirectionDifference(left: ViewMorphPoint2D, right: ViewMorphPoint2D): number {
+  const leftLength = Math.hypot(left[0], left[1]);
+  const rightLength = Math.hypot(right[0], right[1]);
+
+  if (leftLength <= EPSILON || rightLength <= EPSILON) {
+    return 0;
+  }
+
+  return 1 - dotPoint2D(
+    [left[0] / leftLength, left[1] / leftLength],
+    [right[0] / rightLength, right[1] / rightLength],
+  );
+}
+
+type AbsoluteCubicSegment2D = {
+  start: ViewMorphPoint2D;
+  handle1: ViewMorphPoint2D;
+  handle2: ViewMorphPoint2D;
+  end: ViewMorphPoint2D;
+};
+
+function splitCubicSegment(
+  cubic: AbsoluteCubicSegment2D,
+  startTime: number,
+  endTime: number,
+): AbsoluteCubicSegment2D {
+  const start = clamp01(startTime);
+  const end = clamp01(endTime);
+  const afterStart = splitCubicAt(cubic, start).right;
+  const normalizedEnd = start >= 1 ? 1 : clamp01((end - start) / (1 - start));
+
+  return splitCubicAt(afterStart, normalizedEnd).left;
+}
+
+function splitCubicAt(
+  cubic: AbsoluteCubicSegment2D,
+  time: number,
+): { left: AbsoluteCubicSegment2D; right: AbsoluteCubicSegment2D } {
+  const t = clamp01(time);
+  const p01 = lerpPoint2D(cubic.start, cubic.handle1, t);
+  const p12 = lerpPoint2D(cubic.handle1, cubic.handle2, t);
+  const p23 = lerpPoint2D(cubic.handle2, cubic.end, t);
+  const p012 = lerpPoint2D(p01, p12, t);
+  const p123 = lerpPoint2D(p12, p23, t);
+  const p0123 = lerpPoint2D(p012, p123, t);
+
+  return {
+    left: {
+      start: cubic.start,
+      handle1: p01,
+      handle2: p012,
+      end: p0123,
+    },
+    right: {
+      start: p0123,
+      handle1: p123,
+      handle2: p23,
+      end: cubic.end,
+    },
+  };
+}
+
+function lerpPoint2D(
+  left: ViewMorphPoint2D,
+  right: ViewMorphPoint2D,
+  time: number,
+): ViewMorphPoint2D {
+  return roundPoint2D([
+    left[0] + (right[0] - left[0]) * time,
+    left[1] + (right[1] - left[1]) * time,
+  ]);
+}
+
+function pointToViewMorphPoint2D(point: paper.Point): ViewMorphPoint2D {
+  return roundPoint2D([point.x, point.y]);
+}
+
+function paperCurveToAbsoluteCubicSegment(
+  curve: paper.Curve,
+): AbsoluteCubicSegment2D {
+  const start = pointToViewMorphPoint2D(curve.point1);
+  const end = pointToViewMorphPoint2D(curve.point2);
+
+  return {
+    start,
+    handle1: roundPoint2D([
+      start[0] + curve.handle1.x,
+      start[1] + curve.handle1.y,
+    ]),
+    handle2: roundPoint2D([
+      end[0] + curve.handle2.x,
+      end[1] + curve.handle2.y,
+    ]),
+    end,
+  };
+}
+
+function clamp01(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
 }
 
 function smoothPolylineToBezierPath(path: ViewMorphClosedPolyline): StructuredBezierPath {
@@ -914,8 +1135,21 @@ function dotPoint3D(left: ViewMorphPoint3D, right: ViewMorphPoint3D): number {
   return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
 }
 
-function crossPoint2D(left: ViewMorphPoint2D, right: ViewMorphPoint2D): number {
-  return left[0] * right[1] - left[1] * right[0];
+function leastCommonMultiple(left: number, right: number): number {
+  return Math.abs(left * right) / greatestCommonDivisor(left, right);
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(Math.round(left));
+  let b = Math.abs(Math.round(right));
+
+  while (b > 0) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+
+  return a || 1;
 }
 
 function normalizeAngle(angleRad: number): number {
