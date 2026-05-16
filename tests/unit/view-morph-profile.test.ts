@@ -41,6 +41,32 @@ export function runViewMorphProfileUnitTests(): void {
   assert.equal(topEvaluation.debug.horizontalWeight, 1);
   assert.equal(topEvaluation.debug.verticalWeight, 0);
 
+  for (let index = 0; index < 8; index += 1) {
+    const angle = (index * Math.PI) / 4;
+    const evaluated = evaluateViewMorphProfileToBezierPath(profile, [
+      Math.sin(angle),
+      0,
+      Math.cos(angle),
+    ]);
+    const anchors = evaluated.segments.map((segment) => segment.anchor);
+    const xs = anchors.map((anchor) => anchor[0]);
+    const ys = anchors.map((anchor) => anchor[1]);
+    const radii = anchors.map((anchor) => Math.hypot(anchor[0], anchor[1]));
+
+    assert.ok(
+      Math.min(...radii) > 49.9,
+      `horizontal direction ${index} should not flatten inward`,
+    );
+    assert.ok(
+      Math.max(...radii) < 50.1,
+      `horizontal direction ${index} should stay near the template radius`,
+    );
+    assert.ok(Math.min(...xs) < -49.9, `horizontal direction ${index} needs left extent`);
+    assert.ok(Math.max(...xs) > 49.9, `horizontal direction ${index} needs right extent`);
+    assert.ok(Math.min(...ys) < -49.9, `horizontal direction ${index} needs top extent`);
+    assert.ok(Math.max(...ys) > 49.9, `horizontal direction ${index} needs bottom extent`);
+  }
+
   for (const direction of [
     [1, 1, 1],
     [-1, 1, 0.35],

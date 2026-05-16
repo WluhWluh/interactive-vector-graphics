@@ -558,11 +558,22 @@ function blendPolylines(
 function mirrorPolylineHorizontally(
   path: ViewMorphClosedPolyline,
 ): ViewMorphClosedPolyline {
+  const pointCount = path.points.length;
+  const bottomIndex = pointCount / 2;
+
   return {
-    points: path.points.map((point) => ({
-      id: point.id,
-      point: roundPoint2D([-point.point[0], point.point[1]]),
-    })),
+    points: path.points.map((point, index) => {
+      const sourceIndex =
+        index === 0 || index === bottomIndex
+          ? index
+          : (pointCount - index) % pointCount;
+      const sourcePoint = path.points[sourceIndex] ?? point;
+
+      return {
+        id: point.id,
+        point: roundPoint2D([-sourcePoint.point[0], sourcePoint.point[1]]),
+      };
+    }),
   };
 }
 
