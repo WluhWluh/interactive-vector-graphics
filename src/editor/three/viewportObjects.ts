@@ -1,6 +1,5 @@
 import {
   AxesHelper,
-  BoxGeometry,
   BufferGeometry,
   Color,
   DoubleSide,
@@ -12,15 +11,10 @@ import {
   Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
-  SphereGeometry,
   WebGLRenderer,
   type Object3D,
 } from "three";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
-import {
-  getPathControl3DStyle,
-  getPathControlBaseScreenSizePx,
-} from "../tools/pathControlStyle";
 import type { Vector3Tuple } from "./viewportMath";
 
 export type TransformProxyNode = {
@@ -57,13 +51,7 @@ export type Curve3DControlProxy = {
   segmentId: string;
   component: Curve3DControlComponent;
   root: Group;
-  fillMesh: Mesh;
-  outlineMesh: Mesh;
-  baseScreenSizePx: number;
 };
-
-const CURVE_3D_ANCHOR_GEOMETRY = new SphereGeometry(0.5, 18, 12);
-const CURVE_3D_HANDLE_GEOMETRY = new BoxGeometry(1, 1, 1);
 
 export function createTransparentRenderer(
   canvas: HTMLCanvasElement,
@@ -141,76 +129,21 @@ export function createCurve3DControlProxy(
   control: Curve3DControlDescriptor,
 ): Curve3DControlProxy {
   const root = new Group();
-  const geometry =
-    control.component === "anchor"
-      ? CURVE_3D_ANCHOR_GEOMETRY.clone()
-      : CURVE_3D_HANDLE_GEOMETRY.clone();
-  const fillMesh = new Mesh(
-    geometry,
-    new MeshBasicMaterial({
-      depthTest: false,
-      depthWrite: false,
-    }),
-  );
-  const outlineMesh = new Mesh(
-    geometry.clone(),
-    new MeshBasicMaterial({
-      depthTest: false,
-      depthWrite: false,
-      side: DoubleSide,
-    }),
-  );
 
-  root.renderOrder = 15;
-  outlineMesh.renderOrder = 15;
-  fillMesh.renderOrder = 16;
-  outlineMesh.userData.curveControlId = control.id;
-  outlineMesh.userData.segmentId = control.segmentId;
-  outlineMesh.userData.component = control.component;
-  fillMesh.userData.curveControlId = control.id;
-  fillMesh.userData.segmentId = control.segmentId;
-  fillMesh.userData.component = control.component;
+  // 3D source path controls are rendered on the 2D paper overlay for visual
+  // consistency with the rest of Path Edit. This invisible root exists only as
+  // a stable TransformControls target for translating the selected point.
   root.userData.curveControlId = control.id;
   root.userData.segmentId = control.segmentId;
   root.userData.component = control.component;
-  root.add(outlineMesh, fillMesh);
-  const proxy: Curve3DControlProxy = {
+  root.position.fromArray(control.position);
+
+  return {
     id: control.id,
     segmentId: control.segmentId,
     component: control.component,
     root,
-    fillMesh,
-    outlineMesh,
-    baseScreenSizePx: getPathControlBaseScreenSizePx(control.component),
   };
-
-  updateCurve3DControlMaterial(proxy, {
-    selected: control.selected,
-    hovered: false,
-  });
-
-  return proxy;
-}
-
-export function updateCurve3DControlMaterial(
-  proxy: Curve3DControlProxy,
-  state:
-    | boolean
-    | {
-        selected: boolean;
-        hovered: boolean;
-      },
-): void {
-  const selected = typeof state === "boolean" ? state : state.selected;
-  const hovered = typeof state === "boolean" ? false : state.hovered;
-  const style = getPathControl3DStyle(proxy.component, { selected, hovered });
-  const fillMaterial = proxy.fillMesh.material as MeshBasicMaterial;
-  const outlineMaterial = proxy.outlineMesh.material as MeshBasicMaterial;
-
-  fillMaterial.color.set(style.fill);
-  outlineMaterial.color.set(style.outline);
-  proxy.fillMesh.scale.setScalar(style.scale);
-  proxy.outlineMesh.scale.setScalar(style.outlineScale);
 }
 
 export function applyNodeTransform(

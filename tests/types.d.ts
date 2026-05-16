@@ -194,6 +194,8 @@ declare global {
         selectedPointId: string | null;
         hoveredSegmentId: string | null;
         hoveredComponent: "anchor" | "handleIn" | "handleOut" | null;
+        hoveredSegmentId3d: string | null;
+        hoveredComponent3d: "anchor" | "handleIn" | "handleOut" | null;
         hoveredPlaneId: string | null;
         hoveredPointId: string | null;
         hasDraft: boolean;

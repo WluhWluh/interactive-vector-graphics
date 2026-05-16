@@ -132,6 +132,7 @@ import {
   createSceneViewportProxyNodes,
 } from "./render/viewportProxySync";
 import {
+  drawProjectedCurve3DControls,
   drawPathEditControls,
   drawPathEditPreview,
   drawViewMorphProfileEditControls,
@@ -482,7 +483,6 @@ function bindEditorEvents(): void {
     clearMouseDragState: clearMouseDragState,
     onSelectionChange: handleViewportSelectionChange,
     onObjectTransform: handleViewportObjectTransform,
-    onCurve3DControlSelection: selectSourcePathEdit3DControlById,
     onCurve3DControlTransform: updateSourcePathEdit3DControlPosition,
     onCameraChange: handleViewportCameraChange,
   });
@@ -492,6 +492,7 @@ function clearPointerDragState(): void {
   editorState.timelinePointerDrag = null;
   editorState.pathEditDragState = null;
   editorState.pathEditHoveredControl = null;
+  editorState.pathEdit3DHoveredControl = null;
   editorState.viewMorphProfileEditDragState = null;
   editorState.viewMorphProfileEditHoveredControl = null;
   editorState.inPlacePathEditDragState = null;
@@ -502,6 +503,7 @@ function clearPointerDragState(): void {
 function clearMouseDragState(): void {
   editorState.pathEditDragState = null;
   editorState.pathEditHoveredControl = null;
+  editorState.pathEdit3DHoveredControl = null;
   editorState.viewMorphProfileEditDragState = null;
   editorState.viewMorphProfileEditHoveredControl = null;
   editorState.inPlacePathEditDragState = null;
@@ -619,6 +621,7 @@ async function refreshAssets(): Promise<void> {
   }
   if (nextAsset.missingPathEdit3DAssetId) {
     editorState.pathEdit3DSession = null;
+    editorState.pathEdit3DHoveredControl = null;
     threeViewport.clearCurve3DControls();
     setImportError(new Error("3D curve edit asset no longer exists."));
     return;
@@ -781,6 +784,7 @@ async function savePathEditSession(): Promise<void> {
     editorState.viewMorphProfileEditSession =
       nextPathEditState.viewMorphProfileEditSession;
     editorState.pathEditDragState = nextPathEditState.pathEditDragState;
+    editorState.pathEdit3DHoveredControl = null;
     editorState.viewMorphProfileEditDragState =
       nextPathEditState.viewMorphProfileEditDragState;
     editorState.viewMorphProfileEditHoveredControl = null;
@@ -805,6 +809,7 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
   editorState.viewMorphProfileEditSession =
     nextPathEditState.viewMorphProfileEditSession;
   editorState.pathEditDragState = nextPathEditState.pathEditDragState;
+  editorState.pathEdit3DHoveredControl = null;
   editorState.viewMorphProfileEditDragState =
     nextPathEditState.viewMorphProfileEditDragState;
   editorState.viewMorphProfileEditHoveredControl = null;
@@ -828,6 +833,7 @@ function cancelPathEditSession(): void {
   editorState.viewMorphProfileEditSession =
     nextPathEditState.viewMorphProfileEditSession;
   editorState.pathEditDragState = nextPathEditState.pathEditDragState;
+  editorState.pathEdit3DHoveredControl = null;
   editorState.viewMorphProfileEditDragState =
     nextPathEditState.viewMorphProfileEditDragState;
   editorState.viewMorphProfileEditHoveredControl = null;
@@ -955,6 +961,7 @@ async function deleteSelectedAsset(): Promise<void> {
     }
     if (editorState.pathEdit3DSession?.assetId === deletedAssetId) {
       editorState.pathEdit3DSession = null;
+      editorState.pathEdit3DHoveredControl = null;
       threeViewport.clearCurve3DControls();
     }
     if (editorState.viewMorphProfileEditSession?.assetId === deletedAssetId) {
@@ -1609,6 +1616,7 @@ function setEditorMode(mode: EditorMode): void {
     editorState.viewMorphProfileEditSession = null;
     editorState.pathEditDragState = null;
     editorState.pathEditHoveredControl = null;
+    editorState.pathEdit3DHoveredControl = null;
     editorState.viewMorphProfileEditDragState = null;
     editorState.viewMorphProfileEditHoveredControl = null;
   }
@@ -1643,6 +1651,7 @@ function clearProjectWorkspace(): void {
   editorState.pathEdit3DSession = null;
   editorState.viewMorphProfileEditSession = null;
   editorState.pathEditDragState = null;
+  editorState.pathEdit3DHoveredControl = null;
   editorState.viewMorphProfileEditDragState = null;
   editorState.viewMorphProfileEditHoveredControl = null;
   threeViewport.clearCurve3DControls();
@@ -2602,6 +2611,7 @@ function renderPathAssetList(): void {
         }
         if (editorState.pathEdit3DSession && editorState.pathEdit3DSession.assetId !== asset.id) {
           editorState.pathEdit3DSession = null;
+          editorState.pathEdit3DHoveredControl = null;
           threeViewport.clearCurve3DControls();
         }
         if (
@@ -3518,6 +3528,13 @@ function renderPathEditFrame(): void {
 
     drawSourcePathEdit3DPreview(vectorContext, asset3d, editorState.pathEdit3DSession.draft);
     syncSourcePathEdit3DControls();
+    drawProjectedCurve3DControls(
+      paperContext,
+      getSourcePathEdit3DControls(),
+      getSourcePathEdit3DHandleLines(),
+      projectCurve3DWorldPointToScreen,
+      editorState.pathEdit3DHoveredControl,
+    );
     return;
   }
 
@@ -3662,6 +3679,14 @@ function getBillboardRendererContext(): BillboardRendererContext {
   };
 }
 
+function projectCurve3DWorldPointToScreen(
+  position: Vector3Tuple,
+): [number, number] | null {
+  const projected = threeViewport.projectWorldPosition(tupleToVector(position), stage.size);
+
+  return projected ? [projected.x, projected.y] : null;
+}
+
 function drawSourcePathEdit3DPreview(
   context: CanvasRenderingContext2D,
   asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>,
@@ -3723,6 +3748,11 @@ function transformPoint3DFromWorldUnit(
 }
 
 function selectPathEditControl(event: PointerEvent | MouseEvent): void {
+  if (editorState.editorMode === "path" && editorState.pathEdit3DSession) {
+    selectSourcePathEdit3DControlAtEvent(event);
+    return;
+  }
+
   if (
     editorState.editorMode === "path" &&
     editorState.viewMorphProfileEditSession
@@ -3765,6 +3795,32 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
   exposeEditorDebugHooks();
 }
 
+function selectSourcePathEdit3DControlAtEvent(
+  event: PointerEvent | MouseEvent,
+): void {
+  const control = findSourcePathEdit3DControlAtEvent(event);
+
+  if (!control) {
+    updateSourcePathEdit3DHoveredControl(null);
+    return;
+  }
+
+  const selection = {
+    segmentId: control.segmentId,
+    component: control.component,
+  };
+  editorState.pathEdit3DHoveredControl = selection;
+  editorState.pathEdit3DSession!.selected = selection;
+  threeViewport.setSelectedCurve3DControl(control.id);
+  threeViewport.setTransformMode("translate");
+  threeViewport.setTransformControlsVisible(true);
+  event.preventDefault();
+  renderCache.markThreeDirty();
+  renderCache.markPaperDirty();
+  renderSourcePathEditPanel();
+  exposeEditorDebugHooks();
+}
+
 function selectViewMorphProfileEditControlAtEvent(
   event: PointerEvent | MouseEvent,
 ): void {
@@ -3799,6 +3855,11 @@ function selectViewMorphProfileEditControlAtEvent(
 }
 
 function updatePathEditHover(event: PointerEvent | MouseEvent): void {
+  if (editorState.editorMode === "path" && editorState.pathEdit3DSession) {
+    updateSourcePathEdit3DHover(event);
+    return;
+  }
+
   if (
     editorState.editorMode === "path" &&
     editorState.viewMorphProfileEditSession
@@ -3827,6 +3888,70 @@ function updatePathEditHover(event: PointerEvent | MouseEvent): void {
       : null;
 
   updatePathEditHoveredControl(hoveredControl);
+}
+
+function updateSourcePathEdit3DHover(event: PointerEvent | MouseEvent): void {
+  if (
+    !editorState.pathEdit3DSession ||
+    threeViewport.isTransformDraggingOrOrbiting()
+  ) {
+    if (editorState.pathEdit3DHoveredControl) {
+      updateSourcePathEdit3DHoveredControl(null);
+    }
+    return;
+  }
+
+  updateSourcePathEdit3DHoveredControl(findSourcePathEdit3DControlAtEvent(event));
+}
+
+function findSourcePathEdit3DControlAtEvent(
+  event: PointerEvent | MouseEvent,
+): Curve3DControlDescriptor | null {
+  const point = getCanvasPointerPoint(event);
+  const controls = getSourcePathEdit3DControls();
+  let nearest: { control: Curve3DControlDescriptor; distance: number } | null = null;
+
+  for (const control of controls) {
+    const projected = projectCurve3DWorldPointToScreen(control.position);
+
+    if (!projected) {
+      continue;
+    }
+
+    const distance = Math.hypot(projected[0] - point[0], projected[1] - point[1]);
+
+    if (distance > PATH_EDIT_HIT_RADIUS) {
+      continue;
+    }
+
+    if (
+      !nearest ||
+      distance < nearest.distance ||
+      (distance === nearest.distance &&
+        nearest.control.component === "anchor" &&
+        control.component !== "anchor")
+    ) {
+      nearest = { control, distance };
+    }
+  }
+
+  return nearest?.control ?? null;
+}
+
+function updateSourcePathEdit3DHoveredControl(
+  control: Curve3DControlDescriptor | null,
+): void {
+  const nextHover = control
+    ? { segmentId: control.segmentId, component: control.component }
+    : null;
+
+  if (pathEditSelectionsEqual(editorState.pathEdit3DHoveredControl, nextHover)) {
+    return;
+  }
+
+  editorState.pathEdit3DHoveredControl = nextHover;
+  renderCache.markPaperDirty();
+  exposeEditorDebugHooks();
 }
 
 function updateViewMorphProfileHover(event: PointerEvent | MouseEvent): void {
@@ -3888,6 +4013,7 @@ function updatePathEditHoveredControl(control: PathEditControl | null): void {
 
 function clearPathEditHover(): void {
   updatePathEditHoveredControl(null);
+  updateSourcePathEdit3DHoveredControl(null);
   clearViewMorphProfileHover();
 }
 
@@ -4112,20 +4238,6 @@ function getSourcePathEdit3DHandleLines(
   });
 }
 
-function selectSourcePathEdit3DControlById(controlId: string | null): void {
-  if (editorState.editorMode !== "path" || !editorState.pathEdit3DSession) {
-    return;
-  }
-
-  const selection = controlId ? parseSourcePathEdit3DControlId(controlId) : null;
-  editorState.pathEdit3DSession.selected = selection;
-  syncSourcePathEdit3DControls();
-  renderCache.markVectorDirty();
-  renderCache.markThreeDirty();
-  renderSourcePathEditPanel();
-  exposeEditorDebugHooks();
-}
-
 function updateSourcePathEdit3DControlPosition(
   controlId: string,
   position: Vector3Tuple,
@@ -4160,6 +4272,9 @@ function updateSourcePathEdit3DControlPosition(
 
   editorState.pathEdit3DSession.selected = selection;
   syncSourcePathEdit3DControls();
+  renderCache.markVectorDirty();
+  renderCache.markPaperDirty();
+  renderCache.markThreeDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
 }
@@ -4802,6 +4917,7 @@ function exposeEditorDebugHooks(): void {
         pathEdit3DSession: editorState.pathEdit3DSession,
         viewMorphProfileEditSession: editorState.viewMorphProfileEditSession,
         hoveredControl: editorState.pathEditHoveredControl,
+        hoveredControl3d: editorState.pathEdit3DHoveredControl,
         hoveredViewMorphControl: editorState.viewMorphProfileEditHoveredControl,
         controls: getPathEditScreenControls(),
         controls3d: getSourcePathEdit3DControls(),

@@ -733,6 +733,10 @@ body[data-path-edit-3d-active="true"] #three-overlay-canvas {
   pointer-events: auto;
 }
 
+body[data-path-edit-3d-active="true"] #three-overlay-canvas:active {
+  cursor: grabbing;
+}
+
 .stage-hud {
   position: absolute;
   left: 24px;

@@ -1,4 +1,5 @@
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
+import type { Curve3DControlDescriptor, Curve3DHandleLineDescriptor } from "../threeEditorViewport";
 import {
   addBezierPoints,
   getPathEditControls,
@@ -89,6 +90,47 @@ export function drawPathEditPreview(
   context.translate(transform.offsetX, transform.offsetY);
   context.scale(transform.scale, transform.scale);
   drawPrimitiveAssetPath(context, asset);
+  context.restore();
+}
+
+export function drawProjectedCurve3DControls(
+  context: CanvasRenderingContext2D,
+  controls: Curve3DControlDescriptor[],
+  handleLines: Curve3DHandleLineDescriptor[],
+  projectWorldPosition: (position: [number, number, number]) => [number, number] | null,
+  hoveredControl: PathEditDragState | null = null,
+): void {
+  context.save();
+
+  for (const line of handleLines) {
+    const start = projectWorldPosition(line.start);
+    const end = projectWorldPosition(line.end);
+
+    if (start && end) {
+      drawPathEditHandleLine(context, start, end);
+    }
+  }
+
+  for (const control of controls) {
+    const point = projectWorldPosition(control.position);
+
+    if (!point) {
+      continue;
+    }
+
+    const hovered =
+      hoveredControl?.segmentId === control.segmentId &&
+      hoveredControl.component === control.component;
+
+    drawPathEditControlPoint(
+      context,
+      point,
+      control.component,
+      control.selected,
+      hovered,
+    );
+  }
+
   context.restore();
 }
 

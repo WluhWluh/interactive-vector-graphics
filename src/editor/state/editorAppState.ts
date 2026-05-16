@@ -70,6 +70,7 @@ export type EditorAppState = {
   viewMorphProfileEditSession: ViewMorphProfileEditSession | null;
   pathEditDragState: PathEditDragState | null;
   pathEditHoveredControl: PathEditDragState | null;
+  pathEdit3DHoveredControl: PathEditDragState | null;
   viewMorphProfileEditDragState: ViewMorphProfileEditDragState | null;
   viewMorphProfileEditHoveredControl: ViewMorphEditSelection | null;
   inPlacePathEditSession: InPlacePathEditSession | null;
@@ -132,6 +133,7 @@ export type PathEditDomainState = Pick<
   | "viewMorphProfileEditSession"
   | "pathEditDragState"
   | "pathEditHoveredControl"
+  | "pathEdit3DHoveredControl"
   | "viewMorphProfileEditDragState"
   | "viewMorphProfileEditHoveredControl"
   | "inPlacePathEditSession"
@@ -194,6 +196,7 @@ export function createInitialEditorAppState(input: {
     viewMorphProfileEditSession: null,
     pathEditDragState: null,
     pathEditHoveredControl: null,
+    pathEdit3DHoveredControl: null,
     viewMorphProfileEditDragState: null,
     viewMorphProfileEditHoveredControl: null,
     inPlacePathEditSession: null,
@@ -285,6 +288,9 @@ export function cloneEditorAppState(state: EditorAppState): EditorAppState {
       : null,
     pathEditDragState: clonePathEditDragState(state.pathEditDragState),
     pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
+    pathEdit3DHoveredControl: clonePathEditDragState(
+      state.pathEdit3DHoveredControl,
+    ),
     viewMorphProfileEditDragState: cloneViewMorphProfileEditSelection(
       state.viewMorphProfileEditDragState,
     ),
@@ -371,6 +377,9 @@ function clonePathEditDomainState(state: EditorAppState): PathEditDomainState {
       : null,
     pathEditDragState: clonePathEditDragState(state.pathEditDragState),
     pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
+    pathEdit3DHoveredControl: clonePathEditDragState(
+      state.pathEdit3DHoveredControl,
+    ),
     viewMorphProfileEditDragState: cloneViewMorphProfileEditSelection(
       state.viewMorphProfileEditDragState,
     ),

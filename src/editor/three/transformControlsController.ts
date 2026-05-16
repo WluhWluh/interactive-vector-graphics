@@ -31,7 +31,6 @@ export function createTransformControlsController(input: {
   getSelectedNodeId: () => string | null;
   setSelectedNodeId: (nodeId: string | null) => void;
   getSelectedCurve3DControlId: () => string | null;
-  setSelectedCurve3DControlId: (controlId: string | null) => void;
   getTransformControlsVisible: () => boolean;
   setTransformControlsVisibleFlag: (visible: boolean) => void;
   setOrbitInteractionActive: (active: boolean) => void;
@@ -73,6 +72,7 @@ export function createTransformControlsController(input: {
     input.transformControls.addEventListener("objectChange", () => {
       const selectedCurveControlId = input.getSelectedCurve3DControlId();
       if (selectedCurveControlId) {
+        input.transformControls.setMode("translate");
         const proxy = input.curve3DControls.get(selectedCurveControlId);
 
         if (proxy) {
@@ -159,9 +159,12 @@ export function createTransformControlsController(input: {
       : null;
 
     if (curveProxy) {
+      input.transformControls.setMode("translate");
       input.transformControls.attach(curveProxy.root);
       return;
     }
+
+    input.transformControls.setMode(input.getTransformMode());
 
     const selectedNodeId = input.getSelectedNodeId();
     const nodeProxy = selectedNodeId ? input.proxies.get(selectedNodeId) : null;

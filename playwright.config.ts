@@ -24,13 +24,13 @@ export default defineConfig({
   webServer: [
     {
       command:
-        `powershell -NoProfile -Command "$dir = Join-Path $env:TEMP '${dataDirName}'; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue; $env:IVG_DATA_DIR = $dir; $env:IVG_SERVER_PORT = '${serverPort}'; npm run server:dev"`,
+        `powershell -NoProfile -Command "$dir = Join-Path $env:TEMP '${dataDirName}'; Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue; $env:IVG_DATA_DIR = $dir; $env:IVG_SERVER_PORT = '${serverPort}'; npm.cmd run server:dev"`,
       reuseExistingServer: false,
       timeout: 30_000,
       url: `http://${host}:${serverPort}/api/health`,
     },
     {
-      command: `powershell -NoProfile -Command "$env:IVG_SERVER_PORT = '${serverPort}'; npm run dev -- --host ${host} --port ${clientPort}"`,
+      command: `powershell -NoProfile -Command "$env:IVG_SERVER_PORT = '${serverPort}'; npm.cmd run dev -- --host ${host} --port ${clientPort}"`,
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
       url: `http://${host}:${clientPort}`,

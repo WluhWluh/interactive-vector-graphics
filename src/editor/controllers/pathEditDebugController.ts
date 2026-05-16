@@ -31,6 +31,8 @@ export type SourcePathEditDebugState = {
   selectedPointId: string | null;
   hoveredSegmentId: string | null;
   hoveredComponent: PathEditSelection["component"] | null;
+  hoveredSegmentId3d: string | null;
+  hoveredComponent3d: PathEditSelection["component"] | null;
   hoveredPlaneId: string | null;
   hoveredPointId: string | null;
   hasDraft: boolean;
@@ -48,6 +50,7 @@ export function createSourcePathEditDebugState(input: {
   pathEdit3DSession: SourcePathEdit3DSession | null;
   viewMorphProfileEditSession: ViewMorphProfileEditSession | null;
   hoveredControl: PathEditSelection | null;
+  hoveredControl3d: PathEditSelection | null;
   hoveredViewMorphControl: ViewMorphEditSelection | null;
   controls: PathEditScreenControl[];
   controls3d: Curve3DControlDescriptor[];
@@ -77,6 +80,8 @@ export function createSourcePathEditDebugState(input: {
     selectedPointId: viewMorphProfileEditSession?.selected?.pointId ?? null,
     hoveredSegmentId: input.hoveredControl?.segmentId ?? null,
     hoveredComponent: input.hoveredControl?.component ?? null,
+    hoveredSegmentId3d: input.hoveredControl3d?.segmentId ?? null,
+    hoveredComponent3d: input.hoveredControl3d?.component ?? null,
     hoveredPlaneId: input.hoveredViewMorphControl?.planeId ?? null,
     hoveredPointId: input.hoveredViewMorphControl?.pointId ?? null,
     hasDraft: Boolean(

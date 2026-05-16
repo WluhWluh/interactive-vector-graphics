@@ -130,9 +130,6 @@ export class ThreeEditorViewport {
   private selectedCurve3DControlId: string | null = null;
   private onSelectionChange: ((nodeId: string | null) => void) | null = null;
   private onObjectTransform: ((nodeId: string) => void) | null = null;
-  private onCurve3DControlSelection:
-    | ((controlId: string | null) => void)
-    | null = null;
   private onCurve3DControlTransform:
     | ((controlId: string, position: Vector3Tuple) => void)
     | null = null;
@@ -181,9 +178,6 @@ export class ThreeEditorViewport {
         this.selectedNodeId = nodeId;
       },
       getSelectedCurve3DControlId: () => this.selectedCurve3DControlId,
-      setSelectedCurve3DControlId: (controlId) => {
-        this.selectedCurve3DControlId = controlId;
-      },
       getTransformControlsVisible: () => this.transformControlsVisible,
       setTransformControlsVisibleFlag: (visible) => {
         this.transformControlsVisible = visible;
@@ -237,9 +231,6 @@ export class ThreeEditorViewport {
     this.overlayCanvas.addEventListener("pointerdown", (event) => {
       this.pointerDownPosition.set(event.clientX, event.clientY);
     });
-    this.overlayCanvas.addEventListener("pointermove", (event) => {
-      this.updateCurve3DControlHover(event);
-    });
     this.overlayCanvas.addEventListener("pointerup", (event) => {
       if (this.orbitDisabledForTransformPointer && !this.transformControls.dragging) {
         this.orbitControls.enabled = true;
@@ -274,14 +265,11 @@ export class ThreeEditorViewport {
   setCallbacks(callbacks: {
     onSelectionChange: (nodeId: string | null) => void;
     onObjectTransform: (nodeId: string) => void;
-    onCurve3DControlSelection?: (controlId: string | null) => void;
     onCurve3DControlTransform?: (controlId: string, position: Vector3Tuple) => void;
     onCameraChange?: () => void;
   }): void {
     this.onSelectionChange = callbacks.onSelectionChange;
     this.onObjectTransform = callbacks.onObjectTransform;
-    this.onCurve3DControlSelection =
-      callbacks.onCurve3DControlSelection ?? null;
     this.onCurve3DControlTransform =
       callbacks.onCurve3DControlTransform ?? null;
     this.onCameraChange = callbacks.onCameraChange ?? null;
@@ -313,7 +301,6 @@ export class ThreeEditorViewport {
     if (this.orbitInteractionActive && !this.transformControls.dragging) {
       this.transformControls.axis = null;
     }
-    this.updateCurve3DControlScreenScales(size);
     this.backgroundRenderer.render(this.backgroundScene, this.activeCamera);
     this.overlayRenderer.render(this.overlayScene, this.activeCamera);
   }
@@ -438,6 +425,10 @@ export class ThreeEditorViewport {
   }
 
   setTransformMode(mode: TransformMode): void {
+    if (this.selectedCurve3DControlId && mode !== "translate") {
+      mode = "translate";
+    }
+
     this.transformMode = mode;
     this.transformControls.setMode(mode);
   }
@@ -450,6 +441,10 @@ export class ThreeEditorViewport {
     this.orbitControls.enabled = enabled;
     this.orbitDisabledForTransformPointer = false;
     this.orbitInteractionActive = false;
+  }
+
+  isTransformDraggingOrOrbiting(): boolean {
+    return this.transformControls.dragging || this.orbitInteractionActive;
   }
 
   resetView(): void {
@@ -599,29 +594,6 @@ export class ThreeEditorViewport {
     );
     this.raycaster.setFromCamera(this.pointer, this.activeCamera);
 
-    const curveIntersection = this.raycaster.intersectObjects(
-      [...this.curve3DControls.values()].flatMap((proxy) => [
-        proxy.fillMesh,
-        proxy.outlineMesh,
-      ]),
-      false,
-    )[0];
-    const curveControlId = curveIntersection?.object.userData.curveControlId as
-      | string
-      | undefined;
-
-    if (curveControlId) {
-      this.setSelectedCurve3DControl(curveControlId);
-      this.onCurve3DControlSelection?.(curveControlId);
-      return;
-    }
-
-    if (this.curve3DControls.size > 0) {
-      this.setSelectedCurve3DControl(null);
-      this.onCurve3DControlSelection?.(null);
-      return;
-    }
-
     const hitMeshes = [...this.proxies.values()].map((proxy) => proxy.hitMesh);
     const intersection = this.raycaster.intersectObjects(hitMeshes, false)[0];
     const nodeId = intersection?.object.userData.nodeId as string | undefined;
@@ -629,57 +601,6 @@ export class ThreeEditorViewport {
     if (nodeId) {
       this.setSelectedNode(nodeId);
       this.onSelectionChange?.(nodeId);
-    }
-  }
-
-  private updateCurve3DControlHover(event: PointerEvent): void {
-    if (
-      this.curve3DControls.size === 0 ||
-      this.transformControls.dragging ||
-      this.orbitInteractionActive
-    ) {
-      this.curve3DControlsController.setHoveredControlId(null);
-      return;
-    }
-
-    const rect = this.overlayCanvas.getBoundingClientRect();
-    this.pointer.set(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -((event.clientY - rect.top) / rect.height) * 2 + 1,
-    );
-    this.raycaster.setFromCamera(this.pointer, this.activeCamera);
-
-    const intersection = this.raycaster.intersectObjects(
-      [...this.curve3DControls.values()].flatMap((proxy) => [
-        proxy.fillMesh,
-        proxy.outlineMesh,
-      ]),
-      false,
-    )[0];
-    const controlId = intersection?.object.userData.curveControlId as
-      | string
-      | undefined;
-
-    this.curve3DControlsController.setHoveredControlId(controlId ?? null);
-  }
-
-  private updateCurve3DControlScreenScales(size: StageSize): void {
-    if (this.curve3DControls.size === 0) {
-      return;
-    }
-
-    const camera = this.activeCamera;
-
-    for (const proxy of this.curve3DControls.values()) {
-      const worldSize = getWorldSizeForScreenPixels(
-        proxy.root.position,
-        proxy.baseScreenSizePx,
-        camera,
-        size,
-      );
-
-      proxy.root.scale.setScalar(worldSize);
-      proxy.root.updateMatrixWorld();
     }
   }
 
@@ -725,21 +646,4 @@ function getRequiredCanvas(id: string): HTMLCanvasElement {
   }
 
   return canvas;
-}
-
-function getWorldSizeForScreenPixels(
-  worldPosition: Vector3,
-  screenSizePx: number,
-  camera: Camera,
-  size: StageSize,
-): number {
-  if (screenSizePx <= 0) {
-    return 0;
-  }
-
-  const projected = worldPosition.clone().project(camera);
-  const ndcStep = (screenSizePx / Math.max(size.cssHeight, 1)) * 2;
-  const cameraShift = new Vector3(projected.x, projected.y + ndcStep, projected.z);
-  const worldAbove = cameraShift.unproject(camera);
-  return worldAbove.distanceTo(worldPosition);
 }

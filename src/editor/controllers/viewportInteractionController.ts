@@ -6,7 +6,6 @@ export type ViewportInteractionBindings = {
   setViewportCallbacks: (callbacks: {
     onSelectionChange: (nodeId: string | null) => void;
     onObjectTransform: (nodeId: string) => void;
-    onCurve3DControlSelection: (controlId: string | null) => void;
     onCurve3DControlTransform: (controlId: string, position: Vector3Tuple) => void;
     onCameraChange: () => void;
   }) => void;
@@ -24,7 +23,6 @@ export type ViewportInteractionBindings = {
   clearMouseDragState: () => void;
   onSelectionChange: (nodeId: string | null) => void;
   onObjectTransform: (nodeId: string) => void;
-  onCurve3DControlSelection: (controlId: string | null) => void;
   onCurve3DControlTransform: (controlId: string, position: Vector3Tuple) => void;
   onCameraChange: () => void;
 };
@@ -53,12 +51,15 @@ export function bindViewportInteractions(
     { capture: true },
   );
   threeOverlayCanvas.addEventListener("mousemove", (event) => {
+    bindings.updatePathEditHover(event);
     bindings.updateInPlacePathEditHover(event);
   });
   threeOverlayCanvas.addEventListener("pointermove", (event) => {
+    bindings.updatePathEditHover(event);
     bindings.updateInPlacePathEditHover(event);
   });
   threeOverlayCanvas.addEventListener("mouseleave", () => {
+    bindings.clearPathEditHover();
     bindings.clearInPlacePathEditHover();
   });
 
@@ -91,7 +92,6 @@ export function bindViewportInteractions(
   bindings.setViewportCallbacks({
     onSelectionChange: bindings.onSelectionChange,
     onObjectTransform: bindings.onObjectTransform,
-    onCurve3DControlSelection: bindings.onCurve3DControlSelection,
     onCurve3DControlTransform: bindings.onCurve3DControlTransform,
     onCameraChange: bindings.onCameraChange,
   });
