@@ -266,6 +266,61 @@ export function runViewMorphProfileUnitTests(): void {
     );
     previousPath = evaluated;
   }
+
+  const asymmetricProfile = createDefaultViewMorphProfile();
+  asymmetricProfile.verticalPlanes[0]!.path.points = [
+    { id: "point-top", point: [0, -66] },
+    { id: "point-upper-right", point: [44, -42] },
+    { id: "point-right", point: [58, 2] },
+    { id: "point-lower-right", point: [31, 47] },
+    { id: "point-bottom", point: [0, 69] },
+    { id: "point-lower-left", point: [-52, 37] },
+    { id: "point-left", point: [-64, -7] },
+    { id: "point-upper-left", point: [-37, -53] },
+  ];
+  asymmetricProfile.verticalPlanes[1]!.path.points = [
+    { id: "point-top", point: [0, -52] },
+    { id: "point-upper-right", point: [59, -35] },
+    { id: "point-right", point: [75, 8] },
+    { id: "point-lower-right", point: [47, 38] },
+    { id: "point-bottom", point: [0, 58] },
+    { id: "point-lower-left", point: [-38, 45] },
+    { id: "point-left", point: [-51, 0] },
+    { id: "point-upper-left", point: [-28, -41] },
+  ];
+  asymmetricProfile.horizontalPlane.path.points = [
+    { id: "point-east", point: [72, -5] },
+    { id: "point-north-east", point: [32, -38] },
+    { id: "point-north", point: [0, -48] },
+    { id: "point-north-west", point: [-44, -26] },
+    { id: "point-west", point: [-66, 7] },
+    { id: "point-south-west", point: [-31, 46] },
+    { id: "point-south", point: [7, 58] },
+    { id: "point-south-east", point: [53, 34] },
+  ];
+
+  for (const pitchDegrees of [-45, 45]) {
+    let previousEvaluation = evaluateViewMorphProfileToBezierPath(
+      asymmetricProfile,
+      getYawPitchDirection(0, pitchDegrees),
+      getOrbitLikeScreenBasis(getYawPitchDirection(0, pitchDegrees)),
+    );
+
+    for (let yawDegrees = 2; yawDegrees <= 360; yawDegrees += 2) {
+      const direction = getYawPitchDirection(yawDegrees, pitchDegrees);
+      const evaluated = evaluateViewMorphProfileToBezierPath(
+        asymmetricProfile,
+        direction,
+        getOrbitLikeScreenBasis(direction),
+      );
+
+      assert.ok(
+        getApproximateHausdorffDistance(previousEvaluation, evaluated) < 5,
+        `asymmetric view morph should avoid large geometry jumps at pitch ${pitchDegrees}, yaw ${yawDegrees}`,
+      );
+      previousEvaluation = evaluated;
+    }
+  }
 }
 
 function getPathExtents(path: ViewMorphProfileEvaluationPath): PathExtents {
@@ -361,6 +416,20 @@ function samplePath(
         t ** 3 * p3[1],
     ];
   });
+}
+
+function getYawPitchDirection(
+  yawDegrees: number,
+  pitchDegrees: number,
+): Vector3 {
+  const yaw = (yawDegrees * Math.PI) / 180;
+  const pitch = (pitchDegrees * Math.PI) / 180;
+
+  return [
+    Math.cos(pitch) * Math.sin(yaw),
+    Math.sin(pitch),
+    Math.cos(pitch) * Math.cos(yaw),
+  ];
 }
 
 type ViewMorphProfileEvaluationPath = ReturnType<

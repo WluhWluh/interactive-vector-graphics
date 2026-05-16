@@ -724,21 +724,16 @@ function blendPaperPathsByCubicCorrespondence(
     verticalPath,
     targetSegmentCount,
   );
-  const horizontalSegments = splitPaperPathIntoCubicSegments(
+  const horizontalSegments = resamplePaperPathByReferenceSegments(
     horizontalPath,
-    targetSegmentCount,
-  );
-  const alignedHorizontalSegments = alignClosedCubicSegments(
     verticalSegments,
-    horizontalSegments,
   );
 
   return {
     version: 1,
     closed: true,
     segments: verticalSegments.map((verticalSegment, index) => {
-      const horizontalSegment =
-        alignedHorizontalSegments[index] ?? verticalSegment;
+      const horizontalSegment = horizontalSegments[index] ?? verticalSegment;
 
       return {
         id: `point-${index + 1}`,
@@ -763,6 +758,209 @@ function blendPaperPathsByCubicCorrespondence(
       };
     }),
   };
+}
+
+function resamplePaperPathByReferenceSegments(
+  path: paper.Path,
+  reference: CubicSegment2D[],
+): CubicSegment2D[] {
+  const pointCount = reference.length;
+
+  if (pointCount <= 0) {
+    return [];
+  }
+
+  const referenceOffsets = getReferenceSegmentOffsets(reference);
+  const seamOffset = getTopmostPaperPathOffset(path);
+  const sampleDirection =
+    getReferenceOrientation(reference) === getPaperPathOrientation(path) ? 1 : -1;
+  const candidateSamples = referenceOffsets.map((offset, index) =>
+    getPaperPathSampleAtNormalizedOffset(
+      path,
+      seamOffset + offset * sampleDirection,
+      `point-${index + 1}`,
+      sampleDirection,
+    ),
+  );
+
+  return createCubicSegmentsFromPathSamples(candidateSamples);
+}
+
+type PathSample2D = {
+  id: string;
+  point: ViewMorphPoint2D;
+  tangent: ViewMorphPoint2D;
+  offset: number;
+};
+
+function getReferenceSegmentOffsets(reference: CubicSegment2D[]): number[] {
+  const lengths = reference.map((segment, index) =>
+    estimateCubicSegmentLength(
+      segment,
+      reference[(index + 1) % reference.length] ?? segment,
+    ),
+  );
+  const totalLength = lengths.reduce((total, length) => total + length, 0);
+
+  if (totalLength <= EPSILON) {
+    return reference.map((_, index) => index / reference.length);
+  }
+
+  let accumulatedLength = 0;
+
+  return lengths.map((length) => {
+    const offset = accumulatedLength / totalLength;
+    accumulatedLength += length;
+
+    return offset;
+  });
+}
+
+function getPaperPathSampleAtNormalizedOffset(
+  path: paper.Path,
+  offset: number,
+  id: string,
+  tangentDirection = 1,
+): PathSample2D {
+  const distance = normalizeUnitOffset(offset) * path.length;
+  const point = path.getPointAt(distance);
+  const tangent = path.getTangentAt(distance);
+  const fallbackTangent = normalizePoint2D(
+    [point.x, point.y],
+    [1, 0],
+  );
+
+  return {
+    id,
+    point: pointToViewMorphPoint2D(point),
+    tangent: normalizePoint2D(
+      [tangent.x * tangentDirection, tangent.y * tangentDirection],
+      fallbackTangent,
+    ),
+    offset,
+  };
+}
+
+function getTopmostPaperPathOffset(path: paper.Path): number {
+  const sampleCount = 128;
+  let bestOffset = 0;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const offset = index / sampleCount;
+    const point = path.getPointAt(offset * path.length);
+    const score = point.y + Math.abs(point.x) * 0.0001;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestOffset = offset;
+    }
+  }
+
+  return bestOffset;
+}
+
+function getReferenceOrientation(reference: CubicSegment2D[]): number {
+  const area = getSignedArea(reference.map((segment) => segment.anchor));
+
+  return area < 0 ? -1 : 1;
+}
+
+function getPaperPathOrientation(path: paper.Path): number {
+  const sampleCount = 48;
+  const points = Array.from({ length: sampleCount }, (_, index): ViewMorphPoint2D => {
+    const point = path.getPointAt((index / sampleCount) * path.length);
+
+    return [point.x, point.y];
+  });
+  const area = getSignedArea(points);
+
+  return area < 0 ? -1 : 1;
+}
+
+function getSignedArea(points: ViewMorphPoint2D[]): number {
+  return points.reduce((area, point, index) => {
+    const nextPoint = points[(index + 1) % points.length] ?? point;
+
+    return area + point[0] * nextPoint[1] - nextPoint[0] * point[1];
+  }, 0);
+}
+
+function createCubicSegmentsFromPathSamples(samples: PathSample2D[]): CubicSegment2D[] {
+  if (samples.length === 0) {
+    return [];
+  }
+
+  return samples.map((sample, index) => {
+    const previousSample = samples[(index - 1 + samples.length) % samples.length] ?? sample;
+    const nextSample = samples[(index + 1) % samples.length] ?? sample;
+    const previousDistance = getSampleChordDistance(previousSample, sample);
+    const nextDistance = getSampleChordDistance(sample, nextSample);
+
+    return {
+      id: sample.id,
+      anchor: sample.point,
+      handleIn: roundPoint2D([
+        -sample.tangent[0] * previousDistance / 3,
+        -sample.tangent[1] * previousDistance / 3,
+      ]),
+      handleOut: roundPoint2D([
+        sample.tangent[0] * nextDistance / 3,
+        sample.tangent[1] * nextDistance / 3,
+      ]),
+    };
+  });
+}
+
+function getSampleChordDistance(left: PathSample2D, right: PathSample2D): number {
+  return Math.hypot(left.point[0] - right.point[0], left.point[1] - right.point[1]);
+}
+
+function estimateCubicSegmentLength(
+  segment: CubicSegment2D,
+  nextSegment: CubicSegment2D,
+): number {
+  const sampleCount = 8;
+  let previousPoint = segment.anchor;
+  let length = 0;
+
+  for (let index = 1; index <= sampleCount; index += 1) {
+    const point = sampleCubicSegment(segment, nextSegment, index / sampleCount);
+    length += Math.hypot(point[0] - previousPoint[0], point[1] - previousPoint[1]);
+    previousPoint = point;
+  }
+
+  return length;
+}
+
+function sampleCubicSegment(
+  segment: CubicSegment2D,
+  nextSegment: CubicSegment2D,
+  time: number,
+): ViewMorphPoint2D {
+  const p0 = segment.anchor;
+  const p1: ViewMorphPoint2D = [
+    segment.anchor[0] + segment.handleOut[0],
+    segment.anchor[1] + segment.handleOut[1],
+  ];
+  const p2: ViewMorphPoint2D = [
+    nextSegment.anchor[0] + nextSegment.handleIn[0],
+    nextSegment.anchor[1] + nextSegment.handleIn[1],
+  ];
+  const p3 = nextSegment.anchor;
+  const t = clamp01(time);
+  const inverseT = 1 - t;
+
+  return [
+    inverseT ** 3 * p0[0] +
+      3 * inverseT ** 2 * t * p1[0] +
+      3 * inverseT * t ** 2 * p2[0] +
+      t ** 3 * p3[0],
+    inverseT ** 3 * p0[1] +
+      3 * inverseT ** 2 * t * p1[1] +
+      3 * inverseT * t ** 2 * p2[1] +
+      t ** 3 * p3[1],
+  ];
 }
 
 function splitPaperPathIntoCubicSegments(
@@ -825,95 +1023,6 @@ function getCubicCorrespondenceSegmentCount(
   const multiplier = Math.max(1, Math.ceil(minimumSegmentCount / commonCurveCount));
 
   return commonCurveCount * multiplier;
-}
-
-function alignClosedCubicSegments(
-  reference: CubicSegment2D[],
-  candidate: CubicSegment2D[],
-): CubicSegment2D[] {
-  if (reference.length !== candidate.length || reference.length === 0) {
-    return candidate;
-  }
-
-  let bestOffset = 0;
-  let bestReversed = false;
-  let bestScore = Number.POSITIVE_INFINITY;
-
-  for (const reversed of [false, true]) {
-    const orientedCandidate = reversed
-      ? reverseClosedCubicSegments(candidate)
-      : candidate;
-
-    for (let offset = 0; offset < orientedCandidate.length; offset += 1) {
-      const score = getClosedCubicAlignmentScore(
-        reference,
-        rotateCubicSegments(orientedCandidate, offset),
-      );
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestOffset = offset;
-        bestReversed = reversed;
-      }
-    }
-  }
-
-  return rotateCubicSegments(
-    bestReversed ? reverseClosedCubicSegments(candidate) : candidate,
-    bestOffset,
-  );
-}
-
-function getClosedCubicAlignmentScore(
-  reference: CubicSegment2D[],
-  candidate: CubicSegment2D[],
-): number {
-  return reference.reduce((score, segment, index) => {
-    const other = candidate[index] ?? segment;
-
-    return (
-      score +
-      Math.hypot(segment.anchor[0] - other.anchor[0], segment.anchor[1] - other.anchor[1]) +
-      getDirectionDifference(segment.handleOut, other.handleOut) * 8
-    );
-  }, 0);
-}
-
-function rotateCubicSegments(
-  segments: CubicSegment2D[],
-  offset: number,
-): CubicSegment2D[] {
-  return segments.map((_, index) => ({
-    ...segments[(index + offset) % segments.length]!,
-  }));
-}
-
-function reverseClosedCubicSegments(segments: CubicSegment2D[]): CubicSegment2D[] {
-  return segments.map((_, index) => {
-    const sourceIndex = (segments.length - index) % segments.length;
-    const source = segments[sourceIndex]!;
-
-    return {
-      id: source.id,
-      anchor: source.anchor,
-      handleIn: source.handleOut,
-      handleOut: source.handleIn,
-    };
-  });
-}
-
-function getDirectionDifference(left: ViewMorphPoint2D, right: ViewMorphPoint2D): number {
-  const leftLength = Math.hypot(left[0], left[1]);
-  const rightLength = Math.hypot(right[0], right[1]);
-
-  if (leftLength <= EPSILON || rightLength <= EPSILON) {
-    return 0;
-  }
-
-  return 1 - dotPoint2D(
-    [left[0] / leftLength, left[1] / leftLength],
-    [right[0] / rightLength, right[1] / rightLength],
-  );
 }
 
 type AbsoluteCubicSegment2D = {
@@ -1001,6 +1110,10 @@ function paperCurveToAbsoluteCubicSegment(
 
 function clamp01(value: number): number {
   return Math.min(Math.max(value, 0), 1);
+}
+
+function normalizeUnitOffset(value: number): number {
+  return ((value % 1) + 1) % 1;
 }
 
 function smoothPolylineToBezierPath(path: ViewMorphClosedPolyline): StructuredBezierPath {
