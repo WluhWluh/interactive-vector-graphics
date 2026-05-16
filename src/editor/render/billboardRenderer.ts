@@ -115,8 +115,6 @@ function drawBillboardNode(
       projectWorldPosition: rendererContext.projectWorldPosition,
       fillStyle: ghostColor ?? asset.fill,
       fillRule: asset.fillRule,
-      rotationRad: drawable.transform.rotation[2],
-      scale: [drawable.transform.scale[0], drawable.transform.scale[1]],
       localToWorldMatrix: transformToMatrix(drawable.transform),
     });
     context.restore();
