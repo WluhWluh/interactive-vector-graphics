@@ -30,13 +30,13 @@ export type ViewMorphBillboardTransformAdapter = {
   localToWorldMatrix: Matrix4;
   getCameraEvaluationInput: (camera: Camera) => ViewMorphCameraEvaluationInput;
   createProjector: (
-    input: Omit<ViewMorphBillboardProjectorInput, "origin">,
+    input: ViewMorphBillboardProjectorInput,
   ) => ViewMorphBillboardProjector;
 };
 
 export type ViewMorphBillboardProjectorInput = {
   camera: Camera;
-  origin: Vector3Tuple;
+  origin?: Vector3Tuple;
   projectWorldPosition: (
     position: Vector3Tuple,
   ) => { x: number; y: number } | null;
@@ -119,12 +119,11 @@ export function getViewMorphCameraEvaluationInput(
 export function createViewMorphBillboardProjector(
   input: ViewMorphBillboardProjectorInput,
 ): ViewMorphBillboardProjector {
-  const origin = new Vector3(...input.origin);
+  const localToWorldMatrix = input.localToWorldMatrix ?? new Matrix4();
+  const origin = new Vector3(...(input.origin ?? getMatrixOrigin(localToWorldMatrix)));
   const right = getCameraScreenRightWorldVector(input.camera);
   const up = getCameraScreenUpWorldVector(input.camera);
-  const transformBasis = getViewMorphTransformBasis(
-    input.localToWorldMatrix ?? new Matrix4(),
-  );
+  const transformBasis = getViewMorphTransformBasis(localToWorldMatrix);
   const rightLocal = right
     .clone()
     .applyMatrix4(transformBasis.inverseRotationMatrix)

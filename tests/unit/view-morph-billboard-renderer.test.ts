@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { Matrix4, PerspectiveCamera, Vector3 } from "three";
+import { Euler, Matrix4, PerspectiveCamera, Quaternion, Vector3 } from "three";
 import { createDefaultViewMorphProfile } from "../../src/core/assets/viewMorphProfile";
 import {
   createViewMorphBillboardProjector,
@@ -57,6 +57,8 @@ export function runViewMorphBillboardRendererUnitTests(): void {
     horizontalSourceAxis: "x",
     verticalSourceAxis: "z",
   });
+  assertRotatedScaleAwareProjection();
+  assertNestedMatrixScaleAwareProjection();
 }
 
 function assertScaleAwareProjection(
@@ -100,6 +102,71 @@ function assertScaleAwareProjection(
     getDominantScaleRatio(scaledVertical, baseVertical),
     getAxisScale(axes.verticalSourceAxis),
     `${label} vertical billboard extent should follow local ${axes.verticalSourceAxis.toUpperCase()} scale`,
+  );
+}
+
+function assertRotatedScaleAwareProjection(): void {
+  const camera = createCameraLookingFrom([1, 0, 0]);
+  const matrix = composeMatrix({
+    rotation: [0, Math.PI / 2, 0],
+    scale: [2, 3, 4],
+  });
+  const projector = createViewMorphBillboardProjector({
+    camera,
+    origin: [0, 0, 0],
+    projectWorldPosition: createCameraScreenSpaceProjector(camera),
+    localToWorldMatrix: matrix,
+  });
+  const baseProjector = createViewMorphBillboardProjector({
+    camera,
+    origin: [0, 0, 0],
+    projectWorldPosition: createCameraScreenSpaceProjector(camera),
+    localToWorldMatrix: composeMatrix({ rotation: [0, Math.PI / 2, 0] }),
+  });
+  const baseHorizontal = baseProjector.pathToScreen([50, 0]);
+  const scaledHorizontal = projector.pathToScreen([50, 0]);
+  const baseVertical = baseProjector.pathToScreen([0, -50]);
+  const scaledVertical = projector.pathToScreen([0, -50]);
+
+  assert.ok(baseHorizontal && scaledHorizontal && baseVertical && scaledVertical);
+  assert.equal(
+    getDominantScaleRatio(scaledHorizontal, baseHorizontal),
+    2,
+    "rotated view morph should apply local X scale along the rotated screen horizontal axis",
+  );
+  assert.equal(
+    getDominantScaleRatio(scaledVertical, baseVertical),
+    3,
+    "rotated view morph should keep local Y scale along the vertical axis",
+  );
+}
+
+function assertNestedMatrixScaleAwareProjection(): void {
+  const camera = createCameraLookingFrom([0, 0, 1]);
+  const parent = composeMatrix({ rotation: [0, Math.PI / 2, 0], scale: [1, 2, 1] });
+  const child = composeMatrix({ rotation: [0, -Math.PI / 2, 0], scale: [2, 3, 4] });
+  const nested = parent.clone().multiply(child);
+  const base = composeMatrix({});
+  const baseProjector = createViewMorphBillboardProjector({
+    camera,
+    origin: [0, 0, 0],
+    projectWorldPosition: createCameraScreenSpaceProjector(camera),
+    localToWorldMatrix: base,
+  });
+  const nestedProjector = createViewMorphBillboardProjector({
+    camera,
+    origin: [0, 0, 0],
+    projectWorldPosition: createCameraScreenSpaceProjector(camera),
+    localToWorldMatrix: nested,
+  });
+  const baseVertical = baseProjector.pathToScreen([0, -50]);
+  const nestedVertical = nestedProjector.pathToScreen([0, -50]);
+
+  assert.ok(baseVertical && nestedVertical);
+  assert.equal(
+    getDominantScaleRatio(nestedVertical, baseVertical),
+    6,
+    "nested group and node scale should preserve the full world matrix scale for view morph projection",
   );
 }
 
@@ -175,6 +242,20 @@ function createCameraScreenSpaceProjector(
       y: Number(point.dot(up).toFixed(6)),
     };
   };
+}
+
+function composeMatrix(input: {
+  position?: Vector3Tuple;
+  rotation?: Vector3Tuple;
+  scale?: Vector3Tuple;
+}): Matrix4 {
+  const position = new Vector3(...(input.position ?? [0, 0, 0]));
+  const rotation = new Quaternion().setFromEuler(
+    new Euler(...(input.rotation ?? [0, 0, 0]), "XYZ"),
+  );
+  const scale = new Vector3(...(input.scale ?? [1, 1, 1]));
+
+  return new Matrix4().compose(position, rotation, scale);
 }
 
 function getDominantScaleRatio(

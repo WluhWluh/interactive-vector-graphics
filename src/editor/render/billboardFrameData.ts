@@ -144,6 +144,7 @@ function getSelectedPrefabTimelineGhostBillboards(
       id: `${node.id}:timeline-staging-ghost`,
       asset,
       transform: matrixToTransform(worldTransform),
+      worldMatrix: worldTransform.clone(),
       selected: false,
       opacity: 0.5,
       ghost: true,
@@ -169,6 +170,7 @@ export function getSceneLayoutBillboards(
           id: node.id,
           asset,
           transform: cloneTransform(node),
+          worldMatrix: transformToMatrix(node),
           selected: node.id === input.selectedNodeId,
         });
       }
@@ -227,6 +229,7 @@ function flattenPrefabBillboards(
       id: `${input.idPrefix ?? ""}${node.id}`,
       asset,
       transform: matrixToTransform(matrix),
+      worldMatrix: matrix.clone(),
       selected: input.isSelected(node.id),
       pathOverride: input.pathOverrides?.get(node.id),
     });

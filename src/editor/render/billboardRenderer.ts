@@ -21,6 +21,7 @@ export type DrawableBillboard = {
   id: string;
   asset: PrimitiveSvgAsset;
   transform: TransformSnapshot;
+  worldMatrix?: Matrix4;
   selected: boolean;
   opacity?: number;
   ghost?: boolean;
@@ -106,16 +107,17 @@ function drawBillboardNode(
   }
 
   if (asset.assetKind === "viewMorphProfile") {
+    const worldMatrix = drawable.worldMatrix ?? transformToMatrix(drawable.transform);
+
     context.save();
     context.globalAlpha *= drawable.opacity ?? 1;
     drawViewMorphBillboardPath(context, {
       profile: asset.viewMorphProfile,
       camera: rendererContext.camera,
-      origin: drawable.transform.position,
       projectWorldPosition: rendererContext.projectWorldPosition,
       fillStyle: ghostColor ?? asset.fill,
       fillRule: asset.fillRule,
-      localToWorldMatrix: transformToMatrix(drawable.transform),
+      localToWorldMatrix: worldMatrix,
     });
     context.restore();
 
