@@ -135,9 +135,13 @@ try {
   assert.equal(viewMorphAsset.fill, "#ffcf4a");
   assert.equal(viewMorphAsset.fillRule, "nonzero");
   assert.equal(viewMorphAsset.viewMorphProfile?.version, 1);
-  assert.equal(viewMorphAsset.viewMorphProfile?.planes.length, 3);
+  assert.equal(viewMorphAsset.viewMorphProfile?.verticalPlanes.length, 2);
+  assert.equal(
+    viewMorphAsset.viewMorphProfile?.horizontalPlane.path.points.length,
+    8,
+  );
   assert.equal(viewMorphAsset.bezierPath.closed, true);
-  assert.equal(viewMorphAsset.bezierPath.segments.length, 4);
+  assert.equal(viewMorphAsset.bezierPath.segments.length, 8);
   assert.deepEqual(
     evaluateViewMorphProfileToBezierPath(viewMorphAsset.viewMorphProfile!, [
       0,

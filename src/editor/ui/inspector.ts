@@ -109,13 +109,18 @@ export function appendAssetInspectorRows(
     if (asset.assetKind === "viewMorphProfile") {
       appendInspectorRow(
         elements,
-        "Planes",
-        String(asset.viewMorphProfile.planes.length),
+        "Vertical Planes",
+        String(asset.viewMorphProfile.verticalPlanes.length),
       );
       appendInspectorRow(
         elements,
-        "View Morph Segments",
-        String(asset.viewMorphProfile.planes[0]?.path.segments.length ?? 0),
+        "Vertical Points",
+        String(asset.viewMorphProfile.verticalPlanes[0]?.path.points.length ?? 0),
+      );
+      appendInspectorRow(
+        elements,
+        "Horizontal Points",
+        String(asset.viewMorphProfile.horizontalPlane.path.points.length),
       );
     }
   }

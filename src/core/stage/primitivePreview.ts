@@ -1,7 +1,7 @@
 import type { PrimitiveSvgAsset } from "../assets/primitiveAssetTypes";
 import { primitiveAssetUsesStrokeStyle } from "../assets/primitiveAssetCapabilities";
 import {
-  evaluateViewMorphProfileToBezierPath,
+  createViewMorphPreviewPath,
 } from "../assets/viewMorphProfile";
 import { structuredBezierToPathD } from "../assets/structuredBezierPath";
 import type { StageLayer, StageSize } from "./canvasStage";
@@ -82,10 +82,7 @@ export function drawPrimitivePreview(
 function createViewMorphPreviewAsset(
   asset: Extract<PrimitiveSvgAsset, { assetKind: "viewMorphProfile" }>,
 ): PrimitiveSvgAsset {
-  const bezierPath = evaluateViewMorphProfileToBezierPath(
-    asset.viewMorphProfile,
-    [0, 0, 1],
-  );
+  const bezierPath = createViewMorphPreviewPath(asset.viewMorphProfile);
   const pathD = structuredBezierToPathD(bezierPath);
 
   return {

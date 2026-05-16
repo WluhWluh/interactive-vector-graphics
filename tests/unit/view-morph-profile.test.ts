@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import {
-  calculateViewMorphPlaneWeights,
   createDefaultViewMorphProfile,
+  evaluateViewMorphProfile,
   evaluateViewMorphProfileToBezierPath,
 } from "../../src/core/assets/viewMorphProfile";
 
@@ -9,30 +9,37 @@ export function runViewMorphProfileUnitTests(): void {
   const profile = createDefaultViewMorphProfile();
 
   assert.equal(profile.version, 1);
-  assert.equal(profile.planes.length, 3);
+  assert.equal(profile.verticalPlanes.length, 2);
+  assert.equal(profile.horizontalPlane.path.points.length, 8);
 
-  for (const plane of profile.planes) {
-    assert.equal(plane.path.closed, true);
-    assert.equal(plane.path.segments.length, 4);
+  for (const plane of profile.verticalPlanes) {
+    assert.equal(plane.normal[1], 0);
+    assert.equal(plane.tangentU[1], 0);
+    assert.equal(plane.path.points.length, 8);
     assert.deepEqual(
-      plane.path.segments.map((segment) => segment.id),
-      ["seg-1", "seg-2", "seg-3", "seg-4"],
+      plane.path.points.map((point) => point.id),
+      [
+        "point-top",
+        "point-upper-right",
+        "point-right",
+        "point-lower-right",
+        "point-bottom",
+        "point-lower-left",
+        "point-left",
+        "point-upper-left",
+      ],
     );
+    assert.equal(plane.path.points[0]?.point[0], 0);
+    assert.equal(plane.path.points[4]?.point[0], 0);
   }
 
-  const frontPath = evaluateViewMorphProfileToBezierPath(profile, [0, 0, 1]);
-  assert.deepEqual(frontPath, profile.planes[0]?.path);
+  const frontEvaluation = evaluateViewMorphProfile(profile, [0, 0, 1]);
+  assert.equal(frontEvaluation.debug.verticalBlend.leftPlaneId, "vertical-front");
+  assert.equal(frontEvaluation.debug.horizontalWeight, 0);
 
-  const sidePath = evaluateViewMorphProfileToBezierPath(profile, [1, 0, 0]);
-  assert.deepEqual(sidePath, profile.planes[1]?.path);
-
-  const topPath = evaluateViewMorphProfileToBezierPath(profile, [0, 1, 0]);
-  assert.deepEqual(topPath, profile.planes[2]?.path);
-
-  const weights = calculateViewMorphPlaneWeights(profile, [1, 0, 0]);
-  assert.equal(weights.find((weight) => weight.planeId === "plane-front")?.weight, 0);
-  assert.equal(weights.find((weight) => weight.planeId === "plane-top")?.weight, 0);
-  assert.equal(weights.find((weight) => weight.planeId === "plane-side")?.weight, 1);
+  const topEvaluation = evaluateViewMorphProfile(profile, [0, 1, 0]);
+  assert.equal(topEvaluation.debug.horizontalWeight, 1);
+  assert.equal(topEvaluation.debug.verticalWeight, 0);
 
   for (const direction of [
     [1, 1, 1],
@@ -41,14 +48,20 @@ export function runViewMorphProfileUnitTests(): void {
   ] as Array<[number, number, number]>) {
     const evaluated = evaluateViewMorphProfileToBezierPath(profile, direction);
     assert.equal(evaluated.closed, true);
-    assert.equal(evaluated.segments.length, 4);
+    assert.equal(evaluated.segments.length, 8);
     assert.deepEqual(
       evaluated.segments.map((segment) => segment.id),
-      ["seg-1", "seg-2", "seg-3", "seg-4"],
+      [
+        "point-top",
+        "point-upper-right",
+        "point-right",
+        "point-lower-right",
+        "point-bottom",
+        "point-lower-left",
+        "point-left",
+        "point-upper-left",
+      ],
     );
-    assert.deepEqual(evaluated.segments[0]?.anchor, [0, -50]);
-    assert.deepEqual(evaluated.segments[1]?.anchor, [50, 0]);
-    assert.deepEqual(evaluated.segments[2]?.anchor, [0, 50]);
-    assert.deepEqual(evaluated.segments[3]?.anchor, [-50, 0]);
+    assert.ok(evaluated.segments.every((segment) => segment.anchor.every(Number.isFinite)));
   }
 }

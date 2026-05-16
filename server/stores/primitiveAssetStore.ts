@@ -20,7 +20,7 @@ import {
 } from "../../src/core/assets/structuredBezierPath3d";
 import {
   createDefaultViewMorphProfile,
-  evaluateViewMorphProfileToBezierPath,
+  createViewMorphPreviewPath,
   validateViewMorphProfile,
   VIEW_MORPH_PROFILE_DEFAULT_VIEW_BOX,
 } from "../../src/core/assets/viewMorphProfile";
@@ -410,7 +410,7 @@ export function createPrimitiveAssetStore(
     assertProjectExists(projectId);
 
     const profile = validateViewMorphProfile(createDefaultViewMorphProfile());
-    const previewPath = evaluateViewMorphProfileToBezierPath(profile, [0, 0, 1]);
+    const previewPath = createViewMorphPreviewPath(profile);
     const name = "View Morph Profile";
     const assetId = createUniqueAssetId(projectId, name);
     const timestamp = new Date().toISOString();

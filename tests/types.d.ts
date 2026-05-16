@@ -25,14 +25,31 @@ type StructuredBezierPath3DDebug = {
 type ViewMorphProfileDebug = {
   version: 1;
   center: [number, number, number];
-  planes: Array<{
+  verticalPlanes: Array<{
     id: string;
     name: string;
     normal: [number, number, number];
     tangentU: [number, number, number];
-    tangentV: [number, number, number];
-    path: StructuredBezierPathDebug;
+    path: {
+      points: Array<{
+        id: string;
+        point: [number, number];
+      }>;
+    };
   }>;
+  horizontalPlane: {
+    id: string;
+    name: string;
+    normal: [0, 1, 0];
+    tangentU: [1, 0, 0];
+    tangentV: [0, 0, 1];
+    path: {
+      points: Array<{
+        id: string;
+        point: [number, number];
+      }>;
+    };
+  };
 };
 
 declare global {

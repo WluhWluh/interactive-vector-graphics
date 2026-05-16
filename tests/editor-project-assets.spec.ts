@@ -1104,8 +1104,9 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
     page.getByRole("button", { name: "View Morph: View Morph Profile" }),
   ).toBeVisible();
   await expect(page.locator("#inspector-fields")).toContainText("viewMorphProfile");
-  await expect(page.locator("#inspector-fields")).toContainText("Planes");
-  await expect(page.locator("#inspector-fields")).toContainText("View Morph Segments");
+  await expect(page.locator("#inspector-fields")).toContainText("Vertical Planes");
+  await expect(page.locator("#inspector-fields")).toContainText("Vertical Points");
+  await expect(page.locator("#inspector-fields")).toContainText("Horizontal Points");
 
   const assetState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -1122,9 +1123,12 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
   expect(assetState.selectedAssetId).toBe("view-morph-profile");
   expect(assetState.asset?.assetKind).toBe("viewMorphProfile");
   expect(assetState.asset?.viewMorphProfile?.version).toBe(1);
-  expect(assetState.asset?.viewMorphProfile?.planes.length).toBe(3);
+  expect(assetState.asset?.viewMorphProfile?.verticalPlanes.length).toBe(2);
+  expect(assetState.asset?.viewMorphProfile?.horizontalPlane.path.points.length).toBe(
+    8,
+  );
   expect(assetState.asset?.bezierPath.closed).toBe(true);
-  expect(assetState.asset?.bezierPath.segments.length).toBe(4);
+  expect(assetState.asset?.bezierPath.segments.length).toBe(8);
 
   const vectorCanvas = page.locator("#vector-canvas");
   await expect.poll(() => countWarmYellowPixels(vectorCanvas)).toBeGreaterThan(50);
@@ -1156,8 +1160,8 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
     kind: "primitive",
     assetId: "view-morph-profile",
   });
-  expect(prefabState.asset?.viewMorphProfile?.planes[0]?.path.segments.length).toBe(
-    4,
+  expect(prefabState.asset?.viewMorphProfile?.verticalPlanes[0]?.path.points.length).toBe(
+    8,
   );
 });
 
