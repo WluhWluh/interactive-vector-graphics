@@ -55,6 +55,12 @@ export type ViewMorphProfileEvaluationDebug = {
 
 export type ViewMorphProfileEvaluationOptions = {
   horizontalRotationReferenceLocal?: ViewMorphPoint3D;
+  screenUpReferenceLocal?: ViewMorphPoint3D;
+};
+
+type ViewMorphHorizontalBasis2D = {
+  right: ViewMorphPoint2D;
+  up: ViewMorphPoint2D;
 };
 
 export class ViewMorphProfileError extends Error {
@@ -197,9 +203,10 @@ export function evaluateViewMorphProfile(
     [viewDirection[0], viewDirection[2]],
     [0, 1],
   );
-  const horizontalRotationDirection = resolveHorizontalRotationDirection(
+  const horizontalBasis = resolveHorizontalRenderBasis(
     viewDirection,
     options.horizontalRotationReferenceLocal,
+    options.screenUpReferenceLocal,
   );
   const verticalBlend = blendVerticalPlanes(
     validatedProfile.verticalPlanes,
@@ -207,14 +214,7 @@ export function evaluateViewMorphProfile(
   );
   const rotatedHorizontalPath = rotateHorizontalPolylineForView(
     validatedProfile.horizontalPlane.path,
-    horizontalRotationDirection,
-    viewDirection[1],
-  );
-  const smoothedHorizontalPath = smoothPolylineToBezierPath(rotatedHorizontalPath);
-  const horizontalTargets = verticalBlend.path.points.map((point) =>
-    findFirstRayIntersectionWithPath(point.point, smoothedHorizontalPath) ??
-    intersectRayWithPolyline(point.point, rotatedHorizontalPath) ??
-    point.point,
+    horizontalBasis,
   );
   const horizontalWeight = Math.abs(viewDirection[1]);
   const verticalWeight = Math.max(0, Math.hypot(viewDirection[0], viewDirection[2]));
@@ -223,25 +223,19 @@ export function evaluateViewMorphProfile(
     totalWeight <= EPSILON ? 0 : horizontalWeight / totalWeight;
   const normalizedVerticalWeight =
     totalWeight <= EPSILON ? 1 : verticalWeight / totalWeight;
-  const finalPolyline: ViewMorphClosedPolyline = {
-    points: verticalBlend.path.points.map((point, index) => ({
-      id: point.id,
-      point: blend2DPoints(
-        point.point,
-        horizontalTargets[index] ?? point.point,
-        normalizedVerticalWeight,
-        normalizedHorizontalWeight,
-      ),
-    })),
-  };
 
   return {
-    path: smoothPolylineToBezierPath(finalPolyline),
+    path: blendSmoothedViewMorphPaths(
+      verticalBlend.path,
+      rotatedHorizontalPath,
+      normalizedVerticalWeight,
+      normalizedHorizontalWeight,
+    ),
     debug: {
       verticalBlend: verticalBlend.debug,
       horizontalWeight: roundNumber(normalizedHorizontalWeight),
       verticalWeight: roundNumber(normalizedVerticalWeight),
-      horizontalRotationRad: getHorizontalRotationForView(horizontalRotationDirection),
+      horizontalRotationRad: getHorizontalRotationForView(horizontalBasis.right),
     },
   };
 }
@@ -595,68 +589,203 @@ function mirrorPolylineHorizontally(
 
 function rotateHorizontalPolylineForView(
   path: ViewMorphClosedPolyline,
-  horizontalViewDirection: ViewMorphPoint2D,
-  yDirection: number,
+  basis: ViewMorphHorizontalBasis2D,
 ): ViewMorphClosedPolyline {
-  const angle = getHorizontalRotationForView(horizontalViewDirection);
-  const directionSign = yDirection < 0 ? -1 : 1;
-
   return {
     points: path.points.map((point) => ({
       id: point.id,
-      point: rotatePoint2D(
-        [point.point[0] * directionSign, point.point[1]],
-        angle,
-      ),
+      point: roundPoint2D([
+        point.point[0] * basis.right[0] + point.point[1] * basis.up[0],
+        point.point[0] * basis.right[1] + point.point[1] * basis.up[1],
+      ]),
     })),
   };
 }
 
-function resolveHorizontalRotationDirection(
+function resolveHorizontalRenderBasis(
   viewDirection: ViewMorphPoint3D,
   horizontalRotationReferenceLocal: ViewMorphPoint3D | undefined,
-): ViewMorphPoint2D {
+  screenUpReferenceLocal: ViewMorphPoint3D | undefined,
+): ViewMorphHorizontalBasis2D {
+  const normalSide = viewDirection[1] < -EPSILON ? -1 : 1;
+
+  if (horizontalRotationReferenceLocal && screenUpReferenceLocal) {
+    const screenRightOnHorizontalPlane = normalizePoint2D(
+      [horizontalRotationReferenceLocal[0], horizontalRotationReferenceLocal[2]],
+      null,
+    );
+    const screenUpOnHorizontalPlane = normalizePoint2D(
+      [screenUpReferenceLocal[0], screenUpReferenceLocal[2]],
+      null,
+    );
+
+    if (screenRightOnHorizontalPlane && screenUpOnHorizontalPlane) {
+      return {
+        right: [
+          screenRightOnHorizontalPlane[0] * normalSide,
+          -screenUpOnHorizontalPlane[0] * normalSide,
+        ],
+        up: [
+          screenRightOnHorizontalPlane[1],
+          -screenUpOnHorizontalPlane[1],
+        ],
+      };
+    }
+  }
+
   const horizontalViewDirection = normalizePoint2D(
     [viewDirection[0], viewDirection[2]],
     null,
   );
 
   if (horizontalViewDirection) {
-    return horizontalViewDirection;
-  }
-
-  if (horizontalRotationReferenceLocal) {
-    const horizontalReference = normalizePoint2D(
-      [
-        horizontalRotationReferenceLocal[0],
-        horizontalRotationReferenceLocal[2],
+    return {
+      right: [
+        horizontalViewDirection[0] * normalSide,
+        horizontalViewDirection[1] * normalSide,
       ],
-      null,
-    );
-
-    if (horizontalReference) {
-      return horizontalReference;
-    }
+      up: [-horizontalViewDirection[1], horizontalViewDirection[0]],
+    };
   }
 
-  return [0, 1];
+  return {
+    right: [normalSide, 0],
+    up: [0, -1],
+  };
 }
 
 function getHorizontalRotationForView(horizontalViewDirection: ViewMorphPoint2D): number {
   return Math.atan2(horizontalViewDirection[1], horizontalViewDirection[0]);
 }
 
-function smoothPolylineToBezierPath(path: ViewMorphClosedPolyline): StructuredBezierPath {
-  const paperPath = new paper.Path();
+function blendSmoothedViewMorphPaths(
+  verticalPath: ViewMorphClosedPolyline,
+  horizontalPath: ViewMorphClosedPolyline,
+  verticalWeight: number,
+  horizontalWeight: number,
+): StructuredBezierPath {
+  const verticalBlendPath = createSmoothPaperPath(verticalPath);
+  const horizontalBlendPath = createSmoothPaperPath(horizontalPath);
 
   try {
-    for (const point of path.points) {
-      paperPath.add(new paper.Point(point.point[0], point.point[1]));
+    return blendPaperPathsByRadialSamples(
+      verticalBlendPath,
+      horizontalBlendPath,
+      verticalPath.points.length + horizontalPath.points.length,
+      verticalWeight,
+      horizontalWeight,
+    );
+  } finally {
+    verticalBlendPath.remove();
+    horizontalBlendPath.remove();
+  }
+}
+
+function createSmoothPaperPath(path: ViewMorphClosedPolyline): paper.Path {
+  const paperPath = new paper.Path();
+
+  for (const point of path.points) {
+    paperPath.add(new paper.Point(point.point[0], point.point[1]));
+  }
+
+  paperPath.closed = true;
+  paperPath.smooth({ type: "continuous" });
+
+  return paperPath;
+}
+
+function blendPaperPathsByRadialSamples(
+  verticalPath: paper.Path,
+  horizontalPath: paper.Path,
+  segmentCount: number,
+  verticalWeight: number,
+  horizontalWeight: number,
+): StructuredBezierPath {
+  const sampleCount = Math.max(4, segmentCount);
+  const finalPolyline: ViewMorphClosedPolyline = {
+    points: Array.from({ length: sampleCount }, (_, index) => {
+      const angle = -Math.PI / 2 + (index / sampleCount) * Math.PI * 2;
+      const direction: ViewMorphPoint2D = [Math.cos(angle), Math.sin(angle)];
+      const verticalPoint = findFirstRayIntersectionWithPaperPath(direction, verticalPath);
+      const horizontalPoint = findFirstRayIntersectionWithPaperPath(
+        direction,
+        horizontalPath,
+      );
+
+      return {
+        id: `point-${index + 1}`,
+        point: blend2DPoints(
+          verticalPoint,
+          horizontalPoint,
+          verticalWeight,
+          horizontalWeight,
+        ),
+      };
+    }),
+  };
+
+  return smoothPolylineToBezierPath(finalPolyline);
+}
+
+function findFirstRayIntersectionWithPaperPath(
+  direction: ViewMorphPoint2D,
+  targetPath: paper.Path,
+): ViewMorphPoint2D {
+  const normalizedDirection = normalizePoint2D(direction, [1, 0]);
+  const rayPath = new paper.Path.Line(
+    new paper.Point(0, 0),
+    new paper.Point(normalizedDirection[0] * 10000, normalizedDirection[1] * 10000),
+  );
+
+  try {
+    const intersections = rayPath
+      .getIntersections(targetPath)
+      .map((intersection) => ({
+        point: intersection.point,
+        distance: intersection.point.getDistance(new paper.Point(0, 0)),
+      }))
+      .filter((intersection) => intersection.distance > EPSILON)
+      .sort((left, right) => left.distance - right.distance);
+    const [firstIntersection] = intersections;
+
+    if (firstIntersection) {
+      return roundPoint2D([firstIntersection.point.x, firstIntersection.point.y]);
     }
 
-    paperPath.closed = true;
-    paperPath.smooth({ type: "continuous" });
+    return samplePaperPathAlongRayFallback(normalizedDirection, targetPath);
+  } finally {
+    rayPath.remove();
+  }
+}
 
+function samplePaperPathAlongRayFallback(
+  direction: ViewMorphPoint2D,
+  path: paper.Path,
+): ViewMorphPoint2D {
+  const sampleCount = 96;
+  let bestPoint: ViewMorphPoint2D = [0, 0];
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const point = path.getPointAt((index / sampleCount) * path.length);
+    const candidate: ViewMorphPoint2D = [point.x, point.y];
+    const angleDistance = Math.abs(crossPoint2D(direction, candidate));
+    const behindPenalty = dotPoint2D(direction, candidate) < 0 ? 100000 : 0;
+    const score = angleDistance + behindPenalty;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestPoint = candidate;
+    }
+  }
+
+  return roundPoint2D(bestPoint);
+}
+
+function smoothPolylineToBezierPath(path: ViewMorphClosedPolyline): StructuredBezierPath {
+  const paperPath = createSmoothPaperPath(path);
+
+  try {
     return {
       version: 1,
       closed: true,
@@ -670,116 +799,6 @@ function smoothPolylineToBezierPath(path: ViewMorphClosedPolyline): StructuredBe
   } finally {
     paperPath.remove();
   }
-}
-
-function findFirstRayIntersectionWithPath(
-  sourcePoint: ViewMorphPoint2D,
-  targetPath: StructuredBezierPath,
-): ViewMorphPoint2D | null {
-  const direction = normalizePoint2D(sourcePoint, null);
-
-  if (!direction) {
-    return [0, 0];
-  }
-
-  const rayPath = new paper.Path.Line(
-    new paper.Point(0, 0),
-    new paper.Point(direction[0] * 10000, direction[1] * 10000),
-  );
-  const paperTargetPath = structuredBezierPathToPaperPath(targetPath);
-
-  try {
-    const intersections = rayPath
-      .getIntersections(paperTargetPath)
-      .map((intersection) => ({
-        point: intersection.point,
-        distance: intersection.point.getDistance(new paper.Point(0, 0)),
-      }))
-      .filter((intersection) => intersection.distance > EPSILON)
-      .sort((left, right) => left.distance - right.distance);
-    const [firstIntersection] = intersections;
-
-    return firstIntersection
-      ? roundPoint2D([firstIntersection.point.x, firstIntersection.point.y])
-      : null;
-  } finally {
-    rayPath.remove();
-    paperTargetPath.remove();
-  }
-}
-
-function structuredBezierPathToPaperPath(path: StructuredBezierPath): paper.Path {
-  const paperPath = new paper.Path();
-
-  for (const segment of path.segments) {
-    paperPath.add(
-      new paper.Segment(
-        new paper.Point(segment.anchor[0], segment.anchor[1]),
-        new paper.Point(segment.handleIn[0], segment.handleIn[1]),
-        new paper.Point(segment.handleOut[0], segment.handleOut[1]),
-      ),
-    );
-  }
-
-  paperPath.closed = path.closed;
-  return paperPath;
-}
-
-function intersectRayWithPolyline(
-  sourcePoint: ViewMorphPoint2D,
-  path: ViewMorphClosedPolyline,
-): ViewMorphPoint2D | null {
-  const rayDirection = normalizePoint2D(sourcePoint, null);
-
-  if (!rayDirection) {
-    return [0, 0];
-  }
-
-  const intersections: Array<{ point: ViewMorphPoint2D; distance: number }> = [];
-
-  for (let index = 0; index < path.points.length; index += 1) {
-    const start = path.points[index]?.point;
-    const end = path.points[(index + 1) % path.points.length]?.point;
-
-    if (!start || !end) {
-      continue;
-    }
-
-    const intersection = intersectRayWithSegment(rayDirection, start, end);
-
-    if (intersection) {
-      intersections.push({
-        point: intersection,
-        distance: Math.hypot(intersection[0], intersection[1]),
-      });
-    }
-  }
-
-  intersections.sort((left, right) => left.distance - right.distance);
-
-  return intersections[0]?.point ?? null;
-}
-
-function intersectRayWithSegment(
-  rayDirection: ViewMorphPoint2D,
-  start: ViewMorphPoint2D,
-  end: ViewMorphPoint2D,
-): ViewMorphPoint2D | null {
-  const segment: ViewMorphPoint2D = [end[0] - start[0], end[1] - start[1]];
-  const denominator = crossPoint2D(rayDirection, segment);
-
-  if (Math.abs(denominator) <= EPSILON) {
-    return null;
-  }
-
-  const t = crossPoint2D(start, segment) / denominator;
-  const u = crossPoint2D(start, rayDirection) / denominator;
-
-  if (t < EPSILON || u < -EPSILON || u > 1 + EPSILON) {
-    return null;
-  }
-
-  return roundPoint2D([rayDirection[0] * t, rayDirection[1] * t]);
 }
 
 function createDefaultVerticalPolyline(): ViewMorphClosedPolyline {
@@ -821,16 +840,6 @@ function blend2DPoints(
   return roundPoint2D([
     left[0] * leftWeight + right[0] * rightWeight,
     left[1] * leftWeight + right[1] * rightWeight,
-  ]);
-}
-
-function rotatePoint2D(point: ViewMorphPoint2D, angleRad: number): ViewMorphPoint2D {
-  const cos = Math.cos(angleRad);
-  const sin = Math.sin(angleRad);
-
-  return roundPoint2D([
-    point[0] * cos - point[1] * sin,
-    point[0] * sin + point[1] * cos,
   ]);
 }
 

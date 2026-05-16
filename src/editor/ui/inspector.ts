@@ -38,6 +38,11 @@ export type TransformInputOptions = {
   ) => void;
 };
 
+export type Vector3InputOptions = {
+  ariaPrefix?: string;
+  onApply: (input: HTMLInputElement, axisIndex: number) => void;
+};
+
 export function appendInspectorRow(
   elements: EditorElements,
   label: string,
@@ -271,6 +276,53 @@ export function appendTransformInspectorRow(
 
       if (event.key === "Escape") {
         input.value = input.dataset.previousValue ?? formatTransformValue(value);
+        input.blur();
+      }
+    });
+
+    editor.append(input);
+  });
+
+  description.append(editor);
+  elements.inspectorFields.append(term, description);
+}
+
+export function appendVector3InspectorRow(
+  elements: EditorElements,
+  label: string,
+  value: [number, number, number],
+  options: Vector3InputOptions,
+): void {
+  const term = document.createElement("dt");
+  const description = document.createElement("dd");
+  const editor = document.createElement("div");
+
+  term.textContent = label;
+  editor.className = "transform-input-row";
+
+  value.forEach((axisValue, axisIndex) => {
+    const input = document.createElement("input");
+    const axisName = ["X", "Y", "Z"][axisIndex] ?? "?";
+    const ariaPrefix = options.ariaPrefix ?? label;
+
+    input.className = "transform-number-input";
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.ariaLabel = `${ariaPrefix} ${axisName}`;
+    input.value = formatTransformValue(axisValue);
+    input.addEventListener("focus", () => {
+      input.dataset.previousValue = input.value;
+    });
+    input.addEventListener("blur", () => {
+      options.onApply(input, axisIndex);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        input.blur();
+      }
+
+      if (event.key === "Escape") {
+        input.value = input.dataset.previousValue ?? formatTransformValue(axisValue);
         input.blur();
       }
     });

@@ -146,6 +146,7 @@ import {
   appendInspectorRow as appendInspectorRowForUi,
   appendPathEditInspectorInputRow as appendPathEditInspectorInputRowForUi,
   appendTransformInspectorRow as appendTransformInspectorRowForUi,
+  appendVector3InspectorRow as appendVector3InspectorRowForUi,
   createPathEdit3DPointInputRow as createPathEdit3DPointInputRowForUi,
   createPathEditPointInputRow as createPathEditPointInputRowForUi,
 } from "./ui/inspector";
@@ -3026,8 +3027,8 @@ function renderInspector(): void {
   appendInspectorRow("Project", model.project.name);
   appendInspectorRow("Project ID", model.project.id);
   appendInspectorRow("Projection", model.camera.projection);
-  appendInspectorRow("Camera Pos", model.camera.position.join(", "));
-  appendInspectorRow("Camera Target", model.camera.target.join(", "));
+  appendCameraVectorInspectorRow("Camera Pos", "position", model.camera.position);
+  appendCameraVectorInspectorRow("Camera Target", "target", model.camera.target);
 
   if (editorState.editorMode === "asset" || editorState.editorMode === "path") {
     renderAssetModeInspector();
@@ -3204,6 +3205,54 @@ function appendInspectorActionRow(label: string, onClick: () => void): void {
 
 function appendInspectorRow(label: string, value: string): void {
   appendInspectorRowForUi(elements, label, value);
+}
+
+function appendCameraVectorInspectorRow(
+  label: string,
+  property: "position" | "target",
+  value: Vector3Tuple,
+): void {
+  appendVector3InspectorRowForUi(elements, label, value, {
+    onApply: (input, axisIndex) => {
+      applyCameraVectorInput(input, property, axisIndex);
+    },
+  });
+}
+
+function applyCameraVectorInput(
+  input: HTMLInputElement,
+  property: "position" | "target",
+  axisIndex: number,
+): void {
+  const snapshot = threeViewport.getCameraSnapshot();
+  const parsedValue = Number(input.value.trim());
+
+  if (!Number.isFinite(parsedValue)) {
+    restoreCameraVectorInput(input, snapshot[property], axisIndex);
+    return;
+  }
+
+  const nextValue = [...snapshot[property]] as Vector3Tuple;
+  nextValue[axisIndex] = roundTransformValue(parsedValue);
+
+  const nextSnapshot = {
+    ...snapshot,
+    [property]: nextValue,
+  };
+
+  threeViewport.applyCameraSnapshot(nextSnapshot);
+  renderCache.markCameraDirty();
+  renderInspector();
+  exposeEditorDebugHooks();
+}
+
+function restoreCameraVectorInput(
+  input: HTMLInputElement,
+  value: Vector3Tuple,
+  axisIndex: number,
+): void {
+  input.value =
+    input.dataset.previousValue ?? formatTransformValue(value[axisIndex] ?? 0);
 }
 
 function applyPathEdit3DPointInput(

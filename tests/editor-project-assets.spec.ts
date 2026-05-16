@@ -925,6 +925,20 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   expect(loadedSceneState?.camera.near).toBe(0.05);
   expect(loadedSceneState?.camera.far).toBe(120);
 
+  await page.getByLabel("Camera Pos X").fill("7.25");
+  await page.getByLabel("Camera Pos X").blur();
+  await page.getByLabel("Camera Target Y").fill("not-a-number");
+  await page.getByLabel("Camera Target Y").blur();
+
+  const editedCameraState = await page.evaluate(() => {
+    const debug = window.__vectorEditorDebug;
+    return debug?.getExperimentScene().camera ?? null;
+  });
+
+  expect(editedCameraState?.position[0]).toBe(7.25);
+  await expect(page.getByLabel("Camera Pos X")).toHaveValue("7.25");
+  await expect(page.getByLabel("Camera Target Y")).toHaveValue("0.8");
+
   await page.screenshot({
     path: "test-results/editor-import.png",
     fullPage: true,
@@ -1128,7 +1142,10 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
     8,
   );
   expect(assetState.asset?.bezierPath.closed).toBe(true);
-  expect(assetState.asset?.bezierPath.segments.length).toBe(8);
+  expect(assetState.asset?.bezierPath.segments.length).toBe(
+    (assetState.asset?.viewMorphProfile?.verticalPlanes[0]?.path.points.length ?? 0) +
+      (assetState.asset?.viewMorphProfile?.horizontalPlane.path.points.length ?? 0),
+  );
 
   const vectorCanvas = page.locator("#vector-canvas");
   await expect.poll(() => countWarmYellowPixels(vectorCanvas)).toBeGreaterThan(50);

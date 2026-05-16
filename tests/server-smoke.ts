@@ -141,7 +141,11 @@ try {
     8,
   );
   assert.equal(viewMorphAsset.bezierPath.closed, true);
-  assert.equal(viewMorphAsset.bezierPath.segments.length, 8);
+  assert.equal(
+    viewMorphAsset.bezierPath.segments.length,
+    (viewMorphAsset.viewMorphProfile?.verticalPlanes[0]?.path.points.length ?? 0) +
+      (viewMorphAsset.viewMorphProfile?.horizontalPlane.path.points.length ?? 0),
+  );
   assert.deepEqual(
     evaluateViewMorphProfileToBezierPath(viewMorphAsset.viewMorphProfile!, [
       0,

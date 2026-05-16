@@ -114,6 +114,8 @@ function drawBillboardNode(
       getCameraViewDirectionInDrawableLocalSpace(drawable, rendererContext),
       {
         horizontalRotationReferenceLocal:
+          getCameraScreenRightInDrawableLocalSpace(drawable, rendererContext),
+        screenUpReferenceLocal:
           getCameraScreenUpInDrawableLocalSpace(drawable, rendererContext),
       },
     );
@@ -179,9 +181,22 @@ function getCameraViewDirectionInDrawableLocalSpace(
   rendererContext.camera.getWorldDirection(worldDirection);
   worldDirection.negate().normalize();
 
-  const inverseLocalToWorld = getBillboardWorldMatrix(drawable, rendererContext).invert();
-  const inverseRotation = new Matrix4().extractRotation(inverseLocalToWorld);
+  const inverseRotation = getDrawableWorldInverseRotation(drawable);
   const localDirection = worldDirection.applyMatrix4(inverseRotation).normalize();
+
+  return [localDirection.x, localDirection.y, localDirection.z];
+}
+
+function getCameraScreenRightInDrawableLocalSpace(
+  drawable: ProjectedBillboard,
+  rendererContext: BillboardRendererContext,
+): ViewMorphPoint3D {
+  const worldRight = new Vector3().setFromMatrixColumn(
+    rendererContext.camera.matrixWorld,
+    0,
+  );
+  const inverseRotation = getDrawableWorldInverseRotation(drawable);
+  const localDirection = worldRight.applyMatrix4(inverseRotation).normalize();
 
   return [localDirection.x, localDirection.y, localDirection.z];
 }
@@ -194,11 +209,16 @@ function getCameraScreenUpInDrawableLocalSpace(
     rendererContext.camera.matrixWorld,
     1,
   );
-  const inverseLocalToWorld = getBillboardWorldMatrix(drawable, rendererContext).invert();
-  const inverseRotation = new Matrix4().extractRotation(inverseLocalToWorld);
+  const inverseRotation = getDrawableWorldInverseRotation(drawable);
   const localDirection = worldUp.applyMatrix4(inverseRotation).normalize();
 
   return [localDirection.x, localDirection.y, localDirection.z];
+}
+
+function getDrawableWorldInverseRotation(drawable: ProjectedBillboard): Matrix4 {
+  return new Matrix4()
+    .extractRotation(transformToMatrix(drawable.transform))
+    .invert();
 }
 
 function drawBezierCurve3DBillboard(
