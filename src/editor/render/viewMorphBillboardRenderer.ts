@@ -25,6 +25,15 @@ export type ViewMorphBillboardProjector = {
   pathToScreen: (point: ViewMorphPoint2D) => [number, number] | null;
 };
 
+export type ViewMorphBillboardTransformAdapter = {
+  origin: Vector3Tuple;
+  localToWorldMatrix: Matrix4;
+  getCameraEvaluationInput: (camera: Camera) => ViewMorphCameraEvaluationInput;
+  createProjector: (
+    input: Omit<ViewMorphBillboardProjectorInput, "origin">,
+  ) => ViewMorphBillboardProjector;
+};
+
 export type ViewMorphBillboardProjectorInput = {
   camera: Camera;
   origin: Vector3Tuple;
@@ -43,12 +52,44 @@ export type DrawViewMorphBillboardPathInput = ViewMorphBillboardProjectorInput &
   localToWorldMatrix?: Matrix4;
 };
 
+export type ViewMorphBillboardTransformAdapterInput = {
+  origin?: Vector3Tuple;
+  localToWorldMatrix?: Matrix4;
+  rotationRad?: number;
+  scale?: [number, number];
+  unitsPerPathUnit?: number;
+};
+
+export function createViewMorphBillboardTransformAdapter(
+  input: ViewMorphBillboardTransformAdapterInput = {},
+): ViewMorphBillboardTransformAdapter {
+  const localToWorldMatrix = input.localToWorldMatrix?.clone() ?? new Matrix4();
+  const origin = input.origin ?? getMatrixOrigin(localToWorldMatrix);
+
+  return {
+    origin,
+    localToWorldMatrix,
+    getCameraEvaluationInput: (camera) =>
+      getViewMorphCameraEvaluationInput(camera, localToWorldMatrix),
+    createProjector: (projectorInput) =>
+      createViewMorphBillboardProjector({
+        ...projectorInput,
+        origin,
+        unitsPerPathUnit: input.unitsPerPathUnit ?? projectorInput.unitsPerPathUnit,
+        rotationRad: input.rotationRad ?? projectorInput.rotationRad,
+        scale: input.scale ?? projectorInput.scale,
+      }),
+  };
+}
+
 export function evaluateViewMorphProfileForCamera(
   profile: ViewMorphProfile,
   camera: Camera,
   localToWorldMatrix = new Matrix4(),
 ): StructuredBezierPath {
-  const input = getViewMorphCameraEvaluationInput(camera, localToWorldMatrix);
+  const input = createViewMorphBillboardTransformAdapter({
+    localToWorldMatrix,
+  }).getCameraEvaluationInput(camera);
 
   return evaluateViewMorphProfileToBezierPath(profile, input.viewDirectionLocal, {
     horizontalRotationReferenceLocal: input.horizontalRotationReferenceLocal,
@@ -113,12 +154,27 @@ export function drawViewMorphBillboardPath(
   context: CanvasRenderingContext2D,
   input: DrawViewMorphBillboardPathInput,
 ): StructuredBezierPath {
-  const evaluatedPath = evaluateViewMorphProfileForCamera(
+  const adapter = createViewMorphBillboardTransformAdapter({
+    origin: input.origin,
+    localToWorldMatrix: input.localToWorldMatrix,
+    rotationRad: input.rotationRad,
+    scale: input.scale,
+    unitsPerPathUnit: input.unitsPerPathUnit,
+  });
+  const evaluationInput = adapter.getCameraEvaluationInput(input.camera);
+  const evaluatedPath = evaluateViewMorphProfileToBezierPath(
     input.profile,
-    input.camera,
-    input.localToWorldMatrix,
+    evaluationInput.viewDirectionLocal,
+    {
+      horizontalRotationReferenceLocal:
+        evaluationInput.horizontalRotationReferenceLocal,
+      screenUpReferenceLocal: evaluationInput.screenUpReferenceLocal,
+    },
   );
-  const projector = createViewMorphBillboardProjector(input);
+  const projector = adapter.createProjector({
+    camera: input.camera,
+    projectWorldPosition: input.projectWorldPosition,
+  });
 
   context.save();
   context.fillStyle = input.fillStyle;
@@ -223,4 +279,8 @@ function vectorToPoint3D(vector: Vector3): ViewMorphPoint3D {
 
 function vectorToTuple(vector: Vector3): Vector3Tuple {
   return [vector.x, vector.y, vector.z];
+}
+
+function getMatrixOrigin(matrix: Matrix4): Vector3Tuple {
+  return vectorToTuple(new Vector3().setFromMatrixPosition(matrix));
 }
