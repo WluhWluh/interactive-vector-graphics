@@ -38,8 +38,8 @@ export function getPathControl2DStyle(
       ? PATH_CONTROL_COLORS.hoverOutline
       : PATH_CONTROL_COLORS.outline,
     lineWidth: state.hovered ? 3 : 2,
-    radius: emphasized ? 6 : 5,
-    size: emphasized ? 10 : 8,
+    radius: emphasized ? 9 : 7.5,
+    size: emphasized ? 15 : 12,
   };
 }
 

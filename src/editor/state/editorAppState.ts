@@ -68,6 +68,7 @@ export type EditorAppState = {
   pathEditSession: SourcePathEditSession | null;
   pathEdit3DSession: SourcePathEdit3DSession | null;
   viewMorphProfileEditSession: ViewMorphProfileEditSession | null;
+  viewMorphProfileShowFinalPath: boolean;
   pathEditDragState: PathEditDragState | null;
   pathEditHoveredControl: PathEditDragState | null;
   pathEdit3DHoveredControl: PathEditDragState | null;
@@ -131,6 +132,7 @@ export type PathEditDomainState = Pick<
   | "pathEditSession"
   | "pathEdit3DSession"
   | "viewMorphProfileEditSession"
+  | "viewMorphProfileShowFinalPath"
   | "pathEditDragState"
   | "pathEditHoveredControl"
   | "pathEdit3DHoveredControl"
@@ -194,6 +196,7 @@ export function createInitialEditorAppState(input: {
     pathEditSession: null,
     pathEdit3DSession: null,
     viewMorphProfileEditSession: null,
+    viewMorphProfileShowFinalPath: true,
     pathEditDragState: null,
     pathEditHoveredControl: null,
     pathEdit3DHoveredControl: null,
@@ -286,6 +289,7 @@ export function cloneEditorAppState(state: EditorAppState): EditorAppState {
     viewMorphProfileEditSession: state.viewMorphProfileEditSession
       ? cloneViewMorphProfileEditSession(state.viewMorphProfileEditSession)
       : null,
+    viewMorphProfileShowFinalPath: state.viewMorphProfileShowFinalPath,
     pathEditDragState: clonePathEditDragState(state.pathEditDragState),
     pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
     pathEdit3DHoveredControl: clonePathEditDragState(
@@ -375,6 +379,7 @@ function clonePathEditDomainState(state: EditorAppState): PathEditDomainState {
     viewMorphProfileEditSession: state.viewMorphProfileEditSession
       ? cloneViewMorphProfileEditSession(state.viewMorphProfileEditSession)
       : null,
+    viewMorphProfileShowFinalPath: state.viewMorphProfileShowFinalPath,
     pathEditDragState: clonePathEditDragState(state.pathEditDragState),
     pathEditHoveredControl: clonePathEditDragState(state.pathEditHoveredControl),
     pathEdit3DHoveredControl: clonePathEditDragState(

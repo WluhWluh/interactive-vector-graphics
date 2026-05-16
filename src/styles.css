@@ -713,15 +713,22 @@ body[data-path-edit-active="true"] #paper-canvas {
 
 body[data-view-morph-profile-edit-active="true"] #paper-canvas {
   cursor: crosshair;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 body[data-path-edit-active="true"] #three-background-canvas,
-body[data-path-edit-active="true"] #three-overlay-canvas,
-body[data-view-morph-profile-edit-active="true"] #three-background-canvas,
-body[data-view-morph-profile-edit-active="true"] #three-overlay-canvas {
+body[data-path-edit-active="true"] #three-overlay-canvas {
   opacity: 0;
   pointer-events: none;
+}
+
+body[data-view-morph-profile-edit-active="true"] #three-overlay-canvas {
+  cursor: grab;
+  pointer-events: auto;
+}
+
+body[data-view-morph-profile-edit-active="true"] #three-overlay-canvas:active {
+  cursor: grabbing;
 }
 
 body[data-path-edit-3d-active="true"] #paper-canvas {

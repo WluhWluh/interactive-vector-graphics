@@ -538,6 +538,37 @@ export class ThreeEditorViewport {
     };
   }
 
+  getWorldRayFromScreenPoint(
+    point: { x: number; y: number },
+    size: StageSize,
+  ): { origin: Vector3Tuple; direction: Vector3Tuple } | null {
+    const ndc = new Vector2(
+      (point.x / Math.max(size.cssWidth, 1)) * 2 - 1,
+      -(point.y / Math.max(size.cssHeight, 1)) * 2 + 1,
+    );
+    const origin = new Vector3();
+    const direction = new Vector3();
+
+    if (this.projection === "perspective") {
+      origin.copy(this.activeCamera.position);
+      direction.set(ndc.x, ndc.y, 0.5).unproject(this.activeCamera).sub(origin);
+    } else {
+      origin.set(ndc.x, ndc.y, -1).unproject(this.activeCamera);
+      this.activeCamera.getWorldDirection(direction);
+    }
+
+    if (direction.lengthSq() < 0.000001) {
+      return null;
+    }
+
+    direction.normalize();
+
+    return {
+      origin: vectorToTuple(origin),
+      direction: vectorToTuple(direction),
+    };
+  }
+
   getDistanceScale(worldPosition: Vector3, baseWorldSize: number): number {
     if (this.projection === "orthographic") {
       return this.orthographicCamera.zoom * 72 * baseWorldSize;

@@ -31,8 +31,14 @@ import {
 } from "../core/assets/structuredBezierPath3d";
 import {
   smoothViewMorphPolylineToBezierPath,
+  evaluateViewMorphProfileToBezierPath,
+  type ViewMorphClosedPolyline,
+  type ViewMorphHorizontalPlane,
+  type ViewMorphPoint2D,
+  type ViewMorphPoint3D,
+  type ViewMorphProfile,
+  type ViewMorphVerticalPlane,
 } from "../core/assets/viewMorphProfile";
-import { structuredBezierToPathD } from "../core/assets/structuredBezierPath";
 import {
   createPrefab,
   convertAssetTo3DCurve,
@@ -95,6 +101,12 @@ import {
   type TransformSnapshot,
 } from "./tools/prefabTransform";
 import {
+  billboardScreenPointToPath,
+  createBillboardScreenTransform,
+  createPlanePathViewportAdapter,
+  pathPointToBillboardScreen,
+} from "./tools/pathPlaneAdapter";
+import {
   clonePrefabAnimation,
   clonePrefabAnimationClip,
   clonePrefabAnimationTrack,
@@ -116,6 +128,7 @@ import {
   buildPathEditPathD,
   getAssetKindListLabel,
 } from "./render/primitiveAssetDrawing";
+import { getPrimitiveGhostColor } from "./render/ghostColor";
 import {
   drawBillboards as drawBillboardsWithRenderer,
   type BillboardRendererContext,
@@ -317,14 +330,15 @@ import {
   findNearestViewMorphProfileEditControl,
   getSelectedViewMorphProfilePoint,
   getViewMorphProfileEditPlaneRefs,
-  getViewMorphProfileEditPath,
   getViewMorphProfileEditScreenControls,
   selectViewMorphProfileEditControl,
   setViewMorphProfileEditPlane,
   setViewMorphProfilePointAxisValue,
   toViewMorphProfileEditSelection,
   viewMorphProfileEditSelectionsEqual,
+  type ViewMorphEditPlaneRef,
   type ViewMorphProfileEditControl,
+  type ViewMorphProfileEditSession,
   type ViewMorphProfileEditViewportAdapter,
 } from "./tools/viewMorphProfileEditCore";
 import {
@@ -357,10 +371,15 @@ import {
 } from "./workflows/projectWorkspaceWorkflow";
 
 type SceneCreateSource = "empty" | "current";
+type ViewMorphProfilePlane = ViewMorphVerticalPlane | ViewMorphHorizontalPlane;
 const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
-const PATH_EDIT_HIT_RADIUS = 10;
+const PATH_EDIT_HIT_RADIUS = 15;
+const VIEW_MORPH_PROFILE_WORLD_SIZE = 1.6;
+const VIEW_MORPH_PROFILE_PATH_RADIUS = 50;
+const VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT =
+  VIEW_MORPH_PROFILE_WORLD_SIZE / (VIEW_MORPH_PROFILE_PATH_RADIUS * 2);
 
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
@@ -813,6 +832,9 @@ function startPathEditSession(asset: PrimitiveSvgAsset): void {
   editorState.viewMorphProfileEditDragState =
     nextPathEditState.viewMorphProfileEditDragState;
   editorState.viewMorphProfileEditHoveredControl = null;
+  if (nextPathEditState.mode === "viewMorphProfile") {
+    editorState.viewMorphProfileShowFinalPath = false;
+  }
 
   if (nextPathEditState.mode === "3d") {
     threeViewport.setTransformMode("translate");
@@ -2956,10 +2978,22 @@ function renderViewMorphProfileEditPanel(): void {
     button.className = "editor-button";
     button.textContent = plane.name;
     button.dataset.selected = String(
-      session.selectedPlane.kind === plane.kind &&
+      !editorState.viewMorphProfileShowFinalPath &&
+        session.selectedPlane.kind === plane.kind &&
         session.selectedPlane.planeId === plane.planeId,
     );
     button.addEventListener("click", () => {
+      const alreadySelected =
+        !editorState.viewMorphProfileShowFinalPath &&
+        session.selectedPlane.kind === plane.kind &&
+        session.selectedPlane.planeId === plane.planeId;
+
+      if (alreadySelected) {
+        focusCameraOnViewMorphProfilePlane(session, plane);
+        return;
+      }
+
+      editorState.viewMorphProfileShowFinalPath = false;
       setViewMorphProfileEditPlane(session, plane);
       editorState.viewMorphProfileEditDragState = null;
       editorState.viewMorphProfileEditHoveredControl = null;
@@ -2972,6 +3006,34 @@ function renderViewMorphProfileEditPanel(): void {
   }
 
   elements.pathEditFields.append(planeRow);
+
+  const finalPathRow = document.createElement("div");
+  finalPathRow.className = "path-edit-point-row";
+  const finalPathButton = document.createElement("button");
+  finalPathButton.type = "button";
+  finalPathButton.className = "editor-button";
+  finalPathButton.textContent = "Final Path";
+  finalPathButton.dataset.selected = String(
+    editorState.viewMorphProfileShowFinalPath,
+  );
+  finalPathButton.addEventListener("click", () => {
+    editorState.viewMorphProfileShowFinalPath =
+      !editorState.viewMorphProfileShowFinalPath;
+
+    if (editorState.viewMorphProfileShowFinalPath) {
+      session.selected = null;
+      editorState.viewMorphProfileEditDragState = null;
+      editorState.viewMorphProfileEditHoveredControl = null;
+    }
+
+    renderCache.markVectorDirty();
+    renderCache.markPaperDirty();
+    renderSourcePathEditPanel();
+    renderEditorShell();
+    exposeEditorDebugHooks();
+  });
+  finalPathRow.append(finalPathButton);
+  elements.pathEditFields.append(finalPathRow);
 
   const selectedPoint = getSelectedViewMorphProfilePoint(session);
 
@@ -3541,35 +3603,27 @@ function renderPathEditFrame(): void {
   threeViewport.clearCurve3DControls();
 
   if (editorState.viewMorphProfileEditSession) {
+    threeViewport.render(stage.size);
+
     if (!viewMorphAsset || viewMorphAsset.assetKind !== "viewMorphProfile") {
       drawCenteredStatus(vectorContext, stage.size, "View morph profile asset is missing");
       return;
     }
 
-    const editPath = getViewMorphProfileEditPath(
-      editorState.viewMorphProfileEditSession.draft,
-      editorState.viewMorphProfileEditSession.selectedPlane,
-    );
-    const previewBezierPath = smoothViewMorphPolylineToBezierPath(
-      editPath ?? viewMorphAsset.viewMorphProfile.horizontalPlane.path,
-    );
-    const previewPathD = structuredBezierToPathD(previewBezierPath);
-    const previewAsset = {
-      ...viewMorphAsset,
-      pathD: previewPathD,
-      path: new Path2D(previewPathD),
-      bezierPath: previewBezierPath,
-      viewMorphProfile: editorState.viewMorphProfileEditSession.draft,
-    };
-    const transform = getSourcePathEditViewTransform(previewAsset);
-
-    drawPathEditPreview(vectorContext, previewAsset, transform);
-    drawViewMorphProfileEditControls(
-      paperContext,
+    drawViewMorphProfile3DEditPreview(
+      vectorContext,
+      viewMorphAsset,
       editorState.viewMorphProfileEditSession,
-      getViewMorphProfileEditAdapter(previewAsset, transform),
-      editorState.viewMorphProfileEditHoveredControl,
     );
+
+    if (!editorState.viewMorphProfileShowFinalPath) {
+      drawViewMorphProfileEditControls(
+        paperContext,
+        editorState.viewMorphProfileEditSession,
+        getViewMorphProfileEditAdapter(viewMorphAsset),
+        editorState.viewMorphProfileEditHoveredControl,
+      );
+    }
     return;
   }
 
@@ -3687,6 +3741,402 @@ function projectCurve3DWorldPointToScreen(
   return projected ? [projected.x, projected.y] : null;
 }
 
+function drawViewMorphProfile3DEditPreview(
+  context: CanvasRenderingContext2D,
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "viewMorphProfile" }>,
+  session: ViewMorphProfileEditSession,
+): void {
+  const planes = getViewMorphProfilePlanes(session.draft);
+  const selectedPlaneKey = getViewMorphProfilePlaneKey(session.selectedPlane);
+  const ghostColor = getPrimitiveGhostColor(asset);
+
+  if (editorState.viewMorphProfileShowFinalPath) {
+    drawViewMorphProfileFinalPath(context, asset, session);
+    for (const plane of planes) {
+      drawViewMorphProfilePlanePath(context, plane, ghostColor, 0.28);
+    }
+    return;
+  }
+
+  const selectedPlane = planes.find(
+    (candidate) => getViewMorphProfilePlaneKey(candidate.ref) === selectedPlaneKey,
+  );
+
+  if (selectedPlane) {
+    drawViewMorphProfilePlanePath(context, selectedPlane, asset.fill, 1);
+  }
+
+  for (const plane of planes.filter(
+    (candidate) => getViewMorphProfilePlaneKey(candidate.ref) !== selectedPlaneKey,
+  )) {
+    drawViewMorphProfilePlanePath(context, plane, ghostColor, 0.28);
+  }
+}
+
+function drawViewMorphProfileFinalPath(
+  context: CanvasRenderingContext2D,
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "viewMorphProfile" }>,
+  session: ViewMorphProfileEditSession,
+): void {
+  const evaluatedPath = evaluateViewMorphProfileToBezierPath(
+    session.draft,
+    getCameraViewDirectionInViewMorphLocalSpace(),
+    {
+      horizontalRotationReferenceLocal: getCameraScreenRightInViewMorphLocalSpace(),
+      screenUpReferenceLocal: getCameraScreenUpInViewMorphLocalSpace(),
+    },
+  );
+
+  context.save();
+  context.fillStyle = asset.fill;
+  context.beginPath();
+
+  for (const [index, segment] of evaluatedPath.segments.entries()) {
+    const point = viewMorphBillboardPointToScreen(segment.anchor);
+
+    if (!point) {
+      continue;
+    }
+
+    if (index === 0) {
+      context.moveTo(point[0], point[1]);
+      continue;
+    }
+
+    const previousSegment = evaluatedPath.segments[index - 1];
+
+    if (!previousSegment) {
+      context.lineTo(point[0], point[1]);
+      continue;
+    }
+
+    const cp1 = viewMorphBillboardPointToScreen([
+      previousSegment.anchor[0] + previousSegment.handleOut[0],
+      previousSegment.anchor[1] + previousSegment.handleOut[1],
+    ]);
+    const cp2 = viewMorphBillboardPointToScreen([
+      segment.anchor[0] + segment.handleIn[0],
+      segment.anchor[1] + segment.handleIn[1],
+    ]);
+
+    if (cp1 && cp2) {
+      context.bezierCurveTo(cp1[0], cp1[1], cp2[0], cp2[1], point[0], point[1]);
+    } else {
+      context.lineTo(point[0], point[1]);
+    }
+  }
+
+  const firstSegment = evaluatedPath.segments[0];
+  const lastSegment = evaluatedPath.segments.at(-1);
+
+  if (firstSegment && lastSegment) {
+    const firstPoint = viewMorphBillboardPointToScreen(firstSegment.anchor);
+    const cp1 = viewMorphBillboardPointToScreen([
+      lastSegment.anchor[0] + lastSegment.handleOut[0],
+      lastSegment.anchor[1] + lastSegment.handleOut[1],
+    ]);
+    const cp2 = viewMorphBillboardPointToScreen([
+      firstSegment.anchor[0] + firstSegment.handleIn[0],
+      firstSegment.anchor[1] + firstSegment.handleIn[1],
+    ]);
+
+    if (firstPoint && cp1 && cp2) {
+      context.bezierCurveTo(
+        cp1[0],
+        cp1[1],
+        cp2[0],
+        cp2[1],
+        firstPoint[0],
+        firstPoint[1],
+      );
+    }
+  }
+
+  context.closePath();
+  context.fill(asset.fillRule);
+  context.restore();
+}
+
+function drawViewMorphProfilePlanePath(
+  context: CanvasRenderingContext2D,
+  plane: {
+    plane: ViewMorphProfilePlane;
+    path: ViewMorphClosedPolyline;
+  },
+  fillStyle: string,
+  opacity: number,
+): void {
+  const bezierPath = smoothViewMorphPolylineToBezierPath(plane.path);
+
+  context.save();
+  context.globalAlpha *= opacity;
+  context.fillStyle = fillStyle;
+  context.beginPath();
+
+  for (const [index, segment] of bezierPath.segments.entries()) {
+    const anchor = viewMorphPlanePointToScreen(plane.plane, segment.anchor);
+
+    if (!anchor) {
+      continue;
+    }
+
+    if (index === 0) {
+      context.moveTo(anchor[0], anchor[1]);
+      continue;
+    }
+
+    const previousSegment = bezierPath.segments[index - 1];
+
+    if (!previousSegment) {
+      context.lineTo(anchor[0], anchor[1]);
+      continue;
+    }
+
+    const previousAnchor = viewMorphPlanePointToScreen(
+      plane.plane,
+      previousSegment.anchor,
+    );
+    const cp1 = viewMorphPlanePointToScreen(plane.plane, [
+      previousSegment.anchor[0] + previousSegment.handleOut[0],
+      previousSegment.anchor[1] + previousSegment.handleOut[1],
+    ]);
+    const cp2 = viewMorphPlanePointToScreen(plane.plane, [
+      segment.anchor[0] + segment.handleIn[0],
+      segment.anchor[1] + segment.handleIn[1],
+    ]);
+
+    if (previousAnchor && cp1 && cp2) {
+      context.bezierCurveTo(cp1[0], cp1[1], cp2[0], cp2[1], anchor[0], anchor[1]);
+    } else {
+      context.lineTo(anchor[0], anchor[1]);
+    }
+  }
+
+  const firstSegment = bezierPath.segments[0];
+  const lastSegment = bezierPath.segments.at(-1);
+
+  if (firstSegment && lastSegment) {
+    const firstAnchor = viewMorphPlanePointToScreen(plane.plane, firstSegment.anchor);
+    const cp1 = viewMorphPlanePointToScreen(plane.plane, [
+      lastSegment.anchor[0] + lastSegment.handleOut[0],
+      lastSegment.anchor[1] + lastSegment.handleOut[1],
+    ]);
+    const cp2 = viewMorphPlanePointToScreen(plane.plane, [
+      firstSegment.anchor[0] + firstSegment.handleIn[0],
+      firstSegment.anchor[1] + firstSegment.handleIn[1],
+    ]);
+
+    if (firstAnchor && cp1 && cp2) {
+      context.bezierCurveTo(
+        cp1[0],
+        cp1[1],
+        cp2[0],
+        cp2[1],
+        firstAnchor[0],
+        firstAnchor[1],
+      );
+    }
+  }
+
+  context.closePath();
+  context.fill();
+  context.restore();
+}
+
+function viewMorphPlanePointToScreen(
+  plane: ViewMorphProfilePlane,
+  point: ViewMorphPoint2D,
+): [number, number] | null {
+  return projectCurve3DWorldPointToScreen(viewMorphPlanePointToWorld(plane, point));
+}
+
+function viewMorphBillboardPointToScreen(point: ViewMorphPoint2D): [number, number] | null {
+  const target = getViewMorphProfileWorldOrigin();
+  const right = getCameraScreenRightWorldVector();
+  const up = getCameraScreenUpWorldVector();
+  const worldPoint = target
+    .add(right.multiplyScalar(point[0] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT))
+    .add(up.multiplyScalar(point[1] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT));
+
+  return projectCurve3DWorldPointToScreen(vectorToTuple(worldPoint));
+}
+
+function viewMorphPlanePointToWorld(
+  plane: ViewMorphProfilePlane,
+  point: ViewMorphPoint2D,
+): Vector3Tuple {
+  return vectorToTuple(
+    new Vector3(...viewMorphPlanePointToLocal3D(plane, point)).applyMatrix4(
+      getViewMorphProfileLocalToWorldUnitMatrix(),
+    ),
+  );
+}
+
+function viewMorphPlanePointToLocal3D(
+  plane: ViewMorphProfilePlane,
+  point: ViewMorphPoint2D,
+): Vector3Tuple {
+  const uAxis = plane.tangentU;
+  const vAxis = getViewMorphProfilePlaneVAxis(plane);
+
+  return [
+    (uAxis[0] * point[0] + vAxis[0] * point[1]) *
+      VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
+    (uAxis[1] * point[0] - vAxis[1] * point[1]) *
+      VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
+    (uAxis[2] * point[0] + vAxis[2] * point[1]) *
+      VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
+  ];
+}
+
+function createViewMorphProfilePlaneAdapter(
+  asset: Extract<PrimitiveSvgAsset, { assetKind: "viewMorphProfile" }>,
+  ref: ViewMorphEditPlaneRef,
+): ViewMorphProfileEditViewportAdapter | null {
+  const plane = getViewMorphProfilePlane(asset.viewMorphProfile, ref);
+
+  if (!plane) {
+    return null;
+  }
+
+  const matrix = getViewMorphProfileLocalToWorldUnitMatrix();
+  const origin = vectorToTuple(new Vector3(0, 0, 0).applyMatrix4(matrix));
+  const uAxis = vectorToTuple(
+    new Vector3(...plane.tangentU).transformDirection(matrix),
+  );
+  const vAxis = vectorToTuple(
+    new Vector3(...getViewMorphProfilePlaneVAxis(plane))
+      .multiplyScalar(planeIsVertical(plane) ? -1 : 1)
+      .transformDirection(matrix),
+  );
+
+  return createPlanePathViewportAdapter({
+    origin,
+    uAxis,
+    vAxis,
+    unitsPerPathUnit: VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
+    projectWorldPosition: (position) =>
+      threeViewport.projectWorldPosition(tupleToVector(position), stage.size),
+    getWorldRayFromScreenPoint: (point) =>
+      threeViewport.getWorldRayFromScreenPoint(
+        { x: point[0], y: point[1] },
+        stage.size,
+      ),
+  });
+}
+
+function getViewMorphProfileLocalToWorldUnitMatrix(): Matrix4 {
+  return new Matrix4();
+}
+
+function getViewMorphProfilePlanes(profile: ViewMorphProfile): Array<{
+  ref: ViewMorphEditPlaneRef;
+  plane: ViewMorphProfilePlane;
+  path: ViewMorphClosedPolyline;
+}> {
+  return [
+    ...profile.verticalPlanes.map((plane) => ({
+      ref: { kind: "vertical" as const, planeId: plane.id },
+      plane,
+      path: plane.path,
+    })),
+    {
+      ref: { kind: "horizontal" as const, planeId: profile.horizontalPlane.id },
+      plane: profile.horizontalPlane,
+      path: profile.horizontalPlane.path,
+    },
+  ];
+}
+
+function getViewMorphProfilePlane(
+  profile: ViewMorphProfile,
+  ref: ViewMorphEditPlaneRef,
+): ViewMorphProfilePlane | null {
+  return ref.kind === "horizontal"
+    ? profile.horizontalPlane.id === ref.planeId
+      ? profile.horizontalPlane
+      : null
+    : (profile.verticalPlanes.find((plane) => plane.id === ref.planeId) ?? null);
+}
+
+function getViewMorphProfilePlaneVAxis(
+  plane: ViewMorphProfilePlane,
+): ViewMorphPoint3D {
+  if ("tangentV" in plane) {
+    return plane.tangentV;
+  }
+
+  return [0, 1, 0];
+}
+
+function planeIsVertical(plane: ViewMorphProfilePlane): boolean {
+  return !("tangentV" in plane);
+}
+
+function getViewMorphProfilePlaneKey(ref: ViewMorphEditPlaneRef): string {
+  return `${ref.kind}:${ref.planeId}`;
+}
+
+function focusCameraOnViewMorphProfilePlane(
+  session: ViewMorphProfileEditSession,
+  ref: ViewMorphEditPlaneRef,
+): void {
+  const plane = getViewMorphProfilePlane(session.draft, ref);
+
+  if (!plane) {
+    return;
+  }
+
+  const snapshot = threeViewport.getCameraSnapshot();
+  const currentPosition = new Vector3(...snapshot.position);
+  const target = new Vector3(...snapshot.target);
+  const normal = new Vector3(...getViewMorphProfilePlaneNormal(plane)).normalize();
+  const currentDirectionFromTarget = currentPosition.clone().sub(target);
+  const side = currentDirectionFromTarget.dot(normal) < 0 ? -1 : 1;
+  const distance = Math.max(currentDirectionFromTarget.length(), 2.8);
+  const nextPosition = target.clone().add(normal.multiplyScalar(distance * side));
+
+  threeViewport.applyCameraSnapshot({
+    ...snapshot,
+    position: vectorToTuple(nextPosition),
+    target: vectorToTuple(target),
+  });
+  renderCache.markCameraDirty();
+  renderCache.markVectorDirty();
+  renderCache.markPaperDirty();
+  renderEditorShell();
+  exposeEditorDebugHooks();
+}
+
+function getViewMorphProfilePlaneNormal(
+  plane: ViewMorphProfilePlane,
+): ViewMorphPoint3D {
+  return plane.normal;
+}
+
+function getCameraViewDirectionInViewMorphLocalSpace(): ViewMorphPoint3D {
+  const direction = new Vector3();
+  threeViewport.activeCamera.getWorldDirection(direction);
+  direction.negate().normalize();
+  return vectorToTuple(direction);
+}
+
+function getCameraScreenRightInViewMorphLocalSpace(): ViewMorphPoint3D {
+  return vectorToTuple(getCameraScreenRightWorldVector());
+}
+
+function getCameraScreenUpInViewMorphLocalSpace(): ViewMorphPoint3D {
+  return vectorToTuple(getCameraScreenUpWorldVector());
+}
+
+function getCameraScreenRightWorldVector(): Vector3 {
+  return new Vector3().setFromMatrixColumn(threeViewport.activeCamera.matrixWorld, 0).normalize();
+}
+
+function getCameraScreenUpWorldVector(): Vector3 {
+  return new Vector3().setFromMatrixColumn(threeViewport.activeCamera.matrixWorld, 1).normalize();
+}
+
 function drawSourcePathEdit3DPreview(
   context: CanvasRenderingContext2D,
   asset: Extract<PrimitiveSvgAsset, { assetKind: "bezierCurve3d" }>,
@@ -3747,29 +4197,27 @@ function transformPoint3DFromWorldUnit(
   return [roundBezierValue(local.x), roundBezierValue(local.y), roundBezierValue(local.z)];
 }
 
-function selectPathEditControl(event: PointerEvent | MouseEvent): void {
+function selectPathEditControl(event: PointerEvent | MouseEvent): boolean {
   if (editorState.editorMode === "path" && editorState.pathEdit3DSession) {
-    selectSourcePathEdit3DControlAtEvent(event);
-    return;
+    return selectSourcePathEdit3DControlAtEvent(event);
   }
 
   if (
     editorState.editorMode === "path" &&
     editorState.viewMorphProfileEditSession
   ) {
-    selectViewMorphProfileEditControlAtEvent(event);
-    return;
+    return selectViewMorphProfileEditControlAtEvent(event);
   }
 
   if (editorState.editorMode !== "path" || !editorState.pathEditSession) {
-    return;
+    return false;
   }
 
   const asset = getAssetById(editorState.pathEditSession.assetId);
   const adapter = asset ? getSourcePathEditAdapter(asset) : null;
 
   if (!asset || !adapter) {
-    return;
+    return false;
   }
 
   const control = findPathEditControlAtPoint({
@@ -3781,7 +4229,7 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
 
   if (!control) {
     updatePathEditHoveredControl(null);
-    return;
+    return false;
   }
 
   editorState.pathEditHoveredControl = toPathEditSelection(control);
@@ -3793,16 +4241,23 @@ function selectPathEditControl(event: PointerEvent | MouseEvent): void {
   renderCache.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
+  return true;
+}
+
+function getViewMorphProfileWorldOrigin(): Vector3 {
+  return new Vector3(0, 0, 0).applyMatrix4(
+    getViewMorphProfileLocalToWorldUnitMatrix(),
+  );
 }
 
 function selectSourcePathEdit3DControlAtEvent(
   event: PointerEvent | MouseEvent,
-): void {
+): boolean {
   const control = findSourcePathEdit3DControlAtEvent(event);
 
   if (!control) {
     updateSourcePathEdit3DHoveredControl(null);
-    return;
+    return false;
   }
 
   const selection = {
@@ -3819,17 +4274,18 @@ function selectSourcePathEdit3DControlAtEvent(
   renderCache.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
+  return true;
 }
 
 function selectViewMorphProfileEditControlAtEvent(
   event: PointerEvent | MouseEvent,
-): void {
+): boolean {
   const session = editorState.viewMorphProfileEditSession;
   const asset = session ? getAssetById(session.assetId) : null;
   const adapter = asset ? getViewMorphProfileEditAdapter(asset) : null;
 
-  if (!session || !asset || !adapter) {
-    return;
+  if (!session || !asset || !adapter || editorState.viewMorphProfileShowFinalPath) {
+    return false;
   }
 
   const control = findNearestViewMorphProfileEditControl(
@@ -3841,7 +4297,7 @@ function selectViewMorphProfileEditControlAtEvent(
 
   if (!control) {
     updateViewMorphProfileHoveredControl(null);
-    return;
+    return false;
   }
 
   editorState.viewMorphProfileEditHoveredControl =
@@ -3849,9 +4305,14 @@ function selectViewMorphProfileEditControlAtEvent(
   editorState.viewMorphProfileEditDragState =
     selectViewMorphProfileEditControl(session, control);
   event.preventDefault();
+  event.stopPropagation();
+  if ("stopImmediatePropagation" in event) {
+    event.stopImmediatePropagation();
+  }
   renderCache.markPaperDirty();
   renderSourcePathEditPanel();
   exposeEditorDebugHooks();
+  return true;
 }
 
 function updatePathEditHover(event: PointerEvent | MouseEvent): void {
@@ -3957,7 +4418,8 @@ function updateSourcePathEdit3DHoveredControl(
 function updateViewMorphProfileHover(event: PointerEvent | MouseEvent): void {
   if (
     !editorState.viewMorphProfileEditSession ||
-    editorState.viewMorphProfileEditDragState
+    editorState.viewMorphProfileEditDragState ||
+    editorState.viewMorphProfileShowFinalPath
   ) {
     if (editorState.viewMorphProfileEditHoveredControl) {
       clearViewMorphProfileHover();
@@ -4072,6 +4534,11 @@ function dragViewMorphProfileControl(event: PointerEvent | MouseEvent): void {
     return;
   }
 
+  if (editorState.viewMorphProfileShowFinalPath) {
+    editorState.viewMorphProfileEditDragState = null;
+    return;
+  }
+
   const pathPoint = adapter.screenToPath(getCanvasPointerPoint(event));
 
   if (!pathPoint) {
@@ -4083,6 +4550,7 @@ function dragViewMorphProfileControl(event: PointerEvent | MouseEvent): void {
     editorState.viewMorphProfileEditDragState,
     pathPoint,
   );
+  event.preventDefault();
   renderCache.markVectorDirty();
   renderCache.markPaperDirty();
   renderSourcePathEditPanel();
@@ -4137,17 +4605,23 @@ function getSourcePathEditAdapter(
 
 function getViewMorphProfileEditAdapter(
   asset: PrimitiveSvgAsset,
-  transform = getSourcePathEditViewTransform(asset),
 ): ViewMorphProfileEditViewportAdapter {
+  const session = editorState.viewMorphProfileEditSession;
+
+  if (asset.assetKind !== "viewMorphProfile" || !session) {
+    return createStaticEmptyPathAdapter();
+  }
+
+  return (
+    createViewMorphProfilePlaneAdapter(asset, session.selectedPlane) ??
+    createStaticEmptyPathAdapter()
+  );
+}
+
+function createStaticEmptyPathAdapter(): ViewMorphProfileEditViewportAdapter {
   return {
-    pathToScreen: (point) => [
-      transform.offsetX + point[0] * transform.scale,
-      transform.offsetY + point[1] * transform.scale,
-    ],
-    screenToPath: (point) => [
-      roundBezierValue((point[0] - transform.offsetX) / transform.scale),
-      roundBezierValue((point[1] - transform.offsetY) / transform.scale),
-    ],
+    pathToScreen: () => null,
+    screenToPath: () => null,
   };
 }
 
@@ -4166,6 +4640,10 @@ function getPathEditScreenControls(): Array<{
 }
 
 function getViewMorphProfileEditScreenControlsForDebug() {
+  if (editorState.viewMorphProfileShowFinalPath) {
+    return [];
+  }
+
   const asset = editorState.viewMorphProfileEditSession
     ? getAssetById(editorState.viewMorphProfileEditSession.assetId)
     : null;
@@ -4481,84 +4959,15 @@ function getSelectedInPlacePathNodeAndAsset(): {
 function getBillboardScreenTransform(
   asset: PrimitiveSvgAsset,
   transform: TransformSnapshot,
-): {
-  projected: { x: number; y: number };
-  assetScale: number;
-  rotation: number;
-  nodeScale: [number, number];
-  viewBoxCenter: BezierPoint;
-} | null {
-  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = asset.viewBox;
-  const worldPosition = tupleToVector(transform.position);
-  const projected = threeViewport.projectWorldPosition(worldPosition, stage.size);
-
-  if (!projected) {
-    return null;
-  }
-
-  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
-  const screenScale = threeViewport.getDistanceScale(worldPosition, 1);
-  const assetScale = screenScale / largestDimension;
-
-  return {
-    projected,
-    assetScale,
-    rotation: transform.rotation[2],
-    nodeScale: [transform.scale[0], transform.scale[1]],
-    viewBoxCenter: [viewBoxX + viewBoxWidth / 2, viewBoxY + viewBoxHeight / 2],
-  };
-}
-
-function pathPointToBillboardScreen(
-  point: BezierPoint,
-  transform: NonNullable<ReturnType<typeof getBillboardScreenTransform>>,
-): BezierPoint {
-  const localX =
-    (point[0] - transform.viewBoxCenter[0]) *
-    transform.assetScale *
-    transform.nodeScale[0];
-  const localY =
-    (point[1] - transform.viewBoxCenter[1]) *
-    transform.assetScale *
-    transform.nodeScale[1];
-  const cos = Math.cos(transform.rotation);
-  const sin = Math.sin(transform.rotation);
-
-  return [
-    roundBezierValue(transform.projected.x + localX * cos - localY * sin),
-    roundBezierValue(transform.projected.y + localX * sin + localY * cos),
-  ];
-}
-
-function billboardScreenPointToPath(
-  point: BezierPoint,
-  transform: NonNullable<ReturnType<typeof getBillboardScreenTransform>>,
-): BezierPoint {
-  const dx = point[0] - transform.projected.x;
-  const dy = point[1] - transform.projected.y;
-  const cos = Math.cos(-transform.rotation);
-  const sin = Math.sin(-transform.rotation);
-  const localX = dx * cos - dy * sin;
-  const localY = dx * sin + dy * cos;
-
-  return [
-    roundBezierValue(
-      localX / safeBillboardScale(transform.assetScale * transform.nodeScale[0]) +
-        transform.viewBoxCenter[0],
-    ),
-    roundBezierValue(
-      localY / safeBillboardScale(transform.assetScale * transform.nodeScale[1]) +
-        transform.viewBoxCenter[1],
-    ),
-  ];
-}
-
-function safeBillboardScale(value: number): number {
-  if (Math.abs(value) < 0.0001) {
-    return value < 0 ? -0.0001 : 0.0001;
-  }
-
-  return value;
+): ReturnType<typeof createBillboardScreenTransform> {
+  return createBillboardScreenTransform({
+    viewBox: asset.viewBox,
+    transform,
+    projectWorldPosition: (position) =>
+      threeViewport.projectWorldPosition(tupleToVector(position), stage.size),
+    getDistanceScale: (position, worldSize) =>
+      threeViewport.getDistanceScale(tupleToVector(position), worldSize),
+  });
 }
 
 function getSelectedProject(): ProjectRecord | null {
@@ -4922,6 +5331,7 @@ function exposeEditorDebugHooks(): void {
         controls: getPathEditScreenControls(),
         controls3d: getSourcePathEdit3DControls(),
         viewMorphControls: getViewMorphProfileEditScreenControlsForDebug(),
+        viewMorphProfileShowFinalPath: editorState.viewMorphProfileShowFinalPath,
         projectedCommandCount: getSourcePathEdit3DProjectedCommands().length,
       }),
     getInPlacePathEditState: () =>
@@ -4973,6 +5383,7 @@ function exposeEditorDebugHooks(): void {
     getAppStateSnapshot: () => appStateStore.getSnapshot(),
   });
 }
+
 
 
 

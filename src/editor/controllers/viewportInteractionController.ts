@@ -9,7 +9,7 @@ export type ViewportInteractionBindings = {
     onCurve3DControlTransform: (controlId: string, position: Vector3Tuple) => void;
     onCameraChange: () => void;
   }) => void;
-  selectPathEditControl: (event: PointerEvent | MouseEvent) => void;
+  selectPathEditControl: (event: PointerEvent | MouseEvent) => boolean;
   updatePathEditHover: (event: PointerEvent | MouseEvent) => void;
   clearPathEditHover: () => void;
   selectInPlacePathEditControl: (event: PointerEvent | MouseEvent) => boolean;
@@ -45,6 +45,12 @@ export function bindViewportInteractions(
   threeOverlayCanvas.addEventListener(
     "pointerdown",
     (event) => {
+      const capturedSourcePathControl = bindings.selectPathEditControl(event);
+
+      if (capturedSourcePathControl) {
+        return;
+      }
+
       const capturedPathControl = bindings.selectInPlacePathEditControl(event);
       bindings.onInPlacePathEditCanvasPointerDown(capturedPathControl);
     },
@@ -64,12 +70,12 @@ export function bindViewportInteractions(
   });
 
   window.addEventListener("pointerdown", (event) => {
-    if (event.target !== paperCanvas) {
+    if (event.target !== paperCanvas && event.target !== threeOverlayCanvas) {
       bindings.selectPathEditControl(event);
     }
   });
   window.addEventListener("mousedown", (event) => {
-    if (event.target !== paperCanvas) {
+    if (event.target !== paperCanvas && event.target !== threeOverlayCanvas) {
       bindings.selectPathEditControl(event);
     }
   });
