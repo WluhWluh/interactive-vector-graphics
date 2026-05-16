@@ -3956,7 +3956,7 @@ function viewMorphBillboardPointToScreen(point: ViewMorphPoint2D): [number, numb
   const up = getCameraScreenUpWorldVector();
   const worldPoint = target
     .add(right.multiplyScalar(point[0] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT))
-    .add(up.multiplyScalar(point[1] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT));
+    .add(up.multiplyScalar(-point[1] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT));
 
   return projectCurve3DWorldPointToScreen(vectorToTuple(worldPoint));
 }
@@ -3978,13 +3978,14 @@ function viewMorphPlanePointToLocal3D(
 ): Vector3Tuple {
   const uAxis = plane.tangentU;
   const vAxis = getViewMorphProfilePlaneVAxis(plane);
+  const vSign = getViewMorphProfilePlanePathVSign(plane);
 
   return [
-    (uAxis[0] * point[0] + vAxis[0] * point[1]) *
+    (uAxis[0] * point[0] + vAxis[0] * point[1] * vSign) *
       VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
-    (uAxis[1] * point[0] - vAxis[1] * point[1]) *
+    (uAxis[1] * point[0] + vAxis[1] * point[1] * vSign) *
       VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
-    (uAxis[2] * point[0] + vAxis[2] * point[1]) *
+    (uAxis[2] * point[0] + vAxis[2] * point[1] * vSign) *
       VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
   ];
 }
@@ -4006,7 +4007,7 @@ function createViewMorphProfilePlaneAdapter(
   );
   const vAxis = vectorToTuple(
     new Vector3(...getViewMorphProfilePlaneVAxis(plane))
-      .multiplyScalar(planeIsVertical(plane) ? -1 : 1)
+      .multiplyScalar(getViewMorphProfilePlanePathVSign(plane))
       .transformDirection(matrix),
   );
 
@@ -4071,6 +4072,16 @@ function getViewMorphProfilePlaneVAxis(
 
 function planeIsVertical(plane: ViewMorphProfilePlane): boolean {
   return !("tangentV" in plane);
+}
+
+function getViewMorphProfilePlanePathVSign(plane: ViewMorphProfilePlane): number {
+  /**
+   * viewMorph source polylines use the same path-space convention as SVG and
+   * Canvas billboards: negative Y is visually up. Vertical carrier planes live
+   * in the editor's Y-up 3D space, so their path V axis must be inverted when
+   * previewed or edited in 3D. The horizontal plane keeps its own X/Z basis.
+   */
+  return planeIsVertical(plane) ? -1 : 1;
 }
 
 function getViewMorphProfilePlaneKey(ref: ViewMorphEditPlaneRef): string {

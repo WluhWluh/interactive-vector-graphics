@@ -79,6 +79,7 @@ export type VectorEditorDebugApi = {
     selectedComponent: PathEditComponent | null;
     selectedPlaneId: string | null;
     selectedPointId: string | null;
+    viewMorphProfileShowFinalPath: boolean;
     hoveredSegmentId: string | null;
     hoveredComponent: PathEditComponent | null;
     hoveredPlaneId: string | null;

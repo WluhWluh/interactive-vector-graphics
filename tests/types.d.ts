@@ -192,6 +192,7 @@ declare global {
         selectedComponent: "anchor" | "handleIn" | "handleOut" | null;
         selectedPlaneId: string | null;
         selectedPointId: string | null;
+        viewMorphProfileShowFinalPath: boolean;
         hoveredSegmentId: string | null;
         hoveredComponent: "anchor" | "handleIn" | "handleOut" | null;
         hoveredSegmentId3d: string | null;

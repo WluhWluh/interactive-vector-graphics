@@ -1163,6 +1163,25 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
   expect(pathEditState?.draftViewMorphProfile?.version).toBe(1);
   expect(pathEditState?.viewMorphControls.length).toBeGreaterThan(0);
 
+  const frontTopControl = pathEditState?.viewMorphControls.find(
+    (control) => control.planeId === "vertical-front" && control.pointId === "point-top",
+  );
+  const frontBottomControl = pathEditState?.viewMorphControls.find(
+    (control) => control.planeId === "vertical-front" && control.pointId === "point-bottom",
+  );
+
+  expect(frontTopControl?.y).toBeLessThan(frontBottomControl?.y ?? 0);
+
+  await page.getByRole("button", { name: "Final Path" }).click();
+
+  const finalPathState = await page.evaluate(
+    () => window.__vectorEditorDebug?.getPathEditState() ?? null,
+  );
+
+  expect(finalPathState?.viewMorphProfileShowFinalPath).toBe(true);
+  expect(finalPathState?.selectedPointId).toBeNull();
+  expect(finalPathState?.viewMorphControls.length).toBe(0);
+
   await page.getByRole("button", { name: "Asset Assembly" }).click();
   await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
   await expect(
