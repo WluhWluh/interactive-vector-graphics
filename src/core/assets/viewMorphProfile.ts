@@ -212,10 +212,17 @@ export function evaluateViewMorphProfile(
     validatedProfile.verticalPlanes,
     horizontalViewDirection,
   );
+  const shouldMirrorHorizontalSource = viewDirection[1] < -EPSILON;
+  const horizontalSourcePath = shouldMirrorHorizontalSource
+    ? mirrorClosedPolylineHorizontally(validatedProfile.horizontalPlane.path)
+    : validatedProfile.horizontalPlane.path;
   const horizontalRotationRad = getHorizontalRotationForView(horizontalBasis.right);
-  const horizontalSeamOffset = getContinuousHorizontalSeamOffset(horizontalBasis);
+  const horizontalSeamOffset = getContinuousHorizontalSeamOffset(
+    horizontalBasis,
+    shouldMirrorHorizontalSource,
+  );
   const rotatedHorizontalPath = rotateHorizontalPolylineForView(
-    validatedProfile.horizontalPlane.path,
+    horizontalSourcePath,
     horizontalBasis,
   );
   const horizontalWeight = Math.abs(viewDirection[1]);
@@ -590,6 +597,17 @@ function mirrorPolylineHorizontally(
   };
 }
 
+function mirrorClosedPolylineHorizontally(
+  path: ViewMorphClosedPolyline,
+): ViewMorphClosedPolyline {
+  return {
+    points: path.points.map((point) => ({
+      id: point.id,
+      point: roundPoint2D([-point.point[0], point.point[1]]),
+    })),
+  };
+}
+
 function rotateHorizontalPolylineForView(
   path: ViewMorphClosedPolyline,
   basis: ViewMorphHorizontalBasis2D,
@@ -850,6 +868,7 @@ function getPaperPathSampleAtNormalizedOffset(
 
 function getContinuousHorizontalSeamOffset(
   basis: ViewMorphHorizontalBasis2D,
+  mirroredSource: boolean,
 ): number {
   const screenYFromSourceX = basis.right[1];
   const screenYFromSourceY = basis.up[1];
@@ -861,9 +880,11 @@ function getContinuousHorizontalSeamOffset(
     return 0.75;
   }
 
-  return normalizeUnitOffset(
+  const sourceOffset = normalizeUnitOffset(
     (Math.atan2(-screenYFromSourceY, -screenYFromSourceX) / (Math.PI * 2)),
   );
+
+  return mirroredSource ? normalizeUnitOffset(0.5 - sourceOffset) : sourceOffset;
 }
 
 function getReferenceOrientation(reference: CubicSegment2D[]): number {

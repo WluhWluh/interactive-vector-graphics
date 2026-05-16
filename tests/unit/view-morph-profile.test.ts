@@ -115,6 +115,42 @@ export function runViewMorphProfileUnitTests(): void {
     "top and bottom vertical views with a symmetric profile should preserve extents",
   );
 
+  const asymmetricHorizontalProfile = createDefaultViewMorphProfile();
+  asymmetricHorizontalProfile.horizontalPlane.path.points = [
+    { id: "point-east", point: [80, -10] },
+    { id: "point-north-east", point: [30, -45] },
+    { id: "point-north", point: [-5, -55] },
+    { id: "point-north-west", point: [-48, -28] },
+    { id: "point-west", point: [-62, 8] },
+    { id: "point-south-west", point: [-30, 42] },
+    { id: "point-south", point: [12, 70] },
+    { id: "point-south-east", point: [56, 30] },
+  ];
+  const asymmetricHorizontalTop = evaluateViewMorphProfileToBezierPath(
+    asymmetricHorizontalProfile,
+    [0, 1, 0],
+    {
+      horizontalRotationReferenceLocal: [1, 0, 0],
+      screenUpReferenceLocal: [0, 0, 1],
+    },
+  );
+  const asymmetricHorizontalBottom = evaluateViewMorphProfileToBezierPath(
+    asymmetricHorizontalProfile,
+    [0, -1, 0],
+    {
+      horizontalRotationReferenceLocal: [1, 0, 0],
+      screenUpReferenceLocal: [0, 0, 1],
+    },
+  );
+
+  assert.ok(
+    getApproximateHausdorffDistance(
+      asymmetricHorizontalTop,
+      asymmetricHorizontalBottom,
+    ) < 0.05,
+    "bottom view should mirror horizontal source data before projection",
+  );
+
   for (let index = 0; index < 8; index += 1) {
     const angle = (index * Math.PI) / 4;
     const evaluated = evaluateViewMorphProfileToBezierPath(profile, [
@@ -321,6 +357,7 @@ export function runViewMorphProfileUnitTests(): void {
       previousEvaluation = evaluated;
     }
   }
+
 }
 
 function getPathExtents(path: ViewMorphProfileEvaluationPath): PathExtents {
