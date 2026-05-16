@@ -31,7 +31,6 @@ import {
 } from "../core/assets/structuredBezierPath3d";
 import {
   smoothViewMorphPolylineToBezierPath,
-  evaluateViewMorphProfileToBezierPath,
   type ViewMorphClosedPolyline,
   type ViewMorphHorizontalPlane,
   type ViewMorphPoint2D,
@@ -129,6 +128,10 @@ import {
   getAssetKindListLabel,
 } from "./render/primitiveAssetDrawing";
 import { getPrimitiveGhostColor } from "./render/ghostColor";
+import {
+  VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT,
+  drawViewMorphBillboardPath,
+} from "./render/viewMorphBillboardRenderer";
 import {
   drawBillboards as drawBillboardsWithRenderer,
   type BillboardRendererContext,
@@ -376,10 +379,6 @@ const PREFAB_ROOT_NODE_ID = "__prefab-root__";
 const DEFAULT_PREFAB_SNAP_FPS = 10;
 const DEFAULT_TIMELINE_DURATION_MS = 1000;
 const PATH_EDIT_HIT_RADIUS = 15;
-const VIEW_MORPH_PROFILE_WORLD_SIZE = 1.6;
-const VIEW_MORPH_PROFILE_PATH_RADIUS = 50;
-const VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT =
-  VIEW_MORPH_PROFILE_WORLD_SIZE / (VIEW_MORPH_PROFILE_PATH_RADIUS * 2);
 
 const stage = new CanvasStage(["vector-canvas", "paper-canvas"]);
 const threeViewport = new ThreeEditorViewport();
@@ -3778,83 +3777,15 @@ function drawViewMorphProfileFinalPath(
   asset: Extract<PrimitiveSvgAsset, { assetKind: "viewMorphProfile" }>,
   session: ViewMorphProfileEditSession,
 ): void {
-  const evaluatedPath = evaluateViewMorphProfileToBezierPath(
-    session.draft,
-    getCameraViewDirectionInViewMorphLocalSpace(),
-    {
-      horizontalRotationReferenceLocal: getCameraScreenRightInViewMorphLocalSpace(),
-      screenUpReferenceLocal: getCameraScreenUpInViewMorphLocalSpace(),
-    },
-  );
-
-  context.save();
-  context.fillStyle = asset.fill;
-  context.beginPath();
-
-  for (const [index, segment] of evaluatedPath.segments.entries()) {
-    const point = viewMorphBillboardPointToScreen(segment.anchor);
-
-    if (!point) {
-      continue;
-    }
-
-    if (index === 0) {
-      context.moveTo(point[0], point[1]);
-      continue;
-    }
-
-    const previousSegment = evaluatedPath.segments[index - 1];
-
-    if (!previousSegment) {
-      context.lineTo(point[0], point[1]);
-      continue;
-    }
-
-    const cp1 = viewMorphBillboardPointToScreen([
-      previousSegment.anchor[0] + previousSegment.handleOut[0],
-      previousSegment.anchor[1] + previousSegment.handleOut[1],
-    ]);
-    const cp2 = viewMorphBillboardPointToScreen([
-      segment.anchor[0] + segment.handleIn[0],
-      segment.anchor[1] + segment.handleIn[1],
-    ]);
-
-    if (cp1 && cp2) {
-      context.bezierCurveTo(cp1[0], cp1[1], cp2[0], cp2[1], point[0], point[1]);
-    } else {
-      context.lineTo(point[0], point[1]);
-    }
-  }
-
-  const firstSegment = evaluatedPath.segments[0];
-  const lastSegment = evaluatedPath.segments.at(-1);
-
-  if (firstSegment && lastSegment) {
-    const firstPoint = viewMorphBillboardPointToScreen(firstSegment.anchor);
-    const cp1 = viewMorphBillboardPointToScreen([
-      lastSegment.anchor[0] + lastSegment.handleOut[0],
-      lastSegment.anchor[1] + lastSegment.handleOut[1],
-    ]);
-    const cp2 = viewMorphBillboardPointToScreen([
-      firstSegment.anchor[0] + firstSegment.handleIn[0],
-      firstSegment.anchor[1] + firstSegment.handleIn[1],
-    ]);
-
-    if (firstPoint && cp1 && cp2) {
-      context.bezierCurveTo(
-        cp1[0],
-        cp1[1],
-        cp2[0],
-        cp2[1],
-        firstPoint[0],
-        firstPoint[1],
-      );
-    }
-  }
-
-  context.closePath();
-  context.fill(asset.fillRule);
-  context.restore();
+  drawViewMorphBillboardPath(context, {
+    profile: session.draft,
+    camera: threeViewport.activeCamera,
+    origin: vectorToTuple(getViewMorphProfileWorldOrigin()),
+    projectWorldPosition: (position) =>
+      threeViewport.projectWorldPosition(tupleToVector(position), stage.size),
+    fillStyle: asset.fill,
+    fillRule: asset.fillRule,
+  });
 }
 
 function drawViewMorphProfilePlanePath(
@@ -3948,17 +3879,6 @@ function viewMorphPlanePointToScreen(
   point: ViewMorphPoint2D,
 ): [number, number] | null {
   return projectCurve3DWorldPointToScreen(viewMorphPlanePointToWorld(plane, point));
-}
-
-function viewMorphBillboardPointToScreen(point: ViewMorphPoint2D): [number, number] | null {
-  const target = getViewMorphProfileWorldOrigin();
-  const right = getCameraScreenRightWorldVector();
-  const up = getCameraScreenUpWorldVector();
-  const worldPoint = target
-    .add(right.multiplyScalar(point[0] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT))
-    .add(up.multiplyScalar(-point[1] * VIEW_MORPH_PROFILE_UNITS_PER_PATH_UNIT));
-
-  return projectCurve3DWorldPointToScreen(vectorToTuple(worldPoint));
 }
 
 function viewMorphPlanePointToWorld(
@@ -4123,29 +4043,6 @@ function getViewMorphProfilePlaneNormal(
   plane: ViewMorphProfilePlane,
 ): ViewMorphPoint3D {
   return plane.normal;
-}
-
-function getCameraViewDirectionInViewMorphLocalSpace(): ViewMorphPoint3D {
-  const direction = new Vector3();
-  threeViewport.activeCamera.getWorldDirection(direction);
-  direction.negate().normalize();
-  return vectorToTuple(direction);
-}
-
-function getCameraScreenRightInViewMorphLocalSpace(): ViewMorphPoint3D {
-  return vectorToTuple(getCameraScreenRightWorldVector());
-}
-
-function getCameraScreenUpInViewMorphLocalSpace(): ViewMorphPoint3D {
-  return vectorToTuple(getCameraScreenUpWorldVector());
-}
-
-function getCameraScreenRightWorldVector(): Vector3 {
-  return new Vector3().setFromMatrixColumn(threeViewport.activeCamera.matrixWorld, 0).normalize();
-}
-
-function getCameraScreenUpWorldVector(): Vector3 {
-  return new Vector3().setFromMatrixColumn(threeViewport.activeCamera.matrixWorld, 1).normalize();
 }
 
 function drawSourcePathEdit3DPreview(

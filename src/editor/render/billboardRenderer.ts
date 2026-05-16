@@ -1,4 +1,4 @@
-import { Matrix4, Vector3 } from "three";
+import { Matrix4 } from "three";
 import type { Camera } from "three";
 import type { PrimitiveSvgAsset } from "../../core/assets/primitiveAssetTypes";
 import { primitiveAssetHas3DSourcePath } from "../../core/assets/primitiveAssetCapabilities";
@@ -8,16 +8,13 @@ import {
   type ProjectedCurveCommand,
 } from "../../core/assets/projectedBezier3d";
 import type { BezierPoint, StructuredBezierPath } from "../../core/assets/structuredBezierPath";
-import {
-  evaluateViewMorphProfileToBezierPath,
-  type ViewMorphPoint3D,
-} from "../../core/assets/viewMorphProfile";
 import type { StageSize } from "../../core/stage/canvasStage";
 import {
   createPrimitiveAssetPathPreview,
   drawPrimitiveAssetPath,
   getPrimitiveGhostColor,
 } from "./primitiveAssetDrawing";
+import { drawViewMorphBillboardPath } from "./viewMorphBillboardRenderer";
 import { transformToMatrix, type TransformSnapshot } from "../tools/prefabTransform";
 
 export type DrawableBillboard = {
@@ -109,24 +106,28 @@ function drawBillboardNode(
   }
 
   if (asset.assetKind === "viewMorphProfile") {
-    const evaluatedPath = evaluateViewMorphProfileToBezierPath(
-      asset.viewMorphProfile,
-      getCameraViewDirectionInDrawableLocalSpace(drawable, rendererContext),
-      {
-        horizontalRotationReferenceLocal:
-          getCameraScreenRightInDrawableLocalSpace(drawable, rendererContext),
-        screenUpReferenceLocal:
-          getCameraScreenUpInDrawableLocalSpace(drawable, rendererContext),
-      },
-    );
-    const previewAsset = createPrimitiveAssetPathPreview(asset, evaluatedPath);
+    context.save();
+    context.globalAlpha *= drawable.opacity ?? 1;
+    drawViewMorphBillboardPath(context, {
+      profile: asset.viewMorphProfile,
+      camera: rendererContext.camera,
+      origin: drawable.transform.position,
+      projectWorldPosition: rendererContext.projectWorldPosition,
+      fillStyle: ghostColor ?? asset.fill,
+      fillRule: asset.fillRule,
+      rotationRad: drawable.transform.rotation[2],
+      scale: [drawable.transform.scale[0], drawable.transform.scale[1]],
+      localToWorldMatrix: transformToMatrix(drawable.transform),
+    });
+    context.restore();
 
-    drawFlatBillboardPath(
-      context,
-      drawable,
-      previewAsset,
-      ghostColor ?? undefined,
-    );
+    if (drawable.selected || drawable.ghost) {
+      drawViewMorphBillboardSelectionBounds(
+        context,
+        drawable,
+        ghostColor ?? undefined,
+      );
+    }
     return;
   }
 
@@ -173,52 +174,33 @@ function drawFlatBillboardPath(
   context.restore();
 }
 
-function getCameraViewDirectionInDrawableLocalSpace(
+function drawViewMorphBillboardSelectionBounds(
+  context: CanvasRenderingContext2D,
   drawable: ProjectedBillboard,
-  rendererContext: BillboardRendererContext,
-): ViewMorphPoint3D {
-  const worldDirection = new Vector3();
-  rendererContext.camera.getWorldDirection(worldDirection);
-  worldDirection.negate().normalize();
+  colorOverride?: string,
+): void {
+  const { selected, ghost = false } = drawable;
+  const [viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight] = drawable.asset.viewBox;
+  const largestDimension = Math.max(viewBoxWidth, viewBoxHeight);
+  const assetScale = drawable.screenScale / largestDimension;
 
-  const inverseRotation = getDrawableWorldInverseRotation(drawable);
-  const localDirection = worldDirection.applyMatrix4(inverseRotation).normalize();
-
-  return [localDirection.x, localDirection.y, localDirection.z];
-}
-
-function getCameraScreenRightInDrawableLocalSpace(
-  drawable: ProjectedBillboard,
-  rendererContext: BillboardRendererContext,
-): ViewMorphPoint3D {
-  const worldRight = new Vector3().setFromMatrixColumn(
-    rendererContext.camera.matrixWorld,
-    0,
+  context.save();
+  context.translate(drawable.projected.x, drawable.projected.y);
+  context.rotate(drawable.transform.rotation[2]);
+  context.scale(assetScale * drawable.transform.scale[0], assetScale * drawable.transform.scale[1]);
+  context.translate(
+    -(viewBoxX + viewBoxWidth / 2),
+    -(viewBoxY + viewBoxHeight / 2),
   );
-  const inverseRotation = getDrawableWorldInverseRotation(drawable);
-  const localDirection = worldRight.applyMatrix4(inverseRotation).normalize();
+  context.lineWidth = 3 / Math.max(assetScale, 0.001);
+  context.strokeStyle = colorOverride ?? "#ffcf4a";
+  context.setLineDash(ghost ? [8 / Math.max(assetScale, 0.001)] : []);
 
-  return [localDirection.x, localDirection.y, localDirection.z];
-}
+  if (selected || ghost) {
+    context.strokeRect(viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight);
+  }
 
-function getCameraScreenUpInDrawableLocalSpace(
-  drawable: ProjectedBillboard,
-  rendererContext: BillboardRendererContext,
-): ViewMorphPoint3D {
-  const worldUp = new Vector3().setFromMatrixColumn(
-    rendererContext.camera.matrixWorld,
-    1,
-  );
-  const inverseRotation = getDrawableWorldInverseRotation(drawable);
-  const localDirection = worldUp.applyMatrix4(inverseRotation).normalize();
-
-  return [localDirection.x, localDirection.y, localDirection.z];
-}
-
-function getDrawableWorldInverseRotation(drawable: ProjectedBillboard): Matrix4 {
-  return new Matrix4()
-    .extractRotation(transformToMatrix(drawable.transform))
-    .invert();
+  context.restore();
 }
 
 function drawBezierCurve3DBillboard(
