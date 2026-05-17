@@ -29,6 +29,9 @@ than to the heavier 3D/game look of Star Birds.
 - Write comments in English for authored code.
 - Prefer detailed comments at architectural boundaries and sparse comments for
   obvious implementation details.
+- General Git commit messages should use a conventional prefix such as
+  `feat:`, `fix:`, `doc:`, `refactor:`, `test:`, or `chore:` and keep the
+  subject concise and imperative.
 - Keep early milestones small and verifiable instead of rushing into complex
   demos.
 - Preserve a clear separation between the vector runtime layer, the Paper.js
