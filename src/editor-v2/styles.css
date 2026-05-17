@@ -1,0 +1,428 @@
+:root {
+  color: #d8dee9;
+  background: #17191d;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#editor-v2-app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.editor-v2-page {
+  min-width: 960px;
+  background: #17191d;
+}
+
+.editor-v2-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #17191d;
+  color: #d8dee9;
+}
+
+.editor-v2-shell[data-menu-placement="bottom"] {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.editor-v2-shell[data-menu-placement="bottom"] .editor-v2-menubar {
+  grid-row: 2;
+}
+
+.editor-v2-menubar {
+  display: flex;
+  min-height: 30px;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 6px;
+  background: #23262c;
+  border-bottom: 1px solid #0f1115;
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  z-index: 20;
+}
+
+.editor-v2-shell[data-menu-placement="bottom"] .editor-v2-menubar {
+  border-top: 1px solid #0f1115;
+  border-bottom: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.editor-v2-menu {
+  position: relative;
+  display: flex;
+}
+
+.editor-v2-menu-button,
+.editor-v2-title-button,
+.editor-v2-icon-button,
+.editor-v2-command-button {
+  color: #d8dee9;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.editor-v2-menu-button {
+  min-width: 56px;
+  padding: 0 10px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.editor-v2-menu-button:hover,
+.editor-v2-menu[data-open="true"] .editor-v2-menu-button,
+.editor-v2-title-button:hover,
+.editor-v2-icon-button:hover,
+.editor-v2-command-button:hover {
+  background: #343943;
+}
+
+.editor-v2-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  display: grid;
+  min-width: 230px;
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  padding: 6px;
+  background: #272b33;
+  border: 1px solid #0f1115;
+  border-radius: 4px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  z-index: 50;
+}
+
+.editor-v2-shell[data-menu-placement="bottom"] .editor-v2-menubar > .editor-v2-menu > .editor-v2-dropdown {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+
+.editor-v2-dropdown[hidden] {
+  display: none;
+}
+
+.editor-v2-menu-row,
+.editor-v2-layout-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 30px;
+  gap: 6px;
+  padding: 0 6px;
+  color: #d8dee9;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.editor-v2-menu-row:hover,
+.editor-v2-layout-row:hover {
+  background: #3b414d;
+}
+
+.editor-v2-layout-row[data-active="true"] {
+  background: #3a4b63;
+  color: #ffffff;
+}
+
+.editor-v2-layout-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.editor-v2-menu-separator {
+  height: 1px;
+  margin: 6px 2px;
+  background: #15181e;
+}
+
+.editor-v2-workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  background: #111317;
+}
+
+.editor-v2-split {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: 2px;
+}
+
+.editor-v2-split[data-direction="horizontal"] {
+  grid-template-columns: var(--editor-v2-first-size) 4px minmax(0, 1fr);
+}
+
+.editor-v2-split[data-direction="vertical"] {
+  grid-template-rows: var(--editor-v2-first-size) 4px minmax(0, 1fr);
+}
+
+.editor-v2-split-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-v2-split-resizer {
+  background: #0f1115;
+  border: 0;
+  padding: 0;
+  cursor: col-resize;
+  position: relative;
+  z-index: 2;
+}
+
+.editor-v2-split[data-direction="vertical"] > .editor-v2-split-resizer {
+  cursor: row-resize;
+}
+
+.editor-v2-split-resizer:hover,
+.editor-v2-split-resizer[data-dragging="true"] {
+  background: #4f86d8;
+}
+
+.editor-v2-area {
+  position: relative;
+  display: grid;
+  grid-template-rows: 28px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #20242b;
+  border: 1px solid #0e1014;
+  border-radius: 3px;
+}
+
+.editor-v2-area[data-drop-target="true"] {
+  outline: 0;
+}
+
+.editor-v2-area-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  background: #2c3038;
+  border-bottom: 1px solid #111317;
+  cursor: grab;
+  user-select: none;
+}
+
+.editor-v2-area-header:active {
+  cursor: grabbing;
+}
+
+.editor-v2-content-select-button {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  color: #d8dee9;
+  background: #1d2026;
+  border: 1px solid #414753;
+  border-radius: 3px;
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+  pointer-events: auto;
+}
+
+.editor-v2-content-select-button:hover {
+  background: #2a3038;
+}
+
+.editor-v2-content-select-button:focus-visible {
+  outline: 1px solid #5ca2ff;
+  outline-offset: 1px;
+}
+
+.editor-v2-title-label {
+  color: #9ba5b4;
+  font-size: 11px;
+  font-family: Consolas, "Liberation Mono", monospace;
+  white-space: nowrap;
+}
+
+.editor-v2-icon-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.editor-v2-area-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-v2-content {
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  overflow: auto;
+}
+
+.editor-v2-content h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.editor-v2-content p {
+  margin: 0;
+  color: #9ba5b4;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.editor-v2-viewport-mock {
+  display: grid;
+  height: 100%;
+  min-height: 180px;
+  place-items: center;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    radial-gradient(circle at center, rgba(93, 169, 255, 0.16), transparent 40%),
+    #181b21;
+  background-size: 32px 32px, 32px 32px, auto, auto;
+  border: 1px solid #111317;
+  border-radius: 2px;
+  color: #d8dee9;
+  font-size: 12px;
+}
+
+.editor-v2-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.editor-v2-list li {
+  min-height: 24px;
+  padding: 4px 6px;
+  background: #282d35;
+  border: 1px solid #111317;
+  border-radius: 3px;
+  color: #c8d0dc;
+  font-size: 12px;
+}
+
+.editor-v2-dock-preview {
+  position: fixed;
+  pointer-events: none;
+  inset: 0;
+  z-index: 80;
+}
+
+.editor-v2-dock-line {
+  position: fixed;
+  background: #4f86d8;
+  box-shadow: 0 0 0 1px rgba(155, 202, 255, 0.28);
+}
+
+.editor-v2-dock-line[data-orientation="vertical"] {
+  width: 4px !important;
+}
+
+.editor-v2-dock-line[data-orientation="horizontal"] {
+  height: 4px !important;
+}
+
+.editor-v2-dock-arrow {
+  position: fixed;
+  width: 20px;
+  height: 20px;
+  color: #4f86d8;
+  filter: drop-shadow(0 0 1px rgba(155, 202, 255, 0.58));
+}
+
+.editor-v2-dock-arrow[hidden] {
+  display: none;
+}
+
+.editor-v2-split-resizer[data-dragging="true"] {
+  background: #4f86d8;
+  box-shadow: 0 0 0 1px rgba(155, 202, 255, 0.28);
+}
+
+.editor-v2-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.42);
+  z-index: 90;
+}
+
+.editor-v2-confirm {
+  display: grid;
+  width: min(360px, calc(100vw - 32px));
+  gap: 14px;
+  padding: 18px;
+  background: #272b33;
+  border: 1px solid #111317;
+  border-radius: 6px;
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.5);
+}
+
+.editor-v2-confirm h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.editor-v2-confirm p {
+  margin: 0;
+  color: #b5bdca;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.editor-v2-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.editor-v2-command-button {
+  min-height: 28px;
+  padding: 0 10px;
+  background: #343943;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.editor-v2-command-button[data-danger="true"] {
+  color: #ffe4e4;
+  background: #8d3434;
+}

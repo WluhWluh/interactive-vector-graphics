@@ -16,6 +16,7 @@ export default defineConfig({
       input: {
         stage: resolve(rootDir, "index.html"),
         editor: resolve(rootDir, "editor.html"),
+        editorV2: resolve(rootDir, "editor-v2.html"),
       },
     },
   },
