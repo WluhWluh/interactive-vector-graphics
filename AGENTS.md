@@ -60,6 +60,10 @@ than to the heavier 3D/game look of Star Birds.
   `src/core/assets/primitiveAssetCapabilities.ts`. New asset kinds must add
   type definitions, capability registry entries, import/server validation,
   hydration, rendering, inspector behavior, source serialization, and tests.
+- `viewMorphProfile` is an editor-created primitive with a dedicated billboard
+  renderer and backend source JSON. Keep its render adaptation isolated from
+  the generic flat Path2D billboard path so Source Path Edit previews and
+  prefab/scene rendering stay aligned.
 - Source Path Edit changes project-level asset data through backend APIs.
   In-place Path editing changes only a prefab timeline staging ghost until
   `Add Keyframe` writes a path keyframe.

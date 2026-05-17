@@ -32,9 +32,10 @@ The supported asset kinds are:
 - `filledPath`: closed 2D fill primitives.
 - `strokePath`: open 2D stroke primitives with fixed round cap/join rendering.
 - `bezierCurve3d`: open 3D curve copies created from `strokePath` assets.
-- `viewMorphProfile`: editor-created 2.5D filled profile assets. Their source
-  data is multiple view-responsive polylines; runtime rendering evaluates a
-  camera-facing filled path instead of drawing carrier planes or a mesh.
+- `viewMorphProfile`: editor-created filled profile assets created from a
+  built-in template. Their source data is a structured multi-plane profile JSON;
+  runtime rendering evaluates a camera-facing filled path through a dedicated
+  billboard renderer instead of drawing carrier planes or a mesh.
 
 New asset kinds should start by adding type and capability entries, then extend
 server validation, hydration, rendering, inspector rows, and tests.
@@ -91,7 +92,8 @@ billboard scale path. `src/editor/render/viewMorphBillboardRenderer.ts` owns its
 camera-direction, non-uniform scale, and full world-matrix adaptation so Source
 Path Edit final previews and prefab/scene rendering stay aligned. Preserve the
 full `worldMatrix` in billboard frame data when adding new nested transform
-paths.
+paths. The renderer also keeps a stable local billboard frame so rotated or
+nested prefab transforms do not collapse the projected profile.
 
 Rendering changes should prefer adding renderer inputs or caches over reaching
 back into global editor state.

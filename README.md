@@ -42,7 +42,9 @@ and scene document data:
 - `DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/assets`
 - `POST /api/projects/:projectId/assets` as `multipart/form-data`
+- `POST /api/projects/:projectId/assets/view-morph-profile`
 - `PUT /api/projects/:projectId/assets/:assetId/path`
+- `PUT /api/projects/:projectId/assets/:assetId/view-morph-profile`
 - `POST /api/projects/:projectId/assets/:assetId/convert-to-3d-curve`
 - `PUT /api/projects/:projectId/assets/:assetId/curve3d`
 - `DELETE /api/projects/:projectId/assets/:assetId`
@@ -70,9 +72,11 @@ SVG files under `data/projects/<project-id>/primitives/`. Prefab documents live 
 scenes, and animation data are intentionally separate from source code.
 Only code, fixtures, and built-in demos should enter Git.
 Each primitive asset stores normalized structured Bezier path data in SQLite
-beside `pathD`. Source Path Edit can update the asset source path and regenerate
-both values. Prefab path keyframes store structured Bezier snapshots and render
-through temporary `Path2D` previews during timeline playback.
+beside `pathD`, and editor-created assets such as `viewMorphProfile` also keep
+their source JSON in the same project database. Source Path Edit can update the
+asset source and regenerate the derived preview values. Prefab path keyframes
+store structured Bezier snapshots and render through temporary `Path2D`
+previews during timeline playback.
 
 For local development, run both servers:
 
@@ -158,7 +162,7 @@ and relative handles. Filled primitives must produce a closed structured path
 with at least three segments; stroked primitives must produce an open structured
 path with at least two segments.
 
-Imported assets currently support three asset kinds:
+Primitive assets currently support four asset kinds:
 
 - `filledPath`: closed filled 2D paths.
 - `strokePath`: open 2D strokes with fixed solid round cap/join rendering.
@@ -167,9 +171,13 @@ Imported assets currently support three asset kinds:
   width, and projects to Canvas as a 2D stroke for preview and scene/prefab
   rendering. It cannot be imported directly and does not yet participate in path
   deformation keyframes.
+- `viewMorphProfile`: an editor-created filled profile asset built from a
+  built-in template rather than SVG import. It renders through a dedicated
+  billboard evaluator and does not participate in prefab path keyframes.
 
 `Source Path Edit` edits the project-level asset source and saves it back through
 the API. In `Asset Assembly`, the timeline `Path` tool edits a temporary staging
 ghost for the selected 2D primitive node; clicking `Add Keyframe` is the save
-path for that deformation into the active prefab clip. The source asset itself is
-not changed by in-place timeline path edits.
+path for that deformation into the active prefab clip. `viewMorphProfile` is
+edited in `Source Path Edit` and does not use in-place timeline path staging.
+The source asset itself is not changed by in-place timeline path edits.
