@@ -31,6 +31,7 @@ import {
   hydratePrimitiveAssetRow,
   type StoredPrimitiveAssetRow,
 } from "../persistence/primitiveAssetRows";
+import type { PrimitiveAssetId } from "../../src/core/contracts/ids";
 
 export type CreatePrimitiveAssetInput = {
   projectId: string;
@@ -51,6 +52,10 @@ export type PrimitiveAssetStore = {
   listPrimitiveAssets: (projectId: string) => StoredPrimitiveAsset[];
   createPrimitiveAsset: (
     input: CreatePrimitiveAssetInput,
+  ) => Promise<StoredPrimitiveAsset>;
+  importPrimitiveAssetFromPackage: (
+    projectId: string,
+    sourceAsset: StoredPrimitiveAsset,
   ) => Promise<StoredPrimitiveAsset>;
   updatePrimitiveAssetPath: (
     projectId: string,
@@ -74,6 +79,11 @@ export type PrimitiveAssetStore = {
     assetId: string,
     viewMorphProfile: ViewMorphProfile,
   ) => Promise<StoredPrimitiveAsset>;
+  renamePrimitiveAsset: (
+    projectId: string,
+    assetId: string,
+    name: string,
+  ) => StoredPrimitiveAsset;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
 };
 
@@ -84,8 +94,7 @@ export type PrimitiveAssetStoreDependencies = {
   getProjectDir: (projectId: string) => string;
   toDataRelativePath: (path: string) => string;
   runDatabaseTransaction: <T>(operation: () => T) => T;
-  createUniqueId: (baseId: string, existingIds: Set<string>) => string;
-  slugifyName: (name: string) => string;
+  createPrimitiveAssetId: () => PrimitiveAssetId;
 };
 
 export function createPrimitiveAssetStore(
@@ -98,8 +107,7 @@ export function createPrimitiveAssetStore(
     getProjectDir,
     toDataRelativePath,
     runDatabaseTransaction,
-    createUniqueId,
-    slugifyName,
+    createPrimitiveAssetId,
   } = dependencies;
 
   function listPrimitiveAssets(projectId: string): StoredPrimitiveAsset[] {
@@ -127,7 +135,13 @@ export function createPrimitiveAssetStore(
   ): Promise<StoredPrimitiveAsset> {
     assertProjectExists(input.projectId);
 
-    const assetId = createUniqueAssetId(input.projectId, input.name);
+    const trimmedName = input.name.trim();
+
+    if (!trimmedName) {
+      throw new Error("Asset name is required.");
+    }
+
+    const assetId = createPrimitiveAssetId();
     const timestamp = new Date().toISOString();
     const sourcePath = join(
       getProjectDir(input.projectId),
@@ -148,7 +162,7 @@ export function createPrimitiveAssetStore(
     const asset: StoredPrimitiveAsset = {
       id: assetId,
       projectId: input.projectId,
-      name: input.name.trim(),
+      name: trimmedName,
       sourceFilename: input.sourceFilename,
       sourcePath: relativeSourcePath,
       assetKind: input.assetKind,
@@ -209,6 +223,89 @@ export function createPrimitiveAssetStore(
     });
 
     return asset;
+  }
+
+  async function importPrimitiveAssetFromPackage(
+    projectId: string,
+    sourceAsset: StoredPrimitiveAsset,
+  ): Promise<StoredPrimitiveAsset> {
+    assertProjectExists(projectId);
+
+    const assetId = createPrimitiveAssetId();
+    const timestamp = new Date().toISOString();
+    const sourcePath = join(getProjectDir(projectId), "primitives", `${assetId}.svg`);
+    const relativeSourcePath = toDataRelativePath(sourcePath);
+    const normalizedSource = normalizePackagePrimitiveAsset(sourceAsset);
+    const asset: StoredPrimitiveAsset = {
+      ...normalizedSource,
+      id: assetId,
+      projectId,
+      sourceFilename: sourceAsset.sourceFilename || `${assetId}.svg`,
+      sourcePath: relativeSourcePath,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const normalized = createNormalizedPrimitiveSvg({
+      assetKind: asset.assetKind,
+      viewBox: asset.viewBox,
+      bezierPath: asset.bezierPath,
+      bezierPath3d: asset.bezierPath3d,
+      viewMorphProfile: asset.viewMorphProfile,
+      fill: asset.fill,
+      fillRule: asset.fillRule,
+      stroke: asset.stroke,
+      strokeWidth: asset.strokeWidth,
+    });
+
+    await runFileBackedDatabaseTransaction({
+      writeFiles: async () => {
+        await mkdir(dirname(sourcePath), { recursive: true });
+        await writeTextFileAtomic(sourcePath, normalized.svgText);
+      },
+      writeDatabase: () =>
+        runDatabaseTransaction(() => {
+          database
+            .prepare(
+              `
+        INSERT INTO primitive_assets (
+          id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
+          pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d,
+          viewMorphProfile, createdAt, updatedAt
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+            )
+            .run(
+              asset.id,
+              asset.projectId,
+              asset.name,
+              asset.sourceFilename,
+              asset.sourcePath,
+              asset.assetKind,
+              JSON.stringify(asset.viewBox),
+              normalized.pathD,
+              asset.fill,
+              asset.fillRule,
+              asset.stroke,
+              asset.strokeWidth,
+              JSON.stringify(asset.bezierPath),
+              asset.bezierPath3d ? JSON.stringify(asset.bezierPath3d) : null,
+              asset.viewMorphProfile
+                ? JSON.stringify(asset.viewMorphProfile)
+                : null,
+              asset.createdAt,
+              asset.updatedAt,
+            );
+        }),
+      rollbackFiles: async () => {
+        await rm(sourcePath, { force: true });
+      },
+    });
+
+    return {
+      ...asset,
+      pathD: normalized.pathD,
+    };
   }
 
   async function updatePrimitiveAssetPath(
@@ -282,7 +379,7 @@ export function createPrimitiveAssetStore(
     const bezierPath3d = convertStructuredBezierPathTo3D(sourceAsset.bezierPath);
     const projectedBezierPath = projectStructuredBezierPath3DTo2D(bezierPath3d);
     const name = `${sourceAsset.name} 3D Curve`;
-    const newAssetId = createUniqueAssetId(projectId, name);
+    const newAssetId = createPrimitiveAssetId();
     const timestamp = new Date().toISOString();
     const sourcePath = join(getProjectDir(projectId), "primitives", `${newAssetId}.svg`);
     const relativeSourcePath = toDataRelativePath(sourcePath);
@@ -313,12 +410,16 @@ export function createPrimitiveAssetStore(
       updatedAt: timestamp,
     };
 
-    await mkdir(dirname(sourcePath), { recursive: true });
-    await writeTextFileAtomic(sourcePath, normalized.svgText);
-    runDatabaseTransaction(() => {
-      database
-        .prepare(
-          `
+    await runFileBackedDatabaseTransaction({
+      writeFiles: async () => {
+        await mkdir(dirname(sourcePath), { recursive: true });
+        await writeTextFileAtomic(sourcePath, normalized.svgText);
+      },
+      writeDatabase: () =>
+        runDatabaseTransaction(() => {
+          database
+            .prepare(
+              `
         INSERT INTO primitive_assets (
           id, projectId, name, sourceFilename, sourcePath, assetKind, viewBox,
           pathD, fill, fillRule, stroke, strokeWidth, bezierPath, bezierPath3d,
@@ -326,26 +427,30 @@ export function createPrimitiveAssetStore(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-        )
-        .run(
-          asset.id,
-          asset.projectId,
-          asset.name,
-          asset.sourceFilename,
-          asset.sourcePath,
-          asset.assetKind,
-          JSON.stringify(asset.viewBox),
-          asset.pathD,
-          asset.fill,
-          asset.fillRule,
-          asset.stroke,
-          asset.strokeWidth,
-          JSON.stringify(asset.bezierPath),
-          JSON.stringify(asset.bezierPath3d),
-          null,
-          asset.createdAt,
-          asset.updatedAt,
-        );
+            )
+            .run(
+              asset.id,
+              asset.projectId,
+              asset.name,
+              asset.sourceFilename,
+              asset.sourcePath,
+              asset.assetKind,
+              JSON.stringify(asset.viewBox),
+              asset.pathD,
+              asset.fill,
+              asset.fillRule,
+              asset.stroke,
+              asset.strokeWidth,
+              JSON.stringify(asset.bezierPath),
+              JSON.stringify(asset.bezierPath3d),
+              null,
+              asset.createdAt,
+              asset.updatedAt,
+            );
+        }),
+      rollbackFiles: async () => {
+        await rm(sourcePath, { force: true });
+      },
     });
 
     return asset;
@@ -418,7 +523,7 @@ export function createPrimitiveAssetStore(
     const profile = validateViewMorphProfile(createDefaultViewMorphProfile());
     const previewPath = createViewMorphPreviewPath(profile);
     const name = "View Morph Profile";
-    const assetId = createUniqueAssetId(projectId, name);
+    const assetId = createPrimitiveAssetId();
     const timestamp = new Date().toISOString();
     const sourcePath = join(getProjectDir(projectId), "primitives", `${assetId}.svg`);
     const relativeSourcePath = toDataRelativePath(sourcePath);
@@ -558,6 +663,36 @@ export function createPrimitiveAssetStore(
     return updatedAsset;
   }
 
+  function renamePrimitiveAsset(
+    projectId: string,
+    assetId: string,
+    name: string,
+  ): StoredPrimitiveAsset {
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      throw new Error("Asset name is required.");
+    }
+
+    const existingAsset = getPrimitiveAssetRecord(projectId, assetId);
+    const timestamp = new Date().toISOString();
+    const renamedAsset: StoredPrimitiveAsset = {
+      ...existingAsset,
+      name: trimmedName,
+      updatedAt: timestamp,
+    };
+
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          "UPDATE primitive_assets SET name = ?, updatedAt = ? WHERE projectId = ? AND id = ?",
+        )
+        .run(renamedAsset.name, renamedAsset.updatedAt, projectId, assetId);
+    });
+
+    return renamedAsset;
+  }
+
   async function deletePrimitiveAsset(
     projectId: string,
     assetId: string,
@@ -607,23 +742,79 @@ export function createPrimitiveAssetStore(
     return hydratePrimitiveAssetRow(row);
   }
 
-  function createUniqueAssetId(projectId: string, name: string): string {
-    const baseId = slugifyName(name);
-    const existingIds = new Set(
-      listPrimitiveAssets(projectId).map((asset) => asset.id),
-    );
+  function normalizePackagePrimitiveAsset(
+    asset: StoredPrimitiveAsset,
+  ): StoredPrimitiveAsset {
+    if (asset.assetKind === "bezierCurve3d") {
+      const bezierPath3d = asset.bezierPath3d
+        ? validateStructuredBezierPath3D(asset.bezierPath3d)
+        : null;
 
-    return createUniqueId(baseId, existingIds);
+      if (!bezierPath3d) {
+        throw new Error("3D curve package asset is missing bezierPath3d.");
+      }
+
+      return {
+        ...asset,
+        assetKind: "bezierCurve3d",
+        fill: "none",
+        fillRule: "nonzero",
+        stroke: asset.stroke ?? "#000000",
+        strokeWidth: asset.strokeWidth ?? 1,
+        bezierPath: projectStructuredBezierPath3DTo2D(bezierPath3d),
+        bezierPath3d,
+        viewMorphProfile: null,
+      };
+    }
+
+    if (asset.assetKind === "viewMorphProfile") {
+      const viewMorphProfile = asset.viewMorphProfile
+        ? validateViewMorphProfile(asset.viewMorphProfile)
+        : null;
+
+      if (!viewMorphProfile) {
+        throw new Error("View morph package asset is missing viewMorphProfile.");
+      }
+
+      return {
+        ...asset,
+        assetKind: "viewMorphProfile",
+        fill: asset.fill,
+        fillRule: asset.fillRule,
+        stroke: null,
+        strokeWidth: null,
+        bezierPath: createViewMorphPreviewPath(viewMorphProfile),
+        bezierPath3d: null,
+        viewMorphProfile,
+      };
+    }
+
+    const capabilities = getPrimitiveAssetCapabilities(asset.assetKind);
+
+    return {
+      ...asset,
+      assetKind: asset.assetKind,
+      bezierPath: validateStructuredBezierPath(asset.bezierPath, {
+        expectedClosed: capabilities.expectedStructuredPathClosed,
+      }),
+      bezierPath3d: null,
+      viewMorphProfile: null,
+      stroke: asset.assetKind === "strokePath" ? (asset.stroke ?? "#000000") : null,
+      strokeWidth:
+        asset.assetKind === "strokePath" ? (asset.strokeWidth ?? 1) : null,
+    };
   }
 
   return {
     listPrimitiveAssets,
     createPrimitiveAsset,
+    importPrimitiveAssetFromPackage,
     updatePrimitiveAssetPath,
     convertPrimitiveAssetTo3DCurve,
     updatePrimitiveAssetCurve3D,
     createViewMorphProfileAsset,
     updatePrimitiveAssetViewMorphProfile,
+    renamePrimitiveAsset,
     deletePrimitiveAsset,
   };
 }

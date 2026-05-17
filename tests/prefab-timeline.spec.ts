@@ -21,6 +21,13 @@ test("keeps staged timeline ghost proxies aligned when switching prefab nodes", 
     svgText: filledSvg,
   });
   await expect(page.getByRole("button", { name: "Fill: staged-face" })).toBeVisible();
+  const stagedFaceAssetId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getAssets()
+        .find((candidate) => candidate.name === "staged-face")?.id ?? null,
+  );
+  expect(stagedFaceAssetId).toBeTruthy();
   await page.getByRole("button", { name: "Group: Root Group" }).click();
   await page.getByRole("button", { name: "Add Primitive to Prefab" }).click();
   await page.getByRole("button", { name: "Group: Root Group" }).click();
@@ -83,7 +90,7 @@ test("keeps staged timeline ghost proxies aligned when switching prefab nodes", 
   expect(pathToolSelectionState.inPlaceState).toMatchObject({
     active: true,
     nodeId: "prefab-node-2",
-    assetId: "staged-face",
+    assetId: stagedFaceAssetId,
   });
 
   await page.locator('[data-prefab-node-id="prefab-node-2"]').click();

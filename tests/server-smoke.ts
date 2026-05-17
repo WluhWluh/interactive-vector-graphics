@@ -3,6 +3,10 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDataStore } from "../server/dataStore";
+import {
+  exportProjectPackage,
+  importProjectPackage,
+} from "../server/packageStore";
 import { importPrimitiveSvgOnServer } from "../server/primitiveSvgImport";
 import { validatePrefabDocument } from "../server/prefabDocument";
 import { validateSceneDocument } from "../server/sceneDocument";
@@ -14,6 +18,11 @@ import {
 import { migratePrefabDocument } from "../src/core/documents/prefabDocumentMigration";
 import type { StructuredBezierPath3D } from "../src/core/assets/structuredBezierPath3d";
 import { evaluateViewMorphProfileToBezierPath } from "../src/core/assets/viewMorphProfile";
+import { isOpaqueId } from "../src/core/contracts/ids";
+import {
+  decodeProjectPackageZip,
+  encodeProjectPackageZip,
+} from "../src/core/contracts/package";
 import type { PrefabDocument, SceneDocument } from "../server/types";
 import {
   assertInvalidPrefabDocument,
@@ -37,10 +46,14 @@ try {
   const firstProject = await store.createProject("My Test Project");
   const secondProject = await store.createProject("My Test Project");
 
-  assert.equal(firstProject.id, "my-test-project");
+  assert.equal(isOpaqueId(firstProject.id, "project"), true);
   assert.equal(firstProject.name, "My Test Project");
-  assert.equal(secondProject.id, "my-test-project-2");
+  assert.equal(isOpaqueId(secondProject.id, "project"), true);
+  assert.notEqual(secondProject.id, firstProject.id);
   assert.equal((await store.listProjects()).length, 2);
+  const renamedProject = store.renameProject(firstProject.id, "Renamed Project");
+  assert.equal(renamedProject.id, firstProject.id);
+  assert.equal(renamedProject.name, "Renamed Project");
 
   const validSvg = [
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 100 100">',
@@ -67,9 +80,13 @@ try {
     ...imported,
   });
 
-  assert.equal(firstAsset.id, "uploaded-face");
-  assert.equal(secondAsset.id, "uploaded-face-2");
-  assert.equal(firstAsset.sourcePath, "projects/my-test-project/primitives/uploaded-face.svg");
+  assert.equal(isOpaqueId(firstAsset.id, "primitiveAsset"), true);
+  assert.equal(isOpaqueId(secondAsset.id, "primitiveAsset"), true);
+  assert.notEqual(secondAsset.id, firstAsset.id);
+  assert.equal(
+    firstAsset.sourcePath,
+    `projects/${firstProject.id}/primitives/${firstAsset.id}.svg`,
+  );
   assert.deepEqual(firstAsset.viewBox, [-50, -50, 100, 100]);
   assert.equal(firstAsset.assetKind, "filledPath");
   assert.equal(firstAsset.fill, "#ffcf4a");
@@ -130,7 +147,7 @@ try {
 
   const viewMorphAsset = await store.createViewMorphProfileAsset(firstProject.id);
 
-  assert.equal(viewMorphAsset.id, "view-morph-profile");
+  assert.equal(isOpaqueId(viewMorphAsset.id, "primitiveAsset"), true);
   assert.equal(viewMorphAsset.assetKind, "viewMorphProfile");
   assert.equal(viewMorphAsset.fill, "#ffcf4a");
   assert.equal(viewMorphAsset.fillRule, "nonzero");
@@ -188,6 +205,7 @@ try {
     strokeAsset.id,
   );
 
+  assert.equal(isOpaqueId(curve3dAsset.id, "primitiveAsset"), true);
   assert.equal(curve3dAsset.assetKind, "bezierCurve3d");
   assert.equal(curve3dAsset.stroke, strokeAsset.stroke);
   assert.equal(curve3dAsset.strokeWidth, strokeAsset.strokeWidth);
@@ -907,10 +925,22 @@ try {
     },
   });
 
-  assert.equal(firstPrefab.id, "demo-head");
-  assert.equal(secondPrefab.id, "demo-head-2");
-  assert.equal(firstPrefab.dataPath, "projects/my-test-project/prefabs/demo-head.json");
+  assert.equal(isOpaqueId(firstPrefab.id, "prefab"), true);
+  assert.equal(isOpaqueId(secondPrefab.id, "prefab"), true);
+  assert.notEqual(secondPrefab.id, firstPrefab.id);
+  assert.equal(
+    firstPrefab.dataPath,
+    `projects/${firstProject.id}/prefabs/${firstPrefab.id}.json`,
+  );
   assert.equal(store.listPrefabs(firstProject.id).length, 2);
+  const renamedPrefab = store.renamePrefab(
+    firstProject.id,
+    firstPrefab.id,
+    "Renamed Demo Head",
+  );
+  assert.equal(renamedPrefab.id, firstPrefab.id);
+  assert.equal(renamedPrefab.name, "Renamed Demo Head");
+  assert.equal(renamedPrefab.dataPath, firstPrefab.dataPath);
 
   const storedPrefab = await store.getPrefab(firstProject.id, firstPrefab.id);
   assert.deepEqual(storedPrefab.document, validPrefabDocument);
@@ -1146,10 +1176,22 @@ try {
     document: animatedSceneDocument,
   });
 
-  assert.equal(firstScene.id, "opening-scene");
-  assert.equal(secondScene.id, "opening-scene-2");
-  assert.equal(firstScene.dataPath, "projects/my-test-project/scenes/opening-scene.json");
+  assert.equal(isOpaqueId(firstScene.id, "scene"), true);
+  assert.equal(isOpaqueId(secondScene.id, "scene"), true);
+  assert.notEqual(secondScene.id, firstScene.id);
+  assert.equal(
+    firstScene.dataPath,
+    `projects/${firstProject.id}/scenes/${firstScene.id}.json`,
+  );
   assert.equal(store.listScenes(firstProject.id).length, 2);
+  const renamedScene = store.renameScene(
+    firstProject.id,
+    firstScene.id,
+    "Renamed Opening Scene",
+  );
+  assert.equal(renamedScene.id, firstScene.id);
+  assert.equal(renamedScene.name, "Renamed Opening Scene");
+  assert.equal(renamedScene.dataPath, firstScene.dataPath);
 
   const storedScene = await store.getScene(firstProject.id, firstScene.id);
   assert.deepEqual(storedScene.document, validSceneDocument);
@@ -1179,26 +1221,152 @@ try {
   assert.notEqual(updatedScene.updatedAt, firstScene.updatedAt);
   assert.deepEqual(updatedStoredScene.document, updatedSceneDocument);
 
+  const primitivePackage = await exportProjectPackage({
+    store,
+    projectId: firstProject.id,
+    kind: "primitive",
+    itemId: strokeAsset.id,
+  });
+  assert.equal(primitivePackage.kind, "primitive");
+  assert.equal(primitivePackage.root.primitiveAssetId, strokeAsset.id);
+  assert.deepEqual(
+    primitivePackage.assets.map((asset) => asset.id),
+    [strokeAsset.id],
+  );
+  assert.equal(primitivePackage.prefabs.length, 0);
+  assert.equal(primitivePackage.scenes.length, 0);
+  const primitiveZipRoundTrip = decodeProjectPackageZip(
+    encodeProjectPackageZip(primitivePackage),
+  );
+  assert.deepEqual(normalizeJson(primitiveZipRoundTrip), normalizeJson(primitivePackage));
+
+  const prefabPackage = await exportProjectPackage({
+    store,
+    projectId: firstProject.id,
+    kind: "prefab",
+    itemId: firstPrefab.id,
+  });
+  assert.equal(prefabPackage.kind, "prefab");
+  assert.equal(prefabPackage.root.prefabId, firstPrefab.id);
+  assert.deepEqual(
+    prefabPackage.prefabs.map((entry) => entry.record.id),
+    [firstPrefab.id],
+  );
+  assert.deepEqual(
+    prefabPackage.assets.map((asset) => asset.id),
+    [firstAsset.id],
+  );
+
+  const scenePackage = await exportProjectPackage({
+    store,
+    projectId: firstProject.id,
+    kind: "scene",
+    itemId: firstScene.id,
+  });
+  assert.equal(scenePackage.kind, "scene");
+  assert.equal(scenePackage.root.sceneId, firstScene.id);
+  assert.deepEqual(
+    scenePackage.scenes.map((entry) => entry.record.id),
+    [firstScene.id],
+  );
+  assert.deepEqual(
+    scenePackage.prefabs.map((entry) => entry.record.id),
+    [firstPrefab.id],
+  );
+  assert.deepEqual(
+    scenePackage.assets.map((asset) => asset.id),
+    [firstAsset.id],
+  );
+
+  const projectPackage = await exportProjectPackage({
+    store,
+    projectId: firstProject.id,
+    kind: "project",
+  });
+  assert.equal(projectPackage.kind, "project");
+  assert.equal(projectPackage.assets.length, 5);
+  assert.equal(projectPackage.prefabs.length, 2);
+  assert.equal(projectPackage.scenes.length, 2);
+
+  const importedIntoNewProject = await importProjectPackage({
+    store,
+    manifest: scenePackage,
+  });
+  const importedProjectId =
+    importedIntoNewProject.idMap.projects[firstProject.id] ?? "";
+  const importedPrefabId =
+    importedIntoNewProject.idMap.prefabs[firstPrefab.id] ?? "";
+  const importedSceneId =
+    importedIntoNewProject.idMap.scenes[firstScene.id] ?? "";
+  const importedAssetId =
+    importedIntoNewProject.idMap.assets[firstAsset.id] ?? "";
+  assert.equal(isOpaqueId(importedProjectId, "project"), true);
+  assert.equal(isOpaqueId(importedPrefabId, "prefab"), true);
+  assert.equal(isOpaqueId(importedSceneId, "scene"), true);
+  assert.equal(isOpaqueId(importedAssetId, "primitiveAsset"), true);
+  assert.notEqual(importedProjectId, firstProject.id);
+  assert.notEqual(importedPrefabId, firstPrefab.id);
+  assert.notEqual(importedSceneId, firstScene.id);
+  assert.notEqual(importedAssetId, firstAsset.id);
+  const importedScene = await store.getScene(importedProjectId, importedSceneId);
+  assert.equal(
+    importedScene.document.nodes[0]?.kind === "prefabInstance"
+      ? importedScene.document.nodes[0].prefabId
+      : null,
+    importedPrefabId,
+  );
+  const importedPrefab = await store.getPrefab(importedProjectId, importedPrefabId);
+  assert.equal(
+    importedPrefab.document.nodes[1]?.kind === "primitive"
+      ? importedPrefab.document.nodes[1].assetId
+      : null,
+    importedAssetId,
+  );
+
+  const importedIntoExistingProject = await importProjectPackage({
+    store,
+    manifest: prefabPackage,
+    targetProjectId: secondProject.id,
+  });
+  const existingProjectImportedPrefabId =
+    importedIntoExistingProject.idMap.prefabs[firstPrefab.id] ?? "";
+  const existingProjectImportedAssetId =
+    importedIntoExistingProject.idMap.assets[firstAsset.id] ?? "";
+  assert.equal(
+    importedIntoExistingProject.idMap.projects[firstProject.id],
+    secondProject.id,
+  );
+  const existingProjectPrefab = await store.getPrefab(
+    secondProject.id,
+    existingProjectImportedPrefabId,
+  );
+  assert.equal(
+    existingProjectPrefab.document.nodes[1]?.kind === "primitive"
+      ? existingProjectPrefab.document.nodes[1].assetId
+      : null,
+    existingProjectImportedAssetId,
+  );
+
   const primitiveFiles = await readdir(
     join(tempDataDir, "projects", firstProject.id, "primitives"),
   );
   assert.deepEqual(primitiveFiles.sort(), [
-    "leg-stroke-3d-curve.svg",
-    "leg-stroke.svg",
-    "uploaded-face-2.svg",
-    "uploaded-face.svg",
-    "view-morph-profile.svg",
-  ]);
+    `${curve3dAsset.id}.svg`,
+    `${firstAsset.id}.svg`,
+    `${secondAsset.id}.svg`,
+    `${strokeAsset.id}.svg`,
+    `${viewMorphAsset.id}.svg`,
+  ].sort());
 
   const sceneFiles = await readdir(
     join(tempDataDir, "projects", firstProject.id, "scenes"),
   );
   assert.deepEqual(sceneFiles.sort(), [
-    "opening-scene-2.json",
-    "opening-scene.json",
-  ]);
+    `${firstScene.id}.json`,
+    `${secondScene.id}.json`,
+  ].sort());
   const sceneFileText = await readFile(
-    join(tempDataDir, "projects", firstProject.id, "scenes", "opening-scene.json"),
+    join(tempDataDir, "projects", firstProject.id, "scenes", `${firstScene.id}.json`),
     "utf8",
   );
   assert.equal(JSON.parse(sceneFileText).nodes[0].position[0], 2.5);
@@ -1207,11 +1375,11 @@ try {
     join(tempDataDir, "projects", firstProject.id, "prefabs"),
   );
   assert.deepEqual(prefabFiles.sort(), [
-    "demo-head-2.json",
-    "demo-head.json",
-  ]);
+    `${firstPrefab.id}.json`,
+    `${secondPrefab.id}.json`,
+  ].sort());
   const prefabFileText = await readFile(
-    join(tempDataDir, "projects", firstProject.id, "prefabs", "demo-head.json"),
+    join(tempDataDir, "projects", firstProject.id, "prefabs", `${firstPrefab.id}.json`),
     "utf8",
   );
   assert.equal(JSON.parse(prefabFileText).nodes[1].position[0], 0.5);
@@ -1221,21 +1389,28 @@ try {
   const remainingPrefabFiles = await readdir(
     join(tempDataDir, "projects", firstProject.id, "prefabs"),
   );
-  assert.deepEqual(remainingPrefabFiles, ["demo-head-2.json"]);
+  assert.deepEqual(remainingPrefabFiles, [`${secondPrefab.id}.json`]);
 
   await store.deleteScene(firstProject.id, firstScene.id);
   assert.equal(store.listScenes(firstProject.id).length, 1);
   const remainingSceneFiles = await readdir(
     join(tempDataDir, "projects", firstProject.id, "scenes"),
   );
-  assert.deepEqual(remainingSceneFiles, ["opening-scene-2.json"]);
+  assert.deepEqual(remainingSceneFiles, [`${secondScene.id}.json`]);
 
   await store.deletePrimitiveAsset(firstProject.id, firstAsset.id);
   assert.equal(store.listPrimitiveAssets(firstProject.id).length, 4);
 
   await store.deleteProject(firstProject.id);
-  assert.equal(store.listProjects().length, 1);
+  const remainingProjectIds = store.listProjects().map((project) => project.id);
+  assert.equal(remainingProjectIds.includes(firstProject.id), false);
+  assert.equal(remainingProjectIds.includes(secondProject.id), true);
+  assert.equal(remainingProjectIds.includes(importedProjectId), true);
 } finally {
   store.close();
   await rm(tempDataDir, { recursive: true, force: true });
+}
+
+function normalizeJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }

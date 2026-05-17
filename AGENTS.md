@@ -47,6 +47,12 @@ than to the heavier 3D/game look of Star Birds.
 - `src/editor/main.ts` is the editor shell and compatibility coordinator. New
   user actions should move toward `EditorCommand` dispatch, controllers, or
   workflows rather than directly mutating many `editorState` fields inline.
+- Shared frontend/server API records, package manifests, and ID helpers live
+  under `src/core/contracts`. Do not duplicate DTO shapes in `server/types.ts`
+  or `src/editor/api.ts`; keep those files as thin consumers/re-export facades.
+- Project, primitive, prefab, and scene IDs are opaque UUIDv7-style IDs from the
+  shared factory. Display names are editable labels only and must not be used to
+  derive IDs, filenames, references, or package contents.
 - Use `src/editor/state/editorCommand.ts` for cross-cutting editor state
   commands that need consistent invalidation such as UI shell refresh, debug
   hook refresh, and persisted UI preferences.
@@ -153,6 +159,9 @@ than to the heavier 3D/game look of Star Birds.
 - Project metadata currently lives in SQLite at `data/ivg.sqlite`; imported SVG
   sources are validated and rewritten as normalized project-native SVG files
   beside their project under `data/projects/<project-id>/`.
+- Project, primitive asset, prefab, and scene files/directories are keyed by
+  opaque IDs. Rename actions update display names without moving files or
+  changing references.
 - Prefab metadata lives in the same SQLite database; prefab document v4 JSON
   files under `data/projects/<project-id>/prefabs/` store nodes plus local
   animation clips/tracks/keyframes for `position`, `rotation`, `scale`, and 2D
@@ -167,8 +176,10 @@ than to the heavier 3D/game look of Star Birds.
   not make old scene documents unreadable.
 - Validate primitive SVG imports on the server before saving them. Browser-side
   preview logic may help UX, but it must not be the persistence authority.
-- Treat runtime data as disposable experiment data until explicit export/import
-  tooling exists.
+- Project, primitive, prefab, and scene export/import uses the versioned zip
+  package contract in `src/core/contracts/package.ts`. Package imports must
+  remap IDs and rewrite prefab/scene references instead of preserving source
+  IDs.
 
 ## Testing Expectations
 

@@ -39,23 +39,30 @@ and scene document data:
 - `GET /api/health`
 - `GET /api/projects`
 - `POST /api/projects` with `{ "name": "My Test Project" }`
+- `PATCH /api/projects/:projectId` with `{ "name": "Renamed Project" }`
 - `DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/assets`
 - `POST /api/projects/:projectId/assets` as `multipart/form-data`
 - `POST /api/projects/:projectId/assets/view-morph-profile`
+- `PATCH /api/projects/:projectId/assets/:assetId`
 - `PUT /api/projects/:projectId/assets/:assetId/path`
 - `PUT /api/projects/:projectId/assets/:assetId/view-morph-profile`
 - `POST /api/projects/:projectId/assets/:assetId/convert-to-3d-curve`
 - `PUT /api/projects/:projectId/assets/:assetId/curve3d`
 - `DELETE /api/projects/:projectId/assets/:assetId`
+- `GET /api/projects/:projectId/package?kind=project|primitive|prefab|scene`
+- `POST /api/projects/:projectId/package/import` as `application/zip`
+- `POST /api/package/import` as `application/zip`
 - `GET /api/projects/:projectId/prefabs`
 - `POST /api/projects/:projectId/prefabs`
 - `GET /api/projects/:projectId/prefabs/:prefabId`
+- `PATCH /api/projects/:projectId/prefabs/:prefabId`
 - `PUT /api/projects/:projectId/prefabs/:prefabId`
 - `DELETE /api/projects/:projectId/prefabs/:prefabId`
 - `GET /api/projects/:projectId/scenes`
 - `POST /api/projects/:projectId/scenes`
 - `GET /api/projects/:projectId/scenes/:sceneId`
+- `PATCH /api/projects/:projectId/scenes/:sceneId`
 - `PUT /api/projects/:projectId/scenes/:sceneId`
 - `DELETE /api/projects/:projectId/scenes/:sceneId`
 
@@ -71,12 +78,18 @@ SVG files under `data/projects/<project-id>/primitives/`. Prefab documents live 
 `data/projects/<project-id>/scenes/` as JSON files. Project assets, prefabs,
 scenes, and animation data are intentionally separate from source code.
 Only code, fixtures, and built-in demos should enter Git.
+Project, primitive, prefab, and scene IDs are opaque UUIDv7-style identifiers
+with namespace prefixes. Display names are ordinary editable labels and do not
+drive IDs, paths, references, or package contents.
 Each primitive asset stores normalized structured Bezier path data in SQLite
 beside `pathD`, and editor-created assets such as `viewMorphProfile` also keep
 their source JSON in the same project database. Source Path Edit can update the
 asset source and regenerate the derived preview values. Prefab path keyframes
 store structured Bezier snapshots and render through temporary `Path2D`
 previews during timeline playback.
+Package export/import uses a versioned zip container with a JSON manifest.
+Project, primitive, prefab, and scene exports include the required dependency
+closure, and imports remap IDs while rewriting prefab/scene references.
 
 For local development, run both servers:
 

@@ -14,6 +14,12 @@ but future feature work should use these seams instead of growing `main.ts` or
 - The visual truth for primitives is Canvas Path2D drawing. Three.js is an
   editor aid for camera math, selection proxies, transform handles, 3D source
   curve controls, and optional spatial experiments.
+- Shared frontend/server API DTOs, package manifests, record types, and opaque
+  ID helpers live under `src/core/contracts`. `server/types.ts` and
+  `src/editor/api.ts` should remain thin consumers of that single contract.
+- Project, primitive, prefab, and scene IDs are generated with the shared
+  UUIDv7-style opaque ID factory. Display names are editable metadata and must
+  not be used to derive IDs, filenames, references, or package contents.
 
 ## Primitive Asset Pipeline
 
@@ -110,11 +116,25 @@ back into global editor state.
 Routes should continue to use the facade unless a larger API refactor is
 planned. Runtime data remains under `IVG_DATA_DIR` or repo-root `data/` by
 default, with SQLite metadata and normalized project files stored side by side.
+File-backed project data uses opaque IDs for directories and files. Rename
+actions update display names without moving files or changing references.
+
+## Package Import/Export
+
+`src/core/contracts/package.ts` defines the versioned zip package manifest and
+codec. Server package helpers export project, primitive, prefab, or scene
+dependency closures, then import by remapping IDs before writing new records. A
+package import into an existing project keeps the target project ID and remaps
+imported assets, prefabs, and scenes underneath it. Import without a target
+creates a new project. Future portable asset payloads should extend this
+package boundary instead of adding one-off download formats.
 
 ## Tests
 
 - `npm run test:server` runs a server data-store smoke test through
   `tests/server-smoke.ts`, with shared assertions in `tests/helpers`.
+- `tests/unit/contracts.test.ts` covers opaque ID and package manifest/zip round
+  trips.
 - `npm run test:visual` runs Playwright editor and stage smoke tests.
 - Test SVG fixtures belong in `tests/helpers/svgFixtures.ts`.
 

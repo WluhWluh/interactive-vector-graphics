@@ -24,6 +24,7 @@ import {
   type CreatePrefabInput,
 } from "./stores/prefabStore";
 import { createSceneStore, type CreateSceneInput } from "./stores/sceneStore";
+import { createOpaqueId } from "../src/core/contracts/ids";
 
 const PROJECTS_DIR_NAME = "projects";
 const DATABASE_FILE_NAME = "ivg.sqlite";
@@ -41,10 +42,15 @@ export type DataStore = {
   countProjects: () => number;
   listProjects: () => ProjectRecord[];
   createProject: (name: string) => Promise<ProjectRecord>;
+  renameProject: (projectId: string, name: string) => ProjectRecord;
   deleteProject: (projectId: string) => Promise<void>;
   listPrimitiveAssets: (projectId: string) => StoredPrimitiveAsset[];
   createPrimitiveAsset: (
     input: CreatePrimitiveAssetInput,
+  ) => Promise<StoredPrimitiveAsset>;
+  importPrimitiveAssetFromPackage: (
+    projectId: string,
+    sourceAsset: StoredPrimitiveAsset,
   ) => Promise<StoredPrimitiveAsset>;
   updatePrimitiveAssetPath: (
     projectId: string,
@@ -68,9 +74,15 @@ export type DataStore = {
     assetId: string,
     viewMorphProfile: ViewMorphProfile,
   ) => Promise<StoredPrimitiveAsset>;
+  renamePrimitiveAsset: (
+    projectId: string,
+    assetId: string,
+    name: string,
+  ) => StoredPrimitiveAsset;
   deletePrimitiveAsset: (projectId: string, assetId: string) => Promise<void>;
   listPrefabs: (projectId: string) => PrefabRecord[];
   createPrefab: (input: CreatePrefabInput) => Promise<PrefabRecord>;
+  importPrefabFromPackage: (input: CreatePrefabInput) => Promise<PrefabRecord>;
   getPrefab: (
     projectId: string,
     prefabId: string,
@@ -80,9 +92,15 @@ export type DataStore = {
     prefabId: string,
     document: PrefabDocument,
   ) => Promise<PrefabRecord>;
+  renamePrefab: (
+    projectId: string,
+    prefabId: string,
+    name: string,
+  ) => PrefabRecord;
   deletePrefab: (projectId: string, prefabId: string) => Promise<void>;
   listScenes: (projectId: string) => SceneRecord[];
   createScene: (input: CreateSceneInput) => Promise<SceneRecord>;
+  importSceneFromPackage: (input: CreateSceneInput) => Promise<SceneRecord>;
   getScene: (
     projectId: string,
     sceneId: string,
@@ -92,6 +110,7 @@ export type DataStore = {
     sceneId: string,
     document: SceneDocument,
   ) => Promise<SceneRecord>;
+  renameScene: (projectId: string, sceneId: string, name: string) => SceneRecord;
   deleteScene: (projectId: string, sceneId: string) => Promise<void>;
 };
 
@@ -199,8 +218,7 @@ export function createDataStore(dataDir: string): DataStore {
     database,
     runDatabaseTransaction,
     getProjectDir,
-    createUniqueId,
-    slugifyName,
+    createProjectId: () => createOpaqueId("project"),
   });
 
   const primitiveAssetStore = createPrimitiveAssetStore({
@@ -210,8 +228,7 @@ export function createDataStore(dataDir: string): DataStore {
     getProjectDir,
     toDataRelativePath,
     runDatabaseTransaction,
-    createUniqueId,
-    slugifyName,
+    createPrimitiveAssetId: () => createOpaqueId("primitiveAsset"),
   });
 
   function getScenesDir(projectId: string): string {
@@ -229,8 +246,7 @@ export function createDataStore(dataDir: string): DataStore {
     getPrefabsDir,
     toDataRelativePath,
     runDatabaseTransaction,
-    createUniqueId,
-    slugifyName,
+    createPrefabId: () => createOpaqueId("prefab"),
   });
 
   const sceneStore = createSceneStore({
@@ -240,8 +256,7 @@ export function createDataStore(dataDir: string): DataStore {
     getScenesDir,
     toDataRelativePath,
     runDatabaseTransaction,
-    createUniqueId,
-    slugifyName,
+    createSceneId: () => createOpaqueId("scene"),
   });
 
   function toDataRelativePath(path: string): string {
@@ -267,9 +282,12 @@ export function createDataStore(dataDir: string): DataStore {
     countProjects: projectStore.countProjects,
     listProjects: projectStore.listProjects,
     createProject: projectStore.createProject,
+    renameProject: projectStore.renameProject,
     deleteProject: projectStore.deleteProject,
     listPrimitiveAssets: primitiveAssetStore.listPrimitiveAssets,
     createPrimitiveAsset: primitiveAssetStore.createPrimitiveAsset,
+    importPrimitiveAssetFromPackage:
+      primitiveAssetStore.importPrimitiveAssetFromPackage,
     updatePrimitiveAssetPath: primitiveAssetStore.updatePrimitiveAssetPath,
     convertPrimitiveAssetTo3DCurve:
       primitiveAssetStore.convertPrimitiveAssetTo3DCurve,
@@ -278,16 +296,21 @@ export function createDataStore(dataDir: string): DataStore {
       primitiveAssetStore.createViewMorphProfileAsset,
     updatePrimitiveAssetViewMorphProfile:
       primitiveAssetStore.updatePrimitiveAssetViewMorphProfile,
+    renamePrimitiveAsset: primitiveAssetStore.renamePrimitiveAsset,
     deletePrimitiveAsset: primitiveAssetStore.deletePrimitiveAsset,
     listPrefabs: prefabStore.listPrefabs,
     createPrefab: prefabStore.createPrefab,
+    importPrefabFromPackage: prefabStore.importPrefabFromPackage,
     getPrefab: prefabStore.getPrefab,
     updatePrefab: prefabStore.updatePrefab,
+    renamePrefab: prefabStore.renamePrefab,
     deletePrefab: prefabStore.deletePrefab,
     listScenes: sceneStore.listScenes,
     createScene: sceneStore.createScene,
+    importSceneFromPackage: sceneStore.importSceneFromPackage,
     getScene: sceneStore.getScene,
     updateScene: sceneStore.updateScene,
+    renameScene: sceneStore.renameScene,
     deleteScene: sceneStore.deleteScene,
   };
 }
@@ -312,30 +335,4 @@ export function getServerPort(): number {
   return port;
 }
 
-function createUniqueId(baseId: string, existingIds: Set<string>): string {
-  if (!existingIds.has(baseId)) {
-    return baseId;
-  }
-
-  let suffix = 2;
-  let candidate = `${baseId}-${suffix}`;
-
-  while (existingIds.has(candidate)) {
-    suffix += 1;
-    candidate = `${baseId}-${suffix}`;
-  }
-
-  return candidate;
-}
-
-function slugifyName(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/\.[^.]+$/, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "item";
-}
 

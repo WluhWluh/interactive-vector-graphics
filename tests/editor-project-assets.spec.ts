@@ -75,6 +75,23 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   await expect(page.getByRole("button", { name: "uploaded-face" })).toBeVisible();
+  const uploadedFaceAssetId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getAssets()
+        .find((candidate) => candidate.name === "uploaded-face")?.id ?? null,
+  );
+  const playwrightProjectId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getProjects()
+        .find((candidate) => candidate.name === "Playwright Project")?.id ?? null,
+  );
+  let facePrefabId: string | null = null;
+  let emptySceneId: string | null = null;
+  let openingSceneId: string | null = null;
+  expect(uploadedFaceAssetId).toBeTruthy();
+  expect(playwrightProjectId).toBeTruthy();
   await expect(page.locator("#inspector-fields")).toContainText("uploaded-face");
   await expect(page.locator("#inspector-fields")).toContainText("#ffcf4a");
   await expect(page.locator("#inspector-fields")).toContainText("Bezier Segments");
@@ -83,7 +100,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   const originalUploadedAnchor = await page.evaluate(() => {
     const asset = window.__vectorEditorDebug
       ?.getAssets()
-      .find((candidate) => candidate.id === "uploaded-face");
+      .find((candidate) => candidate.name === "uploaded-face");
 
     return asset?.bezierPath.segments[0]?.anchor ?? null;
   });
@@ -99,7 +116,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   );
 
   expect(initialPathEditState).toMatchObject({
-    assetId: "uploaded-face",
+    assetId: uploadedFaceAssetId,
     selectedSegmentId: "seg-1",
     selectedComponent: "anchor",
     hasDraft: true,
@@ -139,7 +156,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   const savedPathState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+    const asset = debug?.getAssets().find((candidate) => candidate.name === "uploaded-face");
 
     return {
       pathEdit: debug?.getPathEditState() ?? null,
@@ -185,14 +202,14 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       selectedAssetId: debug.getSelectedAssetId(),
       importedAsset: debug
         .getAssets()
-        .find((candidate) => candidate.id === "uploaded-face"),
+        .find((candidate) => candidate.name === "uploaded-face"),
       prefabAssembly: debug.getPrefabAssembly(),
       lastImportError: debug.getLastImportError(),
     };
   });
 
-  expect(editorDebugState?.selectedProjectId).toBe("playwright-project");
-  expect(editorDebugState?.selectedAssetId).toBe("uploaded-face");
+  expect(editorDebugState?.selectedProjectId).toBe(playwrightProjectId);
+  expect(editorDebugState?.selectedAssetId).toBe(uploadedFaceAssetId);
   expect(editorDebugState?.importedAsset?.viewBox).toEqual([-50, -50, 100, 100]);
   expect(editorDebugState?.importedAsset?.bezierPath.version).toBe(1);
   expect(editorDebugState?.importedAsset?.bezierPath.closed).toBe(true);
@@ -200,14 +217,14 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
     editorDebugState?.importedAsset?.bezierPath.segments.length,
   ).toBeGreaterThanOrEqual(3);
   expect(editorDebugState?.importedAsset?.sourceUrl).toBe(
-    "projects/playwright-project/primitives/uploaded-face.svg",
+    `projects/${playwrightProjectId}/primitives/${uploadedFaceAssetId}.svg`,
   );
   expect(editorDebugState?.prefabAssembly.nodes).toEqual([
     {
       id: "prefab-node-1",
       kind: "primitive",
       parentId: null,
-      assetId: "uploaded-face",
+      assetId: uploadedFaceAssetId,
       name: "uploaded-face",
       position: [0, 1, 0],
       rotation: [0, 0, 0],
@@ -272,7 +289,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   const inPlaceInitialState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+    const asset = debug?.getAssets().find((candidate) => candidate.name === "uploaded-face");
 
     return {
       path: debug?.getInPlacePathEditState() ?? null,
@@ -283,7 +300,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   expect(inPlaceInitialState.path).toMatchObject({
     nodeId: "prefab-node-1",
-    assetId: "uploaded-face",
+    assetId: uploadedFaceAssetId,
     active: true,
     hasDraft: true,
     selectedSegmentId: "seg-1",
@@ -354,7 +371,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   const inPlaceEditedState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+    const asset = debug?.getAssets().find((candidate) => candidate.name === "uploaded-face");
 
     return {
       path: debug?.getInPlacePathEditState() ?? null,
@@ -382,7 +399,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   const pathKeyframeState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+    const asset = debug?.getAssets().find((candidate) => candidate.name === "uploaded-face");
     const timeline = debug?.getPrefabTimeline();
     const pathTrack = timeline?.animation.clips[0]?.tracks.find(
       (track) => track.target.property === "path",
@@ -447,7 +464,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
       basePathAnchor:
         window.__vectorEditorDebug
           ?.getAssets()
-          .find((candidate) => candidate.id === "uploaded-face")
+          .find((candidate) => candidate.name === "uploaded-face")
           ?.bezierPath.segments[0]?.anchor ?? null,
     };
   });
@@ -492,7 +509,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   const inPlaceDiscardedState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    const asset = debug?.getAssets().find((candidate) => candidate.id === "uploaded-face");
+    const asset = debug?.getAssets().find((candidate) => candidate.name === "uploaded-face");
 
     return {
       path: debug?.getInPlacePathEditState() ?? null,
@@ -744,6 +761,13 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await page.locator("#prefab-name-input").fill("Face Prefab");
   await page.locator("#create-prefab-button").click();
   await expect(page.getByRole("button", { name: /Face Prefab/ })).toBeVisible();
+  facePrefabId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getPrefabs()
+        .find((candidate) => candidate.name === "Face Prefab")?.id ?? null,
+  );
+  expect(facePrefabId).toBeTruthy();
 
   const savedPrefabState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -761,8 +785,8 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   expect(savedPrefabState?.prefabs).toHaveLength(1);
-  expect(savedPrefabState?.selectedPrefabId).toBe("face-prefab");
-  expect(savedPrefabState?.loadedPrefabId).toBe("face-prefab");
+  expect(savedPrefabState?.selectedPrefabId).toBe(facePrefabId);
+  expect(savedPrefabState?.loadedPrefabId).toBe(facePrefabId);
   expect(savedPrefabState?.timeline.animation.clips[0]?.name).toBe("Idle");
   await page.getByRole("button", { name: "Load Prefab" }).click();
   await expect
@@ -786,12 +810,19 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await page.getByRole("button", { name: "Save Prefab" }).click();
   await expect
     .poll(async () => page.evaluate(() => window.__vectorEditorDebug?.getLoadedPrefabId()))
-    .toBe("face-prefab");
+    .toBe(facePrefabId);
   await page.getByRole("button", { name: "Scene Layout" }).click();
 
   await page.locator("#scene-name-input").fill("Empty Scene");
   await page.locator("#create-scene-button").click();
   await expect(page.getByRole("button", { name: /Empty Scene/ })).toBeVisible();
+  emptySceneId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getScenes()
+        .find((candidate) => candidate.name === "Empty Scene")?.id ?? null,
+  );
+  expect(emptySceneId).toBeTruthy();
 
   const createdSceneState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -808,9 +839,9 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   expect(createdSceneState?.scenes).toHaveLength(1);
-  expect(createdSceneState?.scenes[0]?.id).toBe("empty-scene");
-  expect(createdSceneState?.selectedSceneId).toBe("empty-scene");
-  expect(createdSceneState?.loadedSceneId).toBe("empty-scene");
+  expect(createdSceneState?.scenes[0]?.id).toBe(emptySceneId);
+  expect(createdSceneState?.selectedSceneId).toBe(emptySceneId);
+  expect(createdSceneState?.loadedSceneId).toBe(emptySceneId);
 
   await page.getByRole("button", { name: "Load Scene" }).click();
 
@@ -828,7 +859,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   expect(emptyLoadedState?.nodeCount).toBe(0);
-  expect(emptyLoadedState?.loadedSceneId).toBe("empty-scene");
+  expect(emptyLoadedState?.loadedSceneId).toBe(emptySceneId);
 
   await page.getByRole("button", { name: "Add Prefab Instance to Scene" }).click();
   await expect.poll(async () =>
@@ -847,6 +878,13 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await page.locator("#scene-name-input").fill("Opening Scene");
   await page.locator("#clone-scene-button").click();
   await expect(page.getByRole("button", { name: /Opening Scene/ })).toBeVisible();
+  openingSceneId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getScenes()
+        .find((candidate) => candidate.name === "Opening Scene")?.id ?? null,
+  );
+  expect(openingSceneId).toBeTruthy();
 
   const clonedSceneState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
@@ -864,12 +902,12 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   expect(clonedSceneState?.scenes).toHaveLength(2);
-  expect(clonedSceneState?.selectedSceneId).toBe("opening-scene");
-  expect(clonedSceneState?.loadedSceneId).toBe("opening-scene");
+  expect(clonedSceneState?.selectedSceneId).toBe(openingSceneId);
+  expect(clonedSceneState?.loadedSceneId).toBe(openingSceneId);
   expect(clonedSceneState?.node).toMatchObject({
     id: "node-1",
     kind: "prefabInstance",
-    prefabId: "face-prefab",
+    prefabId: facePrefabId,
     position: [2.5, 1, 0],
   });
 
@@ -878,7 +916,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   await page.getByRole("button", { name: "Save Scene" }).click();
   await expect.poll(async () =>
     page.evaluate(() => window.__vectorEditorDebug?.getLoadedSceneId() ?? null),
-  ).toBe("opening-scene");
+  ).toBe(openingSceneId);
 
   await page.getByLabel("Position X").fill("0");
   await page.getByLabel("Position X").blur();
@@ -918,10 +956,10 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
 
   expect(loadedSceneState?.node).toMatchObject({
     kind: "prefabInstance",
-    prefabId: "face-prefab",
+    prefabId: facePrefabId,
     position: [2, 1, 0],
   });
-  expect(loadedSceneState?.loadedSceneId).toBe("opening-scene");
+  expect(loadedSceneState?.loadedSceneId).toBe(openingSceneId);
   expect(loadedSceneState?.camera.near).toBe(0.05);
   expect(loadedSceneState?.camera.far).toBe(120);
 
@@ -1014,7 +1052,7 @@ test("creates a project, imports a primitive SVG, and deletes data", async ({
   });
 
   expect(afterSceneDeleteState?.sceneCount).toBe(1);
-  expect(afterSceneDeleteState?.selectedSceneId).toBe("empty-scene");
+  expect(afterSceneDeleteState?.selectedSceneId).toBe(emptySceneId);
   expect(afterSceneDeleteState?.loadedSceneId).toBeNull();
   expect(afterSceneDeleteState?.nodeCount).toBe(1);
 
@@ -1117,6 +1155,13 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "View Morph: View Morph Profile" }),
   ).toBeVisible();
+  const viewMorphProfileAssetId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getAssets()
+        .find((candidate) => candidate.name === "View Morph Profile")?.id ?? null,
+  );
+  expect(viewMorphProfileAssetId).toBeTruthy();
   await expect(page.locator("#inspector-fields")).toContainText("viewMorphProfile");
   await expect(page.locator("#inspector-fields")).toContainText("Vertical Planes");
   await expect(page.locator("#inspector-fields")).toContainText("Vertical Points");
@@ -1126,7 +1171,7 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
     const debug = window.__vectorEditorDebug;
     const asset = debug
       ?.getAssets()
-      .find((candidate) => candidate.id === "view-morph-profile");
+      .find((candidate) => candidate.name === "View Morph Profile");
 
     return {
       selectedAssetId: debug?.getSelectedAssetId() ?? null,
@@ -1134,7 +1179,7 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
     };
   });
 
-  expect(assetState.selectedAssetId).toBe("view-morph-profile");
+  expect(assetState.selectedAssetId).toBe(viewMorphProfileAssetId);
   expect(assetState.asset?.assetKind).toBe("viewMorphProfile");
   expect(assetState.asset?.viewMorphProfile?.version).toBe(1);
   expect(assetState.asset?.viewMorphProfile?.verticalPlanes.length).toBe(2);
@@ -1196,12 +1241,12 @@ test("creates and renders a view morph profile asset", async ({ page }) => {
     node: window.__vectorEditorDebug?.getPrefabAssembly().nodes[0] ?? null,
     asset: window.__vectorEditorDebug
       ?.getAssets()
-      .find((candidate) => candidate.id === "view-morph-profile"),
+      .find((candidate) => candidate.name === "View Morph Profile"),
   }));
 
   expect(prefabState.node).toMatchObject({
     kind: "primitive",
-    assetId: "view-morph-profile",
+    assetId: viewMorphProfileAssetId,
   });
   expect(prefabState.asset?.viewMorphProfile?.verticalPlanes[0]?.path.points.length).toBe(
     8,

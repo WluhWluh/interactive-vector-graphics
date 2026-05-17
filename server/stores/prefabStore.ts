@@ -6,6 +6,7 @@ import { validatePrefabDocument } from "../prefabDocument";
 import { writeJsonDocumentFile } from "../persistence/documentFiles";
 import { runFileBackedDatabaseTransaction } from "../persistence/persistenceTransaction";
 import { migratePrefabDocument } from "../../src/core/documents/prefabDocumentMigration";
+import type { PrefabId } from "../../src/core/contracts/ids";
 
 export type CreatePrefabInput = {
   projectId: string;
@@ -16,6 +17,9 @@ export type CreatePrefabInput = {
 export type PrefabStore = {
   listPrefabs: (projectId: string) => PrefabRecord[];
   createPrefab: (input: CreatePrefabInput) => Promise<PrefabRecord>;
+  importPrefabFromPackage: (
+    input: CreatePrefabInput,
+  ) => Promise<PrefabRecord>;
   getPrefab: (
     projectId: string,
     prefabId: string,
@@ -25,6 +29,7 @@ export type PrefabStore = {
     prefabId: string,
     document: PrefabDocument,
   ) => Promise<PrefabRecord>;
+  renamePrefab: (projectId: string, prefabId: string, name: string) => PrefabRecord;
   deletePrefab: (projectId: string, prefabId: string) => Promise<void>;
 };
 
@@ -35,8 +40,7 @@ export type PrefabStoreDependencies = {
   getPrefabsDir: (projectId: string) => string;
   toDataRelativePath: (path: string) => string;
   runDatabaseTransaction: <T>(operation: () => T) => T;
-  createUniqueId: (baseId: string, existingIds: Set<string>) => string;
-  slugifyName: (name: string) => string;
+  createPrefabId: () => PrefabId;
 };
 
 export function createPrefabStore(
@@ -49,8 +53,7 @@ export function createPrefabStore(
     getPrefabsDir,
     toDataRelativePath,
     runDatabaseTransaction,
-    createUniqueId,
-    slugifyName,
+    createPrefabId,
   } = dependencies;
 
   function listPrefabs(projectId: string): PrefabRecord[] {
@@ -69,16 +72,32 @@ export function createPrefabStore(
   }
 
   async function createPrefab(input: CreatePrefabInput): Promise<PrefabRecord> {
+    return writeNewPrefab(input);
+  }
+
+  async function importPrefabFromPackage(
+    input: CreatePrefabInput,
+  ): Promise<PrefabRecord> {
+    return writeNewPrefab(input);
+  }
+
+  async function writeNewPrefab(input: CreatePrefabInput): Promise<PrefabRecord> {
     assertProjectExists(input.projectId);
 
-    const prefabId = createUniquePrefabId(input.projectId, input.name);
+    const trimmedName = input.name.trim();
+
+    if (!trimmedName) {
+      throw new Error("Prefab name is required.");
+    }
+
+    const prefabId = createPrefabId();
     const timestamp = new Date().toISOString();
     const dataPath = join(getPrefabsDir(input.projectId), `${prefabId}.json`);
     const relativeDataPath = toDataRelativePath(dataPath);
     const prefab: PrefabRecord = {
       id: prefabId,
       projectId: input.projectId,
-      name: input.name.trim(),
+      name: trimmedName,
       dataPath: relativeDataPath,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -155,6 +174,36 @@ export function createPrefabStore(
     };
   }
 
+  function renamePrefab(
+    projectId: string,
+    prefabId: string,
+    name: string,
+  ): PrefabRecord {
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      throw new Error("Prefab name is required.");
+    }
+
+    const prefab = getPrefabRecord(projectId, prefabId);
+    const timestamp = new Date().toISOString();
+    const renamedPrefab = {
+      ...prefab,
+      name: trimmedName,
+      updatedAt: timestamp,
+    };
+
+    runDatabaseTransaction(() => {
+      database
+        .prepare(
+          "UPDATE prefabs SET name = ?, updatedAt = ? WHERE projectId = ? AND id = ?",
+        )
+        .run(renamedPrefab.name, renamedPrefab.updatedAt, projectId, prefabId);
+    });
+
+    return renamedPrefab;
+  }
+
   async function deletePrefab(projectId: string, prefabId: string): Promise<void> {
     const prefab = getPrefabRecord(projectId, prefabId);
 
@@ -164,13 +213,6 @@ export function createPrefabStore(
         .run(projectId, prefabId);
     });
     await rm(join(resolvedDataDir, prefab.dataPath), { force: true });
-  }
-
-  function createUniquePrefabId(projectId: string, name: string): string {
-    const baseId = slugifyName(name);
-    const existingIds = new Set(listPrefabs(projectId).map((prefab) => prefab.id));
-
-    return createUniqueId(baseId, existingIds);
   }
 
   function getPrefabRecord(projectId: string, prefabId: string): PrefabRecord {
@@ -196,8 +238,10 @@ export function createPrefabStore(
   return {
     listPrefabs,
     createPrefab,
+    importPrefabFromPackage,
     getPrefab,
     updatePrefab,
+    renamePrefab,
     deletePrefab,
   };
 }

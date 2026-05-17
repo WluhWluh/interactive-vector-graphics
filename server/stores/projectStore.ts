@@ -1,11 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 import { mkdir, rm } from "node:fs/promises";
 import type { ProjectRecord } from "../types";
+import type { ProjectId } from "../../src/core/contracts/ids";
 
 export type ProjectStore = {
   countProjects: () => number;
   listProjects: () => ProjectRecord[];
   createProject: (name: string) => Promise<ProjectRecord>;
+  renameProject: (projectId: string, name: string) => ProjectRecord;
   deleteProject: (projectId: string) => Promise<void>;
   assertProjectExists: (projectId: string) => void;
   getProjectDir: (projectId: string) => string;
@@ -15,8 +17,7 @@ export type ProjectStoreDependencies = {
   database: DatabaseSync;
   runDatabaseTransaction: <T>(operation: () => T) => T;
   getProjectDir: (projectId: string) => string;
-  createUniqueId: (baseId: string, existingIds: Set<string>) => string;
-  slugifyName: (name: string) => string;
+  createProjectId: () => ProjectId;
 };
 
 export function createProjectStore(
@@ -26,8 +27,7 @@ export function createProjectStore(
     database,
     runDatabaseTransaction,
     getProjectDir,
-    createUniqueId,
-    slugifyName,
+    createProjectId,
   } = dependencies;
 
   function countProjects(): number {
@@ -53,7 +53,7 @@ export function createProjectStore(
       throw new Error("Project name is required.");
     }
 
-    const projectId = createUniqueProjectId(trimmedName);
+    const projectId = createProjectId();
     const timestamp = new Date().toISOString();
     const project: ProjectRecord = {
       id: projectId,
@@ -75,11 +75,35 @@ export function createProjectStore(
     return project;
   }
 
+  function renameProject(projectId: string, name: string): ProjectRecord {
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      throw new Error("Project name is required.");
+    }
+
+    const existingProject = getProjectRecord(projectId);
+    const timestamp = new Date().toISOString();
+    const renamedProject: ProjectRecord = {
+      ...existingProject,
+      name: trimmedName,
+      updatedAt: timestamp,
+    };
+
+    runDatabaseTransaction(() => {
+      database
+        .prepare("UPDATE projects SET name = ?, updatedAt = ? WHERE id = ?")
+        .run(renamedProject.name, renamedProject.updatedAt, projectId);
+    });
+
+    return renamedProject;
+  }
+
   async function deleteProject(projectId: string): Promise<void> {
     /**
-     * Project ids normally come from slugified project names, but API route
-     * parameters are still untrusted. Confirming the record before deriving a
-     * filesystem path prevents arbitrary path removal through crafted ids.
+     * Project ids are opaque, but API route parameters are still untrusted.
+     * Confirming the record before deriving a filesystem path prevents
+     * arbitrary path removal through crafted ids.
      */
     assertProjectExists(projectId);
     runDatabaseTransaction(() => {
@@ -89,26 +113,26 @@ export function createProjectStore(
   }
 
   function assertProjectExists(projectId: string): void {
+    getProjectRecord(projectId);
+  }
+
+  function getProjectRecord(projectId: string): ProjectRecord {
     const row = database
-      .prepare("SELECT id FROM projects WHERE id = ?")
-      .get(projectId) as { id: string } | undefined;
+      .prepare("SELECT id, name, createdAt, updatedAt FROM projects WHERE id = ?")
+      .get(projectId) as ProjectRecord | undefined;
 
     if (!row) {
       throw new Error(`Project "${projectId}" does not exist.`);
     }
-  }
 
-  function createUniqueProjectId(name: string): string {
-    const baseId = slugifyName(name);
-    const existingIds = new Set(listProjects().map((project) => project.id));
-
-    return createUniqueId(baseId, existingIds);
+    return row;
   }
 
   return {
     countProjects,
     listProjects,
     createProject,
+    renameProject,
     deleteProject,
     assertProjectExists,
     getProjectDir,

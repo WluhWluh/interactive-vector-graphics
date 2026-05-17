@@ -28,6 +28,13 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
   await expect(page.locator("#inspector-fields")).toContainText("bezierCurve3d");
   await expect(page.locator("#inspector-fields")).toContainText("3D Bezier Segments");
   await expect(page.getByLabel("3D path anchor Z")).toHaveValue("0");
+  const curve3dAssetId = await page.evaluate(
+    () =>
+      window.__vectorEditorDebug
+        ?.getAssets()
+        .find((candidate) => candidate.name === "leg-stroke 3D Curve")?.id ?? null,
+  );
+  expect(curve3dAssetId).toBeTruthy();
 
   const initialCurve3dState = await page.evaluate(
     () => window.__vectorEditorDebug?.getPathEditState() ?? null,
@@ -35,7 +42,7 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
 
   expect(initialCurve3dState).toMatchObject({
     is3d: true,
-    assetId: "leg-stroke-3d-curve",
+    assetId: curve3dAssetId,
     selectedSegmentId: "seg-1",
     selectedComponent: "anchor",
     hasDraft: true,
@@ -79,7 +86,7 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     const debug = window.__vectorEditorDebug;
     const asset = debug
       ?.getAssets()
-      .find((candidate) => candidate.id === "leg-stroke-3d-curve");
+      .find((candidate) => candidate.name === "leg-stroke 3D Curve");
 
     return {
       selectedAssetId: debug?.getSelectedAssetId() ?? null,
@@ -87,7 +94,7 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     };
   });
 
-  expect(savedCurve3dState.selectedAssetId).toBe("leg-stroke-3d-curve");
+  expect(savedCurve3dState.selectedAssetId).toBe(curve3dAssetId);
   expect(savedCurve3dState.asset?.assetKind).toBe("bezierCurve3d");
   expect(savedCurve3dState.asset?.bezierPath3d?.segments[0]?.anchor).toEqual([
     10,
@@ -136,7 +143,7 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
 
   const strokeState = await page.evaluate(() => {
     const debug = window.__vectorEditorDebug;
-    const asset = debug?.getAssets().find((candidate) => candidate.id === "leg-stroke");
+    const asset = debug?.getAssets().find((candidate) => candidate.name === "leg-stroke");
 
     return {
       asset,
@@ -154,7 +161,7 @@ test("imports and previews an open strokePath primitive", async ({ page }) => {
     },
   });
   expect(strokeState.asset?.bezierPath.segments).toHaveLength(2);
-  expect(strokeState.selectedAssetId).toBe("leg-stroke");
+  expect(strokeState.selectedAssetId).toBe(strokeState.asset?.id);
   expect(await countTealPixels(page.locator("#vector-canvas"))).toBeGreaterThan(300);
 
   await page.getByRole("button", { name: "Asset Assembly" }).click();

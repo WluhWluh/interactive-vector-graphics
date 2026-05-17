@@ -1,17 +1,38 @@
-import type {
-  PrimitiveAssetKind,
-  PrimitiveFillRule,
-  PrimitiveSvgAsset,
-} from "../core/assets/primitiveAssetTypes";
+import type { PrimitiveSvgAsset } from "../core/assets/primitiveAssetTypes";
 import { hydratePrimitiveSvgAsset } from "../core/assets/primitiveAssetHydration";
 import type { StructuredBezierPath } from "../core/assets/structuredBezierPath";
 import type { StructuredBezierPath3D } from "../core/assets/structuredBezierPath3d";
 import type { ViewMorphProfile } from "../core/assets/viewMorphProfile";
 import type {
-  EditorSceneNode,
-  EditorViewportCameraSnapshot,
-  Vector3Tuple,
-} from "./threeEditorViewport";
+  AssetsResponse,
+  CreateAssetResponse,
+  CreatePrefabResponse,
+  CreateProjectResponse,
+  CreateSceneResponse,
+  ImportPackageResponse,
+  PrefabDetailResponse,
+  PrefabRecord,
+  PrefabsResponse,
+  ProjectRecord,
+  ProjectsResponse,
+  RenameAssetResponse,
+  RenamePrefabResponse,
+  RenameProjectResponse,
+  RenameSceneResponse,
+  SceneDetailResponse,
+  SceneDocument,
+  SceneRecord,
+  ScenesResponse,
+  StoredPrimitiveAsset as StoredPrimitiveAssetDto,
+  UpdateAssetCurve3DResponse,
+  UpdateAssetPathResponse,
+  UpdateViewMorphProfileResponse,
+} from "../core/contracts/api";
+import type { ProjectPackageManifest } from "../core/contracts/package";
+import {
+  decodeProjectPackageZip,
+  encodeProjectPackageZip,
+} from "../core/contracts/package";
 import type { PrefabDocument } from "../core/documents/prefabDocument";
 
 export type {
@@ -31,114 +52,22 @@ export type {
   PrefabVectorTrackProperty,
 } from "../core/documents/prefabDocument";
 
-export type ProjectRecord = {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type StoredPrimitiveAssetDto = {
-  id: string;
-  projectId: string;
-  assetKind: PrimitiveAssetKind;
-  name: string;
-  sourceFilename: string;
-  sourcePath: string;
-  viewBox: [number, number, number, number];
-  pathD: string;
-  fill: string;
-  fillRule: PrimitiveFillRule;
-  stroke: string | null;
-  strokeWidth: number | null;
-  bezierPath: StructuredBezierPath;
-  bezierPath3d: StructuredBezierPath3D | null;
-  viewMorphProfile: ViewMorphProfile | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type PrefabRecord = {
-  id: string;
-  projectId: string;
-  name: string;
-  dataPath: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ScenePrimitiveNode = EditorSceneNode & {
-  kind: "primitive";
-};
-
-export type ScenePrefabInstanceNode = {
-  id: string;
-  kind: "prefabInstance";
-  prefabId: string;
-  position: Vector3Tuple;
-  rotation: Vector3Tuple;
-  scale: Vector3Tuple;
-};
-
-export type SceneNode = ScenePrimitiveNode | ScenePrefabInstanceNode;
-
-export type SceneDocument = {
-  version: 2;
-  camera: EditorViewportCameraSnapshot;
-  nodes: SceneNode[];
-  animation: {
-    fps: 24;
-    activeClipId: string | null;
-    clips: Array<{
-      id: string;
-      name: string;
-      duration: number;
-      tracks: Array<{
-        id: string;
-        target:
-          | {
-              kind: "node";
-              nodeId: string;
-              property:
-                | "position"
-                | "rotation"
-                | "scale"
-                | "target"
-                | "fov"
-                | "zoom";
-            }
-          | {
-              kind: "camera";
-              property:
-                | "position"
-                | "rotation"
-                | "scale"
-                | "target"
-                | "fov"
-                | "zoom";
-            };
-        keyframes: Array<{
-          time: number;
-          value: number | [number, number, number];
-          easing: "linear" | "step" | "easeInOut";
-        }>;
-      }>;
-    }>;
-  };
-};
-
-export type SceneRecord = {
-  id: string;
-  projectId: string;
-  name: string;
-  dataPath: string;
-  createdAt: string;
-  updatedAt: string;
-};
+export type {
+  PrefabRecord,
+  ProjectPackageManifest,
+  ProjectRecord,
+  SceneDocument,
+  SceneNode,
+  ScenePrefabInstanceNode,
+  ScenePrimitiveNode,
+  SceneRecord,
+} from "../core/contracts/api";
 
 export async function listProjects(): Promise<ProjectRecord[]> {
   const response = await fetch("/api/projects");
-  const body = (await response.json()) as { projects?: ProjectRecord[]; error?: string };
+  const body = (await response.json()) as Partial<ProjectsResponse> & {
+    error?: string;
+  };
   assertOk(response, body.error);
   return body.projects ?? [];
 }
@@ -151,11 +80,36 @@ export async function createProject(name: string): Promise<ProjectRecord> {
     },
     body: JSON.stringify({ name }),
   });
-  const body = (await response.json()) as { project?: ProjectRecord; error?: string };
+  const body = (await response.json()) as Partial<CreateProjectResponse> & {
+    error?: string;
+  };
   assertOk(response, body.error);
 
   if (!body.project) {
     throw new Error("Project API did not return a project.");
+  }
+
+  return body.project;
+}
+
+export async function renameProject(
+  projectId: string,
+  name: string,
+): Promise<ProjectRecord> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+  const body = (await response.json()) as Partial<RenameProjectResponse> & {
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.project) {
+    throw new Error("Project API did not return a renamed project.");
   }
 
   return body.project;
@@ -173,8 +127,7 @@ export async function listAssets(projectId: string): Promise<PrimitiveSvgAsset[]
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/assets`,
   );
-  const body = (await response.json()) as {
-    assets?: StoredPrimitiveAssetDto[];
+  const body = (await response.json()) as Partial<AssetsResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -195,8 +148,7 @@ export async function uploadAsset(
       body: formData,
     },
   );
-  const body = (await response.json()) as {
-    asset?: StoredPrimitiveAssetDto;
+  const body = (await response.json()) as Partial<UpdateAssetPathResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -217,8 +169,7 @@ export async function createViewMorphProfileAsset(
       method: "POST",
     },
   );
-  const body = (await response.json()) as {
-    asset?: StoredPrimitiveAssetDto;
+  const body = (await response.json()) as Partial<CreateAssetResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -259,10 +210,8 @@ export async function updateAssetPath(
       body: JSON.stringify({ bezierPath }),
     },
   );
-  const body = (await response.json()) as {
-    asset?: StoredPrimitiveAssetDto;
-    error?: string;
-  };
+  const body = (await response.json()) as
+    Partial<UpdateAssetPathResponse> & { error?: string };
   assertOk(response, body.error);
 
   if (!body.asset) {
@@ -282,8 +231,7 @@ export async function convertAssetTo3DCurve(
       method: "POST",
     },
   );
-  const body = (await response.json()) as {
-    asset?: StoredPrimitiveAssetDto;
+  const body = (await response.json()) as Partial<UpdateAssetCurve3DResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -310,10 +258,8 @@ export async function updateAssetCurve3D(
       body: JSON.stringify({ bezierPath3d }),
     },
   );
-  const body = (await response.json()) as {
-    asset?: StoredPrimitiveAssetDto;
-    error?: string;
-  };
+  const body = (await response.json()) as
+    Partial<UpdateViewMorphProfileResponse> & { error?: string };
   assertOk(response, body.error);
 
   if (!body.asset) {
@@ -338,10 +284,8 @@ export async function updateViewMorphProfile(
       body: JSON.stringify({ viewMorphProfile }),
     },
   );
-  const body = (await response.json()) as {
-    asset?: StoredPrimitiveAssetDto;
-    error?: string;
-  };
+  const body = (await response.json()) as
+    Partial<UpdateViewMorphProfileResponse> & { error?: string };
   assertOk(response, body.error);
 
   if (!body.asset) {
@@ -351,12 +295,38 @@ export async function updateViewMorphProfile(
   return hydratePrimitiveAsset(body.asset);
 }
 
+export async function renameAsset(
+  projectId: string,
+  assetId: string,
+  name: string,
+): Promise<PrimitiveSvgAsset> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    },
+  );
+  const body = (await response.json()) as Partial<RenameAssetResponse> & {
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.asset) {
+    throw new Error("Asset API did not return a renamed asset.");
+  }
+
+  return hydratePrimitiveAsset(body.asset);
+}
+
 export async function listPrefabs(projectId: string): Promise<PrefabRecord[]> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/prefabs`,
   );
-  const body = (await response.json()) as {
-    prefabs?: PrefabRecord[];
+  const body = (await response.json()) as Partial<PrefabsResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -378,9 +348,7 @@ export async function createPrefab(
       body: JSON.stringify({ name, document }),
     },
   );
-  const body = (await response.json()) as {
-    prefab?: PrefabRecord;
-    document?: PrefabDocument;
+  const body = (await response.json()) as Partial<CreatePrefabResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -399,9 +367,7 @@ export async function getPrefab(
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/prefabs/${encodeURIComponent(prefabId)}`,
   );
-  const body = (await response.json()) as {
-    prefab?: PrefabRecord;
-    document?: PrefabDocument;
+  const body = (await response.json()) as Partial<PrefabDetailResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -428,9 +394,7 @@ export async function savePrefab(
       body: JSON.stringify({ document }),
     },
   );
-  const body = (await response.json()) as {
-    prefab?: PrefabRecord;
-    document?: PrefabDocument;
+  const body = (await response.json()) as Partial<PrefabDetailResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -440,6 +404,33 @@ export async function savePrefab(
   }
 
   return { prefab: body.prefab, document: body.document };
+}
+
+export async function renamePrefab(
+  projectId: string,
+  prefabId: string,
+  name: string,
+): Promise<PrefabRecord> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/prefabs/${encodeURIComponent(prefabId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    },
+  );
+  const body = (await response.json()) as Partial<RenamePrefabResponse> & {
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.prefab) {
+    throw new Error("Prefab API did not return a renamed prefab.");
+  }
+
+  return body.prefab;
 }
 
 export async function deletePrefab(
@@ -460,8 +451,7 @@ export async function listScenes(projectId: string): Promise<SceneRecord[]> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/scenes`,
   );
-  const body = (await response.json()) as {
-    scenes?: SceneRecord[];
+  const body = (await response.json()) as Partial<ScenesResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -483,9 +473,7 @@ export async function createScene(
       body: JSON.stringify({ name, document }),
     },
   );
-  const body = (await response.json()) as {
-    scene?: SceneRecord;
-    document?: SceneDocument;
+  const body = (await response.json()) as Partial<CreateSceneResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -504,9 +492,7 @@ export async function getScene(
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}`,
   );
-  const body = (await response.json()) as {
-    scene?: SceneRecord;
-    document?: SceneDocument;
+  const body = (await response.json()) as Partial<SceneDetailResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -533,9 +519,7 @@ export async function saveScene(
       body: JSON.stringify({ document }),
     },
   );
-  const body = (await response.json()) as {
-    scene?: SceneRecord;
-    document?: SceneDocument;
+  const body = (await response.json()) as Partial<SceneDetailResponse> & {
     error?: string;
   };
   assertOk(response, body.error);
@@ -545,6 +529,33 @@ export async function saveScene(
   }
 
   return { scene: body.scene, document: body.document };
+}
+
+export async function renameScene(
+  projectId: string,
+  sceneId: string,
+  name: string,
+): Promise<SceneRecord> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    },
+  );
+  const body = (await response.json()) as Partial<RenameSceneResponse> & {
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.scene) {
+    throw new Error("Scene API did not return a renamed scene.");
+  }
+
+  return body.scene;
 }
 
 export async function deleteScene(
@@ -561,8 +572,61 @@ export async function deleteScene(
   assertOk(response, body.error);
 }
 
+export async function exportPackage(
+  projectId: string,
+  kind: "project" | "primitive" | "prefab" | "scene",
+  itemId?: string,
+): Promise<ProjectPackageManifest> {
+  const search = new URLSearchParams({ kind });
+
+  if (itemId) {
+    search.set("id", itemId);
+  }
+
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/package?${search.toString()}`,
+  );
+  assertOk(response);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return decodeProjectPackageZip(bytes);
+}
+
+export async function importPackage(
+  projectId: string | null,
+  manifest: ProjectPackageManifest,
+): Promise<ImportPackageResponse> {
+  const path = projectId
+    ? `/api/projects/${encodeURIComponent(projectId)}/package/import`
+    : "/api/package/import";
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/zip",
+    },
+    body: new Blob([toArrayBuffer(encodeProjectPackageZip(manifest))], {
+      type: "application/zip",
+    }),
+  });
+  const body = (await response.json()) as Partial<ImportPackageResponse> & {
+    error?: string;
+  };
+  assertOk(response, body.error);
+
+  if (!body.package || !body.idMap) {
+    throw new Error("Package API did not return an imported package.");
+  }
+
+  return { package: body.package, idMap: body.idMap };
+}
+
 function hydratePrimitiveAsset(asset: StoredPrimitiveAssetDto): PrimitiveSvgAsset {
   return hydratePrimitiveSvgAsset(asset);
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const output = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(output).set(bytes);
+  return output;
 }
 
 function assertOk(response: Response, error?: string): void {

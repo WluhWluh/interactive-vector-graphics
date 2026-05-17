@@ -1,6 +1,12 @@
 import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { createDataStore, getDefaultDataDir, getServerPort } from "./dataStore";
+import {
+  decodeProjectPackageZip,
+  encodeProjectPackageZip,
+  exportProjectPackage,
+  importProjectPackage,
+} from "./packageStore";
 import { validatePrefabDocument } from "./prefabDocument";
 import { importPrimitiveSvgOnServer } from "./primitiveSvgImport";
 import { validateSceneDocument } from "./sceneDocument";
@@ -16,14 +22,20 @@ import type {
   CreateSceneResponse,
   CreateViewMorphProfileAssetResponse,
   HealthResponse,
+  ImportPackageResponse,
   PrefabDetailResponse,
   PrefabsResponse,
-  ProjectsResponse,
+  ProjectPackageKind,
+  RenameAssetResponse,
+  RenamePrefabResponse,
+  RenameProjectResponse,
+  RenameSceneResponse,
   SceneDetailResponse,
   ScenesResponse,
   UpdateAssetCurve3DResponse,
   UpdateAssetPathResponse,
   UpdateViewMorphProfileResponse,
+  ProjectsResponse,
 } from "./types";
 
 const dataStore = createDataStore(getDefaultDataDir());
@@ -43,6 +55,18 @@ await server.register(multipart, {
     files: 1,
   },
 });
+
+server.addContentTypeParser("application/zip", { parseAs: "buffer" }, (_request, body, done) => {
+  done(null, body);
+});
+
+server.addContentTypeParser(
+  "application/octet-stream",
+  { parseAs: "buffer" },
+  (_request, body, done) => {
+    done(null, body);
+  },
+);
 
 server.get<{ Reply: HealthResponse }>("/api/health", async () => {
   await dataStore.ensureReady();
@@ -76,6 +100,28 @@ server.post<{
   return {
     project: await dataStore.createProject(request.body.name),
   };
+});
+
+server.patch<{
+  Params: { projectId: string };
+  Body: { name?: unknown };
+  Reply: RenameProjectResponse | { error: string };
+}>("/api/projects/:projectId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  if (typeof request.body?.name !== "string" || !request.body.name.trim()) {
+    reply.code(400);
+    return { error: "Project name is required." };
+  }
+
+  try {
+    return {
+      project: dataStore.renameProject(request.params.projectId, request.body.name),
+    };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Project not found." };
+  }
 });
 
 server.delete<{
@@ -191,6 +237,32 @@ server.delete<{
   }
 });
 
+server.patch<{
+  Params: { projectId: string; assetId: string };
+  Body: { name?: unknown };
+  Reply: RenameAssetResponse | { error: string };
+}>("/api/projects/:projectId/assets/:assetId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  if (typeof request.body?.name !== "string" || !request.body.name.trim()) {
+    reply.code(400);
+    return { error: "Asset name is required." };
+  }
+
+  try {
+    return {
+      asset: dataStore.renamePrimitiveAsset(
+        request.params.projectId,
+        request.params.assetId,
+        request.body.name,
+      ),
+    };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Asset not found." };
+  }
+});
+
 server.put<{
   Params: { projectId: string; assetId: string };
   Body: { bezierPath?: unknown };
@@ -296,6 +368,90 @@ server.put<{
 
 server.get<{
   Params: { projectId: string };
+  Querystring: { kind?: string; id?: string };
+  Reply: Buffer | { error: string };
+}>("/api/projects/:projectId/package", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  const kind = request.query.kind as ProjectPackageKind | undefined;
+
+  if (
+    kind !== "project" &&
+    kind !== "primitive" &&
+    kind !== "prefab" &&
+    kind !== "scene"
+  ) {
+    reply.code(400);
+    return { error: "Package kind is required." };
+  }
+
+  try {
+    const packageManifest = await exportProjectPackage({
+      store: dataStore,
+      projectId: request.params.projectId,
+      kind,
+      itemId: request.query.id,
+    });
+    reply.header("Content-Type", "application/zip");
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename="${request.params.projectId}-${kind}.zip"`,
+    );
+    return Buffer.from(encodeProjectPackageZip(packageManifest));
+  } catch (error) {
+    reply.code(404);
+    return {
+      error: error instanceof Error ? error.message : "Package export failed.",
+    };
+  }
+});
+
+server.post<{
+  Params: { projectId: string };
+  Body: Buffer;
+  Reply: ImportPackageResponse | { error: string };
+}>("/api/projects/:projectId/package/import", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const manifest = decodeProjectPackageZip(request.body);
+    const result = await importProjectPackage({
+      store: dataStore,
+      manifest,
+      targetProjectId: request.params.projectId,
+    });
+    return result;
+  } catch (error) {
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Package import failed.",
+    };
+  }
+});
+
+server.post<{
+  Body: Buffer;
+  Reply: ImportPackageResponse | { error: string };
+}>("/api/package/import", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  try {
+    const manifest = decodeProjectPackageZip(request.body);
+    const result = await importProjectPackage({
+      store: dataStore,
+      manifest,
+    });
+    return result;
+  } catch (error) {
+    reply.code(400);
+    return {
+      error: error instanceof Error ? error.message : "Package import failed.",
+    };
+  }
+});
+
+server.get<{
+  Params: { projectId: string };
   Reply: PrefabsResponse | { error: string };
 }>("/api/projects/:projectId/prefabs", async (request, reply) => {
   await dataStore.ensureReady();
@@ -336,6 +492,32 @@ server.post<{
   } catch (error) {
     reply.code(400);
     return { error: error instanceof Error ? error.message : "Prefab create failed." };
+  }
+});
+
+server.patch<{
+  Params: { projectId: string; prefabId: string };
+  Body: { name?: unknown };
+  Reply: RenamePrefabResponse | { error: string };
+}>("/api/projects/:projectId/prefabs/:prefabId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  if (typeof request.body?.name !== "string" || !request.body.name.trim()) {
+    reply.code(400);
+    return { error: "Prefab name is required." };
+  }
+
+  try {
+    return {
+      prefab: dataStore.renamePrefab(
+        request.params.projectId,
+        request.params.prefabId,
+        request.body.name,
+      ),
+    };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Prefab not found." };
   }
 });
 
@@ -441,6 +623,32 @@ server.post<{
   } catch (error) {
     reply.code(400);
     return { error: error instanceof Error ? error.message : "Scene create failed." };
+  }
+});
+
+server.patch<{
+  Params: { projectId: string; sceneId: string };
+  Body: { name?: unknown };
+  Reply: RenameSceneResponse | { error: string };
+}>("/api/projects/:projectId/scenes/:sceneId", async (request, reply) => {
+  await dataStore.ensureReady();
+
+  if (typeof request.body?.name !== "string" || !request.body.name.trim()) {
+    reply.code(400);
+    return { error: "Scene name is required." };
+  }
+
+  try {
+    return {
+      scene: dataStore.renameScene(
+        request.params.projectId,
+        request.params.sceneId,
+        request.body.name,
+      ),
+    };
+  } catch (error) {
+    reply.code(404);
+    return { error: error instanceof Error ? error.message : "Scene not found." };
   }
 });
 
