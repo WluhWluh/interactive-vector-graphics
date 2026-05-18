@@ -8,11 +8,12 @@ import {
   cloneEditorV2Layout,
   createDefaultEditorV2Layout,
   createLayoutFingerprint,
+  getAreaIds,
   getAreaCount,
   insertAreaAtWorkspaceBoundary,
   insertAreaAtSplitBoundary,
   moveAreaToArea,
-  resizeSplit,
+  resizeSplitConstrained,
   setMenuBarPlacement,
   splitArea,
   updateAreaContent,
@@ -47,6 +48,11 @@ type ConfirmState = {
   message: string;
   confirmLabel: string;
   onConfirm: () => void;
+};
+
+type ToastState = {
+  id: number;
+  message: string;
 };
 
 type ResizeDragState = {
@@ -91,6 +97,12 @@ type DropTarget =
       cursorSide: "before" | "after";
     };
 
+type DropTargetEvaluation = {
+  target: DropTarget;
+  layout: EditorV2LayoutDocument;
+  invalidReason: string | null;
+};
+
 type BoundaryCandidate =
   | {
       kind: "boundary";
@@ -114,6 +126,8 @@ type EditorV2DebugState = {
   getCookieLayout: () => EditorV2LayoutDocument;
   getProjectLayouts: () => EditorV2StoredLayout[];
   getFingerprint: () => string;
+  setLayout: (nextLayout: EditorV2LayoutDocument) => void;
+  validateLayout: (nextLayout: EditorV2LayoutDocument) => string | null;
   getDropTargetAtPoint: (
     x: number,
     y: number,
@@ -144,6 +158,8 @@ const RESIZE_HOVER_INTENT_DELAY_MS = 100;
 const DOCK_ARROW_SIZE = 20;
 const DOCK_ARROW_GAP = 8;
 const DOCK_ARROW_CORNER_RADIUS = 1.8;
+const MIN_AREA_VIEWPORT_RATIO = 0.05;
+const TOAST_VISIBLE_MS = 2600;
 
 declare global {
   interface Window {
@@ -166,10 +182,14 @@ let projectLayouts: EditorV2StoredLayout[] = [
 ];
 let openDropdown: DropdownState | null = null;
 let confirmState: ConfirmState | null = null;
+let toastState: ToastState | null = null;
+let toastTimer = 0;
+let toastIdCounter = 0;
 let resizeDragState: ResizeDragState | null = null;
 let moveDragState: MoveDragState | null = null;
 let projectLayoutDragState: ProjectLayoutDragState | null = null;
 let activeDropTarget: DropTarget | null = null;
+let activeDropEvaluation: DropTargetEvaluation | null = null;
 let areaHeaderInteractionState: AreaHeaderInteractionState | null = null;
 let resizeHoverTimer: number | null = null;
 let resizeHoverElement: HTMLElement | null = null;
@@ -186,6 +206,7 @@ function render(): void {
     renderWorkspace(),
     ...(openDropdown?.id.startsWith("area-select-") ? [renderFloatingDropdown(openDropdown)] : []),
     ...(confirmState ? [renderConfirmDialog(confirmState)] : []),
+    ...(toastState ? [renderToast(toastState)] : []),
   );
 }
 
@@ -532,7 +553,8 @@ function renderSplit(node: EditorV2SplitNode): HTMLElement {
   const split = document.createElement("div");
   split.className = "editor-v2-split";
   split.dataset.direction = node.direction;
-  split.style.setProperty("--editor-v2-first-size", `${node.ratio * 100}%`);
+  split.style.setProperty("--editor-v2-first-fr", `${node.ratio}fr`);
+  split.style.setProperty("--editor-v2-second-fr", `${1 - node.ratio}fr`);
   split.dataset.splitId = node.id;
 
   const firstPane = document.createElement("div");
@@ -582,8 +604,6 @@ function renderArea(area: EditorV2AreaNode): HTMLElement {
   const element = document.createElement("section");
   element.className = "editor-v2-area";
   element.dataset.areaId = area.id;
-  element.style.minWidth = `${area.minWidth ?? definition.minWidth}px`;
-  element.style.minHeight = `${area.minHeight ?? definition.minHeight}px`;
 
   const header = document.createElement("header");
   header.className = "editor-v2-area-header";
@@ -623,14 +643,16 @@ function renderArea(area: EditorV2AreaNode): HTMLElement {
   selectButton.textContent = definition.label;
 
   const splitHorizontalButton = createAreaButton("↔", "Split horizontally", () => {
-    applyLayout(splitArea(layout, area.id, "horizontal"));
+    applyLayoutOrToast(splitArea(layout, area.id, "horizontal"));
   });
+  splitHorizontalButton.hidden = !canAreaSplit(area.id, "horizontal");
   const splitVerticalButton = createAreaButton("↕", "Split vertically", () => {
-    applyLayout(splitArea(layout, area.id, "vertical"));
+    applyLayoutOrToast(splitArea(layout, area.id, "vertical"));
   });
+  splitVerticalButton.hidden = !canAreaSplit(area.id, "vertical");
   const closeButton = createAreaButton("×", "Close area", () => {
     if (getAreaCount(layout.root) > 1) {
-      applyLayout(closeArea(layout, area.id));
+      applyLayoutOrToast(closeArea(layout, area.id));
     }
   });
 
@@ -702,7 +724,7 @@ function createAreaSelectDropdown(
       detail: candidate.shortLabel,
       active: candidate.type === currentContentType,
       action: () => {
-        applyLayout(updateAreaContent(layout, areaId, candidate.type));
+        applyLayoutOrToast(updateAreaContent(layout, areaId, candidate.type));
       },
     })),
   );
@@ -799,7 +821,21 @@ function renderConfirmDialog(state: ConfirmState): HTMLElement {
   return backdrop;
 }
 
+function renderToast(state: ToastState): HTMLElement {
+  const toast = document.createElement("div");
+  toast.className = "editor-v2-toast";
+  toast.role = "status";
+  toast.ariaLive = "polite";
+  toast.dataset.toastId = String(state.id);
+  toast.textContent = state.message;
+  return toast;
+}
+
 function installGlobalPointerHandlers(): void {
+  window.addEventListener("resize", () => {
+    render();
+  });
+
   window.addEventListener("pointermove", (event) => {
     if (resizeDragState) {
       const { splitId, direction, rect } = resizeDragState;
@@ -807,7 +843,13 @@ function installGlobalPointerHandlers(): void {
         direction === "horizontal"
           ? (event.clientX - rect.left) / rect.width
           : (event.clientY - rect.top) / rect.height;
-      layout = resizeSplit(layout, splitId, ratio);
+      layout = resizeSplitConstrained(layout, {
+        splitId,
+        ratio,
+        splitLength: direction === "horizontal" ? rect.width : rect.height,
+        minLength: direction === "horizontal" ? getMinimumAreaWidth() : getMinimumAreaHeight(),
+        fixedLength: getSplitFixedLength(),
+      });
       persistCurrentLayout();
       updateResizePreview(splitId, direction, rect);
       render();
@@ -835,7 +877,8 @@ function installGlobalPointerHandlers(): void {
           event.clientY,
           areaHeaderInteractionState.areaId,
         );
-        updateDockPreview(activeDropTarget);
+        activeDropEvaluation = evaluateDropTarget(activeDropTarget, areaHeaderInteractionState.areaId);
+        updateDockPreview(activeDropEvaluation);
         render();
       }
     } else if (moveDragState) {
@@ -854,7 +897,8 @@ function installGlobalPointerHandlers(): void {
           event.clientY,
           moveDragState.areaId,
         );
-        updateDockPreview(activeDropTarget);
+        activeDropEvaluation = evaluateDropTarget(activeDropTarget, moveDragState.areaId);
+        updateDockPreview(activeDropEvaluation);
       }
     }
   });
@@ -875,38 +919,17 @@ function installGlobalPointerHandlers(): void {
     }
 
     if (moveDragState) {
-      if (moveDragState.dragging && activeDropTarget) {
-        if (activeDropTarget.kind === "boundary") {
-          applyLayout(
-            insertAreaAtSplitBoundary(
-              layout,
-              moveDragState.areaId,
-              activeDropTarget.splitId,
-              activeDropTarget.side,
-            ),
-          );
-        } else if (activeDropTarget.kind === "workspace-boundary") {
-          applyLayout(
-            insertAreaAtWorkspaceBoundary(
-              layout,
-              moveDragState.areaId,
-              activeDropTarget.edge,
-            ),
-          );
+      if (moveDragState.dragging && activeDropEvaluation) {
+        if (activeDropEvaluation.invalidReason) {
+          showToast(activeDropEvaluation.invalidReason);
         } else {
-          applyLayout(
-            moveAreaToArea(
-              layout,
-              moveDragState.areaId,
-              activeDropTarget.areaId,
-              activeDropTarget.edge,
-            ),
-          );
+          applyLayout(activeDropEvaluation.layout);
         }
       }
 
       moveDragState = null;
       activeDropTarget = null;
+      activeDropEvaluation = null;
       removeDockPreview();
     }
 
@@ -929,6 +952,228 @@ function installGlobalPointerHandlers(): void {
 function applyLayout(nextLayout: EditorV2LayoutDocument): void {
   layout = cloneEditorV2Layout(nextLayout);
   persistCurrentLayout();
+  render();
+}
+
+function applyLayoutOrToast(nextLayout: EditorV2LayoutDocument): boolean {
+  const invalidReason = getLayoutViewportMinimumViolation(nextLayout);
+  if (invalidReason) {
+    showToast(invalidReason);
+    return false;
+  }
+
+  applyLayout(nextLayout);
+  return true;
+}
+
+function getLayoutViewportMinimumViolation(nextLayout: EditorV2LayoutDocument): string | null {
+  const minWidth = getMinimumAreaWidth();
+  const minHeight = getMinimumAreaHeight();
+  const minimum = getSmallestLayoutAreaSize(nextLayout.root, getLayoutRootRect());
+
+  if (minimum.width < minWidth || minimum.height < minHeight) {
+    return "Area is too small. Keep every area at least 5% of the viewport.";
+  }
+
+  return null;
+}
+
+function canAreaSplit(
+  areaId: string,
+  direction: EditorV2SplitDirection,
+): boolean {
+  const size = getLayoutAreaSize(layout.root, areaId, getLayoutRootRect());
+  if (!size) {
+    return true;
+  }
+
+  const splitGap = getSplitGap();
+  const splitResizerSize = getSplitResizerSize();
+  if (direction === "horizontal") {
+    return (size.width - splitGap * 2 - splitResizerSize) / 2 >= getMinimumAreaWidth();
+  }
+
+  return (size.height - splitGap * 2 - splitResizerSize) / 2 >= getMinimumAreaHeight();
+}
+
+function getMinimumAreaWidth(): number {
+  return window.innerWidth * MIN_AREA_VIEWPORT_RATIO;
+}
+
+function getMinimumAreaHeight(): number {
+  return window.innerHeight * MIN_AREA_VIEWPORT_RATIO;
+}
+
+function getLayoutRootRect(): DOMRect {
+  const workspace = document.querySelector<HTMLElement>(".editor-v2-workspace");
+  const workspaceRect = workspace?.getBoundingClientRect() ?? null;
+  if (!workspaceRect) {
+    return new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+  }
+
+  return new DOMRect(
+    0,
+    0,
+    Math.max(0, workspaceRect.width - getWorkspacePaddingInline()),
+    Math.max(0, workspaceRect.height - getWorkspacePaddingBlock()),
+  );
+}
+
+function getWorkspacePaddingInline(): number {
+  const workspace = document.querySelector<HTMLElement>(".editor-v2-workspace");
+  if (!workspace) {
+    return 0;
+  }
+
+  const style = window.getComputedStyle(workspace);
+  return parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+}
+
+function getWorkspacePaddingBlock(): number {
+  const workspace = document.querySelector<HTMLElement>(".editor-v2-workspace");
+  if (!workspace) {
+    return 0;
+  }
+
+  const style = window.getComputedStyle(workspace);
+  return parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+}
+
+function getSmallestLayoutAreaSize(
+  node: EditorV2LayoutNode,
+  rect: DOMRect,
+): { width: number; height: number } {
+  if (node.kind === "area") {
+    return { width: rect.width, height: rect.height };
+  }
+
+  const gap = getSplitGap();
+  const resizerSize = getSplitResizerSize();
+  if (node.direction === "horizontal") {
+    const availableWidth = Math.max(0, rect.width - gap * 2 - resizerSize);
+    const firstWidth = availableWidth * node.ratio;
+    const secondWidth = availableWidth - firstWidth;
+    return smallestSize(
+      getSmallestLayoutAreaSize(
+        node.first,
+        new DOMRect(rect.left, rect.top, firstWidth, rect.height),
+      ),
+      getSmallestLayoutAreaSize(
+        node.second,
+        new DOMRect(rect.left + firstWidth + gap * 2 + resizerSize, rect.top, secondWidth, rect.height),
+      ),
+    );
+  }
+
+  const availableHeight = Math.max(0, rect.height - gap * 2 - resizerSize);
+  const firstHeight = availableHeight * node.ratio;
+  const secondHeight = availableHeight - firstHeight;
+  return smallestSize(
+    getSmallestLayoutAreaSize(
+      node.first,
+      new DOMRect(rect.left, rect.top, rect.width, firstHeight),
+    ),
+    getSmallestLayoutAreaSize(
+      node.second,
+      new DOMRect(rect.left, rect.top + firstHeight + gap * 2 + resizerSize, rect.width, secondHeight),
+    ),
+  );
+}
+
+function getLayoutAreaSize(
+  node: EditorV2LayoutNode,
+  areaId: string,
+  rect: DOMRect,
+): { width: number; height: number } | null {
+  if (node.kind === "area") {
+    return node.id === areaId ? { width: rect.width, height: rect.height } : null;
+  }
+
+  const gap = getSplitGap();
+  const resizerSize = getSplitResizerSize();
+  if (node.direction === "horizontal") {
+    const availableWidth = Math.max(0, rect.width - gap * 2 - resizerSize);
+    const firstWidth = availableWidth * node.ratio;
+    const secondWidth = availableWidth - firstWidth;
+    return (
+      getLayoutAreaSize(
+        node.first,
+        areaId,
+        new DOMRect(rect.left, rect.top, firstWidth, rect.height),
+      ) ??
+      getLayoutAreaSize(
+        node.second,
+        areaId,
+        new DOMRect(
+          rect.left + firstWidth + gap * 2 + resizerSize,
+          rect.top,
+          secondWidth,
+          rect.height,
+        ),
+      )
+    );
+  }
+
+  const availableHeight = Math.max(0, rect.height - gap * 2 - resizerSize);
+  const firstHeight = availableHeight * node.ratio;
+  const secondHeight = availableHeight - firstHeight;
+  return (
+    getLayoutAreaSize(
+      node.first,
+      areaId,
+      new DOMRect(rect.left, rect.top, rect.width, firstHeight),
+    ) ??
+    getLayoutAreaSize(
+      node.second,
+      areaId,
+      new DOMRect(
+        rect.left,
+        rect.top + firstHeight + gap * 2 + resizerSize,
+        rect.width,
+        secondHeight,
+      ),
+    )
+  );
+}
+
+function smallestSize(
+  first: { width: number; height: number },
+  second: { width: number; height: number },
+): { width: number; height: number } {
+  return {
+    width: Math.min(first.width, second.width),
+    height: Math.min(first.height, second.height),
+  };
+}
+
+function getSplitGap(): number {
+  return getRootCssPixelValue("--editor-v2-split-gap", DOCK_SPLIT_GAP);
+}
+
+function getSplitResizerSize(): number {
+  return getRootCssPixelValue("--editor-v2-split-resizer-size", DOCK_RESIZER_THICKNESS);
+}
+
+function getSplitFixedLength(): number {
+  return getSplitGap() * 2 + getSplitResizerSize();
+}
+
+function getRootCssPixelValue(name: string, fallback: number): number {
+  const value = parseFloat(window.getComputedStyle(document.documentElement).getPropertyValue(name));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function showToast(message: string): void {
+  toastIdCounter += 1;
+  toastState = {
+    id: toastIdCounter,
+    message,
+  };
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toastState = null;
+    render();
+  }, TOAST_VISIBLE_MS);
   render();
 }
 
@@ -1008,18 +1253,20 @@ function clearResizeHoverIntent(): void {
   resizeHoverElement = null;
 }
 
-function updateDockPreview(target: DropTarget | null): void {
-  if (!target) {
+function updateDockPreview(evaluation: DropTargetEvaluation | null): void {
+  if (!evaluation) {
     removeDockPreview();
     return;
   }
 
+  const target = evaluation.target;
   const preview = getOrCreateDockPreview();
   const line = preview.line;
   const arrow = preview.arrow;
   const lineRect = getDropTargetLineRect(target);
   const arrowPlacement = getDropArrowPlacement(target, lineRect);
 
+  preview.root.dataset.invalid = String(Boolean(evaluation.invalidReason));
   line.dataset.orientation = isVerticalLineTarget(target) ? "vertical" : "horizontal";
   line.style.left = `${lineRect.left}px`;
   line.style.top = `${lineRect.top}px`;
@@ -1078,7 +1325,7 @@ function getDropEdge(rect: DOMRect, x: number, y: number): DropEdge {
 function findDropTargetAtPoint(
   x: number,
   y: number,
-  sourceAreaId: string,
+  _sourceAreaId: string,
 ): DropTarget | null {
   const boundaryTarget = findBoundaryDropTargetAtPoint(x, y);
   if (boundaryTarget) {
@@ -1090,8 +1337,7 @@ function findDropTargetAtPoint(
     .find(
       (element): element is HTMLElement =>
         element instanceof HTMLElement &&
-        element.classList.contains("editor-v2-area") &&
-        element.dataset.areaId !== sourceAreaId,
+        element.classList.contains("editor-v2-area"),
     );
 
   if (!area || !area.dataset.areaId) {
@@ -1197,6 +1443,56 @@ function findBoundaryDropTargetAtPoint(x: number, y: number): DropTarget | null 
     rect: candidate.rect,
     cursorSide,
   };
+}
+
+function evaluateDropTarget(
+  target: DropTarget | null,
+  sourceAreaId: string,
+): DropTargetEvaluation | null {
+  if (!target) {
+    return null;
+  }
+
+  const nextLayout = createDropTargetLayout(layout, sourceAreaId, target);
+  const invalidReason = getDropLayoutInvalidReason(layout, nextLayout);
+  return {
+    target,
+    layout: nextLayout,
+    invalidReason,
+  };
+}
+
+function createDropTargetLayout(
+  currentLayout: EditorV2LayoutDocument,
+  sourceAreaId: string,
+  target: DropTarget,
+): EditorV2LayoutDocument {
+  if (target.kind === "boundary") {
+    return insertAreaAtSplitBoundary(currentLayout, sourceAreaId, target.splitId, target.side);
+  }
+
+  if (target.kind === "workspace-boundary") {
+    return insertAreaAtWorkspaceBoundary(currentLayout, sourceAreaId, target.edge);
+  }
+
+  return moveAreaToArea(currentLayout, sourceAreaId, target.areaId, target.edge);
+}
+
+function getDropLayoutInvalidReason(
+  currentLayout: EditorV2LayoutDocument,
+  nextLayout: EditorV2LayoutDocument,
+): string | null {
+  if (createLayoutFingerprint(nextLayout) === createLayoutFingerprint(currentLayout)) {
+    return "Cannot move area there because it would leave the layout unchanged.";
+  }
+
+  const beforeAreaIds = getAreaIds(currentLayout.root).length;
+  const afterAreaIds = getAreaIds(nextLayout.root).length;
+  if (beforeAreaIds !== afterAreaIds) {
+    return "Cannot move area there because it would not preserve all layout areas.";
+  }
+
+  return getLayoutViewportMinimumViolation(nextLayout);
 }
 
 function findWorkspaceBoundaryCandidateAtPoint(
@@ -1614,6 +1910,10 @@ function installDebugHook(): void {
         layout: cloneEditorV2Layout(entry.layout),
       })),
     getFingerprint: () => createLayoutFingerprint(layout),
+    setLayout: (nextLayout) => {
+      applyLayout(nextLayout);
+    },
+    validateLayout: (nextLayout) => getLayoutViewportMinimumViolation(nextLayout),
     getDropTargetAtPoint: (x, y, sourceAreaId) => {
       const target = findDropTargetAtPoint(x, y, sourceAreaId);
       return target

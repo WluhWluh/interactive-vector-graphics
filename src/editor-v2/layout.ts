@@ -14,8 +14,6 @@ export type EditorV2AreaNode = {
   kind: "area";
   id: string;
   contentType: EditorV2ContentType;
-  minWidth?: number;
-  minHeight?: number;
 };
 
 export type EditorV2SplitNode = {
@@ -38,8 +36,8 @@ export type EditorV2LayoutDocument = {
 type AreaPathStep = "first" | "second";
 type AreaPath = AreaPathStep[];
 
-const MIN_SPLIT_RATIO = 0.12;
-const MAX_SPLIT_RATIO = 0.88;
+const MIN_SPLIT_RATIO = 0.01;
+const MAX_SPLIT_RATIO = 0.99;
 
 let layoutIdCounter = 0;
 
@@ -73,14 +71,12 @@ export function createDefaultEditorV2Layout(): EditorV2LayoutDocument {
 
 export function createArea(
   contentType: EditorV2ContentType,
-  input: Partial<Pick<EditorV2AreaNode, "id" | "minWidth" | "minHeight">> = {},
+  input: Partial<Pick<EditorV2AreaNode, "id">> = {},
 ): EditorV2AreaNode {
   return {
     kind: "area",
     id: input.id ?? createLayoutId("area"),
     contentType,
-    minWidth: input.minWidth,
-    minHeight: input.minHeight,
   };
 }
 
@@ -157,10 +153,7 @@ export function splitArea(
   placement: "before" | "after" = "after",
 ): EditorV2LayoutDocument {
   return updateLayoutNode(layout, areaId, (area) => {
-    const duplicate = createArea(area.contentType, {
-      minWidth: area.minWidth,
-      minHeight: area.minHeight,
-    });
+    const duplicate = createArea(area.contentType);
     return placement === "before"
       ? createSplit(direction, 0.5, duplicate, area)
       : createSplit(direction, 0.5, area, duplicate);
@@ -174,6 +167,21 @@ export function resizeSplit(
 ): EditorV2LayoutDocument {
   const next = cloneEditorV2Layout(layout);
   next.root = resizeSplitNode(next.root, splitId, clampSplitRatio(ratio));
+  return next;
+}
+
+export function resizeSplitConstrained(
+  layout: EditorV2LayoutDocument,
+  input: {
+    splitId: string;
+    ratio: number;
+    splitLength: number;
+    minLength: number;
+    fixedLength: number;
+  },
+): EditorV2LayoutDocument {
+  const next = cloneEditorV2Layout(layout);
+  next.root = resizeSplitConstrainedNode(next.root, input);
   return next;
 }
 
@@ -343,6 +351,14 @@ export function clampSplitRatio(value: number): number {
   return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, value));
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  if (min > max) {
+    return (min + max) / 2;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
 function updateLayoutNode(
   layout: EditorV2LayoutDocument,
   areaId: string,
@@ -386,6 +402,131 @@ function resizeSplitNode(
   };
 }
 
+function resizeSplitConstrainedNode(
+  node: EditorV2LayoutNode,
+  input: {
+    splitId: string;
+    ratio: number;
+    splitLength: number;
+    minLength: number;
+    fixedLength: number;
+  },
+): EditorV2LayoutNode {
+  if (node.kind === "area") {
+    return node;
+  }
+
+  if (node.id !== input.splitId) {
+    return {
+      ...node,
+      first: resizeSplitConstrainedNode(node.first, input),
+      second: resizeSplitConstrainedNode(node.second, input),
+    };
+  }
+
+  const budget = Math.max(0, input.splitLength - input.fixedLength);
+  if (budget <= 0) {
+    return node;
+  }
+
+  const firstMin = getNodeMinimumLength(node.first, node.direction, input.minLength, input.fixedLength);
+  const secondMin = getNodeMinimumLength(node.second, node.direction, input.minLength, input.fixedLength);
+  const lowerBound = firstMin;
+  const upperBound = budget - secondMin;
+  if (lowerBound > upperBound) {
+    return node;
+  }
+
+  const targetFirst = clampNumber(
+    budget * input.ratio,
+    lowerBound,
+    upperBound,
+  );
+  const targetSecond = budget - targetFirst;
+
+  return {
+    ...node,
+    ratio: clampSplitRatio(budget > 0 ? targetFirst / budget : node.ratio),
+    first: fitNodeLength(node.first, node.direction, targetFirst, input.minLength, input.fixedLength),
+    second: fitNodeLength(node.second, node.direction, targetSecond, input.minLength, input.fixedLength),
+  };
+}
+
+function fitNodeLength(
+  node: EditorV2LayoutNode,
+  direction: EditorV2SplitDirection,
+  targetLength: number,
+  minLength: number,
+  fixedLength: number,
+): EditorV2LayoutNode {
+  if (node.kind === "area") {
+    return node;
+  }
+
+  if (node.direction !== direction) {
+    return {
+      ...node,
+      first: fitNodeLength(node.first, direction, targetLength, minLength, fixedLength),
+      second: fitNodeLength(node.second, direction, targetLength, minLength, fixedLength),
+    };
+  }
+
+  const budget = Math.max(0, targetLength - fixedLength);
+  if (budget <= 0) {
+    return node;
+  }
+
+  const firstMin = getNodeMinimumLength(node.first, direction, minLength, fixedLength);
+  const secondMin = getNodeMinimumLength(node.second, direction, minLength, fixedLength);
+  if (firstMin + secondMin > budget) {
+    return node;
+  }
+
+  const currentFirst = budget * node.ratio;
+  const currentSecond = budget - currentFirst;
+  let firstLength = currentFirst;
+  let secondLength = currentSecond;
+
+  if (firstLength < firstMin) {
+    const deficit = firstMin - firstLength;
+    firstLength = firstMin;
+    secondLength = Math.max(secondMin, secondLength - deficit);
+  }
+
+  if (secondLength < secondMin) {
+    const deficit = secondMin - secondLength;
+    secondLength = secondMin;
+    firstLength = Math.max(firstMin, firstLength - deficit);
+  }
+
+  return {
+    ...node,
+    ratio: clampSplitRatio(budget > 0 ? firstLength / budget : node.ratio),
+    first: fitNodeLength(node.first, direction, firstLength, minLength, fixedLength),
+    second: fitNodeLength(node.second, direction, secondLength, minLength, fixedLength),
+  };
+}
+
+function getNodeMinimumLength(
+  node: EditorV2LayoutNode,
+  direction: EditorV2SplitDirection,
+  minLength: number,
+  fixedLength: number,
+): number {
+  if (node.kind === "area") {
+    return minLength;
+  }
+
+  const firstMin = getNodeMinimumLength(node.first, direction, minLength, fixedLength);
+  const secondMin = getNodeMinimumLength(node.second, direction, minLength, fixedLength);
+
+  if (node.direction !== direction) {
+    return Math.max(firstMin, secondMin);
+  }
+
+  return firstMin + fixedLength + secondMin;
+}
+
 function normalizeLayoutNode(node: EditorV2LayoutNode): unknown {
   if (node.kind === "area") {
     return {
@@ -412,14 +553,6 @@ function parseLayoutNode(value: unknown): EditorV2LayoutNode | null {
     return isContentType(value.contentType)
       ? createArea(value.contentType, {
           id: typeof value.id === "string" ? value.id : undefined,
-          minWidth:
-            typeof value.minWidth === "number" && Number.isFinite(value.minWidth)
-              ? value.minWidth
-              : undefined,
-          minHeight:
-            typeof value.minHeight === "number" && Number.isFinite(value.minHeight)
-              ? value.minHeight
-              : undefined,
         })
       : null;
   }

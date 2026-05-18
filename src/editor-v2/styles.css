@@ -39,6 +39,8 @@
     var(--editor-v2-split-gap) * 2 + var(--editor-v2-split-resizer-size)
   );
   --editor-v2-area-header-block-size: 28px;
+  --editor-v2-area-content-min-inline-size: 5vw;
+  --editor-v2-area-content-min-block-size: 5vh;
   --editor-v2-control-block-size: 22px;
   --editor-v2-icon-button-size: 22px;
   --editor-v2-viewport-min-block-size: 180px;
@@ -48,6 +50,8 @@
   --editor-v2-dock-arrow-size: 20px;
   --editor-v2-confirm-inline-size: min(360px, calc(100vw - var(--editor-v2-space-32)));
   --editor-v2-command-button-min-block-size: 28px;
+  --editor-v2-toast-inset: var(--editor-v2-space-18);
+  --editor-v2-toast-max-inline-size: min(420px, calc(100vw - var(--editor-v2-space-32)));
 
   --editor-v2-radius-xs: var(--editor-v2-space-2);
   --editor-v2-radius-sm: var(--editor-v2-space-3);
@@ -76,6 +80,8 @@
   --editor-v2-color-row-active-bg: #3a4b63;
   --editor-v2-color-viewport-bg: #181b21;
   --editor-v2-color-danger-bg: #8d3434;
+  --editor-v2-color-dock-invalid: #7d8794;
+  --editor-v2-color-toast-bg: #252b35;
 
   --editor-v2-color-text: #d8dee9;
   --editor-v2-color-text-strong: #ffffff;
@@ -94,10 +100,12 @@
 
   --editor-v2-color-menubar-shadow: rgba(255, 255, 255, 0.05);
   --editor-v2-color-dropdown-shadow: rgba(0, 0, 0, 0.42);
+  --editor-v2-color-toast-shadow: rgba(0, 0, 0, 0.36);
   --editor-v2-color-modal-shadow: rgba(0, 0, 0, 0.5);
   --editor-v2-color-backdrop: rgba(0, 0, 0, 0.42);
   --editor-v2-color-dock-shadow: rgba(155, 202, 255, 0.28);
   --editor-v2-color-dock-arrow-shadow: rgba(155, 202, 255, 0.58);
+  --editor-v2-color-dock-invalid-shadow: rgba(125, 135, 148, 0.42);
   --editor-v2-color-viewport-grid: rgba(255, 255, 255, 0.045);
   --editor-v2-color-viewport-glow: rgba(93, 169, 255, 0.16);
   --editor-v2-dropdown-shadow-blur: 42px;
@@ -284,16 +292,16 @@ body,
 
 .editor-v2-split[data-direction="horizontal"] {
   grid-template-columns:
-    var(--editor-v2-first-size)
+    minmax(var(--editor-v2-size-zero), var(--editor-v2-first-fr, 1fr))
     var(--editor-v2-split-resizer-size)
-    minmax(var(--editor-v2-size-zero), 1fr);
+    minmax(var(--editor-v2-size-zero), var(--editor-v2-second-fr, 1fr));
 }
 
 .editor-v2-split[data-direction="vertical"] {
   grid-template-rows:
-    var(--editor-v2-first-size)
+    minmax(var(--editor-v2-size-zero), var(--editor-v2-first-fr, 1fr))
     var(--editor-v2-split-resizer-size)
-    minmax(var(--editor-v2-size-zero), 1fr);
+    minmax(var(--editor-v2-size-zero), var(--editor-v2-second-fr, 1fr));
 }
 
 .editor-v2-split-pane {
@@ -367,6 +375,7 @@ body,
   min-width: var(--editor-v2-size-zero);
   min-height: var(--editor-v2-size-zero);
   overflow: hidden;
+  contain: paint;
   background: var(--editor-v2-color-area-bg);
   border: var(--editor-v2-border-width) solid var(--editor-v2-color-area-border);
   border-radius: var(--editor-v2-radius-sm);
@@ -397,12 +406,15 @@ body,
   min-width: var(--editor-v2-size-zero);
   height: var(--editor-v2-control-block-size);
   padding: var(--editor-v2-size-zero) var(--editor-v2-space-8);
+  overflow: hidden;
   color: var(--editor-v2-color-text);
   background: var(--editor-v2-color-control-bg);
   border: var(--editor-v2-border-width) solid var(--editor-v2-color-control-border);
   border-radius: var(--editor-v2-radius-sm);
   font-size: var(--editor-v2-font-size-sm);
+  text-overflow: ellipsis;
   text-align: left;
+  white-space: nowrap;
   cursor: default;
   pointer-events: auto;
 }
@@ -441,6 +453,8 @@ body,
 .editor-v2-content {
   width: var(--editor-v2-size-full);
   height: var(--editor-v2-size-full);
+  min-width: var(--editor-v2-area-content-min-inline-size);
+  min-height: var(--editor-v2-area-content-min-block-size);
   padding: var(--editor-v2-space-12);
   overflow: auto;
 }
@@ -527,6 +541,22 @@ body,
   height: var(--editor-v2-dock-line-size) !important;
 }
 
+.editor-v2-dock-preview[data-invalid="true"] .editor-v2-dock-line {
+  background: var(--editor-v2-color-dock-invalid);
+  box-shadow:
+    var(--editor-v2-size-zero) var(--editor-v2-size-zero) var(--editor-v2-size-zero)
+    var(--editor-v2-border-width) var(--editor-v2-color-dock-invalid-shadow);
+}
+
+.editor-v2-dock-preview[data-invalid="true"] .editor-v2-dock-arrow {
+  color: var(--editor-v2-color-dock-invalid);
+  filter:
+    drop-shadow(
+      var(--editor-v2-size-zero) var(--editor-v2-size-zero) var(--editor-v2-border-width)
+      var(--editor-v2-color-dock-invalid-shadow)
+    );
+}
+
 .editor-v2-dock-arrow {
   position: fixed;
   width: var(--editor-v2-dock-arrow-size);
@@ -600,4 +630,22 @@ body,
 .editor-v2-command-button[data-danger="true"] {
   color: var(--editor-v2-color-danger-text);
   background: var(--editor-v2-color-danger-bg);
+}
+
+.editor-v2-toast {
+  position: fixed;
+  right: var(--editor-v2-toast-inset);
+  bottom: var(--editor-v2-toast-inset);
+  z-index: var(--editor-v2-z-confirm);
+  max-width: var(--editor-v2-toast-max-inline-size);
+  padding: var(--editor-v2-space-10) var(--editor-v2-space-14);
+  color: var(--editor-v2-color-text-strong);
+  background: var(--editor-v2-color-toast-bg);
+  border: var(--editor-v2-border-width) solid var(--editor-v2-color-control-border);
+  border-radius: var(--editor-v2-radius-md);
+  box-shadow:
+    var(--editor-v2-size-zero) var(--editor-v2-space-10)
+    var(--editor-v2-space-32) var(--editor-v2-color-toast-shadow);
+  font-size: var(--editor-v2-font-size-sm);
+  line-height: var(--editor-v2-line-height-body);
 }
