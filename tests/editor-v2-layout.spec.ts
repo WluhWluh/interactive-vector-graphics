@@ -36,9 +36,14 @@ test("supports the editor v2 docking layout experiment", async ({ page }) => {
     resizerBox!.x + resizerBox!.width / 2,
     resizerBox!.y + resizerBox!.height / 2,
   );
+  await expect(firstResizer).toHaveCSS("cursor", "default");
+  await expect(firstResizer).toHaveAttribute("data-hover-intent", "false");
+  await expect(firstResizer).toHaveAttribute("data-hover-intent", "true", { timeout: 450 });
+  await expect(firstResizer).toHaveCSS("cursor", "col-resize");
   await page.mouse.down();
   await page.mouse.move(resizerBox!.x + 90, resizerBox!.y + resizerBox!.height / 2);
   await expect(page.locator(".editor-v2-dock-line")).toBeVisible();
+  await expect(page.locator(".editor-v2-dock-line")).toHaveCSS("border-radius", "3px");
   await page.mouse.up();
   await expect(page.locator(".editor-v2-dock-line")).toHaveCount(0);
 
@@ -46,6 +51,62 @@ test("supports the editor v2 docking layout experiment", async ({ page }) => {
     () => window.__editorV2Debug?.getFingerprint() ?? "",
   );
   expect(resizedFingerprint).toContain("split");
+
+  const dropTargetProbe = await page.evaluate(() => {
+    const source = document.querySelector<HTMLElement>(".editor-v2-area");
+    const workspace = document.querySelector<HTMLElement>(".editor-v2-workspace");
+    const root = workspace?.firstElementChild;
+    const resizers = [...document.querySelectorAll<HTMLElement>(".editor-v2-split-resizer")]
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          direction: element.dataset.direction,
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          right: rect.right,
+          bottom: rect.bottom,
+        };
+      });
+
+    if (!(source && workspace && root instanceof HTMLElement)) {
+      return null;
+    }
+
+    const workspaceRect = workspace.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    const innerResizer = resizers.find(
+      (resizer) =>
+        resizer.direction === "horizontal" &&
+        resizer.height < rootRect.height * 0.8 &&
+        resizer.bottom + 32 < rootRect.bottom,
+    );
+
+    if (!innerResizer) {
+      return null;
+    }
+
+    const sourceAreaId = source.dataset.areaId ?? "";
+    const extensionTarget = window.__editorV2Debug?.getDropTargetAtPoint(
+      innerResizer.left + innerResizer.width / 2,
+      innerResizer.bottom + 24,
+      sourceAreaId,
+    );
+    const outerTarget = window.__editorV2Debug?.getDropTargetAtPoint(
+      rootRect.left - (rootRect.left - workspaceRect.left) / 2,
+      rootRect.top + rootRect.height / 2,
+      sourceAreaId,
+    );
+
+    return { extensionTarget, outerTarget };
+  });
+
+  expect(dropTargetProbe).not.toBeNull();
+  expect(dropTargetProbe!.extensionTarget?.kind).not.toBe("boundary");
+  expect(dropTargetProbe!.extensionTarget?.kind).not.toBe("workspace-boundary");
+  expect(dropTargetProbe!.outerTarget?.kind).toBe("workspace-boundary");
+  expect(dropTargetProbe!.outerTarget?.edge).toBe("left");
 
   const sourceHeader = page.locator(".editor-v2-area-header").first();
   const targetArea = page.locator(".editor-v2-area").last();

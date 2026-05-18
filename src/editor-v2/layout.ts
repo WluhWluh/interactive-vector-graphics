@@ -269,6 +269,54 @@ export function insertAreaAtSplitBoundary(
   };
 }
 
+export function insertAreaAtWorkspaceBoundary(
+  layout: EditorV2LayoutDocument,
+  sourceAreaId: string,
+  edge: "left" | "right" | "top" | "bottom",
+): EditorV2LayoutDocument {
+  if (getAreaCount(layout.root) <= 1) {
+    return layout;
+  }
+
+  const sourceArea = findArea(layout.root, sourceAreaId);
+
+  if (!sourceArea) {
+    return layout;
+  }
+
+  const movedArea = {
+    ...sourceArea,
+    id: createLayoutId("area"),
+  };
+  const next = closeArea(layout, sourceAreaId);
+
+  if (edge === "left") {
+    return {
+      ...next,
+      root: createSplit("horizontal", 0.26, movedArea, next.root),
+    };
+  }
+
+  if (edge === "right") {
+    return {
+      ...next,
+      root: createSplit("horizontal", 0.74, next.root, movedArea),
+    };
+  }
+
+  if (edge === "top") {
+    return {
+      ...next,
+      root: createSplit("vertical", 0.26, movedArea, next.root),
+    };
+  }
+
+  return {
+    ...next,
+    root: createSplit("vertical", 0.74, next.root, movedArea),
+  };
+}
+
 export function setMenuBarPlacement(
   layout: EditorV2LayoutDocument,
   placement: EditorV2MenuBarPlacement,

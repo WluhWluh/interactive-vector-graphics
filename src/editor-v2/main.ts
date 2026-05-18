@@ -9,6 +9,7 @@ import {
   createDefaultEditorV2Layout,
   createLayoutFingerprint,
   getAreaCount,
+  insertAreaAtWorkspaceBoundary,
   insertAreaAtSplitBoundary,
   moveAreaToArea,
   resizeSplit,
@@ -75,19 +76,37 @@ type DropTarget =
       rect: DOMRect;
     }
   | {
-      kind: "area-edge";
-      areaId: string;
-      edge: DropEdge;
-      rect: DOMRect;
-      cursorSide: "before" | "after";
-    }
-  | {
       kind: "boundary";
       splitId: string;
       side: "first" | "second";
       direction: EditorV2SplitDirection;
       rect: DOMRect;
       cursorSide: "before" | "after";
+    }
+  | {
+      kind: "workspace-boundary";
+      edge: DropEdge;
+      direction: EditorV2SplitDirection;
+      rect: DOMRect;
+      cursorSide: "before" | "after";
+    };
+
+type BoundaryCandidate =
+  | {
+      kind: "boundary";
+      splitId: string;
+      direction: EditorV2SplitDirection;
+      rect: DOMRect;
+      distance: number;
+      span: number;
+    }
+  | {
+      kind: "workspace-boundary";
+      edge: DropEdge;
+      direction: EditorV2SplitDirection;
+      rect: DOMRect;
+      distance: number;
+      span: number;
     };
 
 type EditorV2DebugState = {
@@ -95,6 +114,16 @@ type EditorV2DebugState = {
   getCookieLayout: () => EditorV2LayoutDocument;
   getProjectLayouts: () => EditorV2StoredLayout[];
   getFingerprint: () => string;
+  getDropTargetAtPoint: (
+    x: number,
+    y: number,
+    sourceAreaId: string,
+  ) => {
+    kind: DropTarget["kind"];
+    edge?: DropEdge;
+    direction?: EditorV2SplitDirection;
+    rect: { x: number; y: number; width: number; height: number };
+  } | null;
 };
 
 type AreaHeaderInteractionState = {
@@ -110,6 +139,8 @@ const DOCK_SPLIT_GAP = 2;
 const DOCK_RESIZER_THICKNESS = 4;
 const DOCK_LINE_GAP = DOCK_SPLIT_GAP * 2 + DOCK_RESIZER_THICKNESS;
 const DOCK_AREA_LINE_OFFSET = (DOCK_LINE_GAP - DOCK_LINE_THICKNESS) / 2;
+const DOCK_EDGE_HIT_DISTANCE = 12;
+const RESIZE_HOVER_INTENT_DELAY_MS = 100;
 const DOCK_ARROW_SIZE = 20;
 const DOCK_ARROW_GAP = 8;
 const DOCK_ARROW_CORNER_RADIUS = 1.8;
@@ -140,6 +171,8 @@ let moveDragState: MoveDragState | null = null;
 let projectLayoutDragState: ProjectLayoutDragState | null = null;
 let activeDropTarget: DropTarget | null = null;
 let areaHeaderInteractionState: AreaHeaderInteractionState | null = null;
+let resizeHoverTimer: number | null = null;
+let resizeHoverElement: HTMLElement | null = null;
 let pendingCookieWrite = 0;
 
 render();
@@ -513,8 +546,18 @@ function renderSplit(node: EditorV2SplitNode): HTMLElement {
   resizer.dataset.splitId = node.id;
   resizer.dataset.direction = node.direction;
   resizer.dataset.dragging = String(resizeDragState?.splitId === node.id);
+  resizer.dataset.hoverIntent = "false";
+  resizer.addEventListener("pointerenter", () => {
+    scheduleResizeHoverIntent(resizer);
+  });
+  resizer.addEventListener("pointerleave", () => {
+    if (resizeHoverElement === resizer) {
+      clearResizeHoverIntent();
+    }
+  });
   resizer.addEventListener("pointerdown", (event) => {
     const rect = split.getBoundingClientRect();
+    clearResizeHoverIntent();
     resizeDragState = {
       splitId: node.id,
       direction: node.direction,
@@ -570,7 +613,7 @@ function renderArea(area: EditorV2AreaNode): HTMLElement {
 
   const title = document.createElement("span");
   title.className = "editor-v2-title-label";
-  title.textContent = "　||　";
+  title.textContent = " || ";
 
   const selectButton = document.createElement("button");
   selectButton.className = "editor-v2-content-select-button";
@@ -819,6 +862,7 @@ function installGlobalPointerHandlers(): void {
   window.addEventListener("pointerup", () => {
     if (resizeDragState) {
       resizeDragState = null;
+      clearResizeHoverIntent();
       removeDockPreview();
       render();
     }
@@ -839,6 +883,14 @@ function installGlobalPointerHandlers(): void {
               moveDragState.areaId,
               activeDropTarget.splitId,
               activeDropTarget.side,
+            ),
+          );
+        } else if (activeDropTarget.kind === "workspace-boundary") {
+          applyLayout(
+            insertAreaAtWorkspaceBoundary(
+              layout,
+              moveDragState.areaId,
+              activeDropTarget.edge,
             ),
           );
         } else {
@@ -897,7 +949,26 @@ function updateResizePreview(
     document.querySelector<HTMLElement>(
       `.editor-v2-split-resizer[data-split-id="${splitId}"]`,
     ) ?? null;
-  const rect = resizer?.getBoundingClientRect() ?? fallbackRect;
+  const resizerRect = resizer?.getBoundingClientRect() ?? null;
+  const splitRect =
+    resizer?.closest<HTMLElement>(".editor-v2-split")?.getBoundingClientRect() ??
+    fallbackRect;
+  const rect =
+    resizerRect === null
+      ? fallbackRect
+      : direction === "horizontal"
+        ? new DOMRect(
+            resizerRect.left + resizerRect.width / 2 - DOCK_LINE_THICKNESS / 2,
+            splitRect.top,
+            DOCK_LINE_THICKNESS,
+            splitRect.height,
+          )
+        : new DOMRect(
+            splitRect.left,
+            resizerRect.top + resizerRect.height / 2 - DOCK_LINE_THICKNESS / 2,
+            splitRect.width,
+            DOCK_LINE_THICKNESS,
+          );
   const preview = getOrCreateDockPreview();
   const line = preview.line;
 
@@ -907,6 +978,34 @@ function updateResizePreview(
   line.style.width = `${rect.width}px`;
   line.style.height = `${rect.height}px`;
   preview.arrow.toggleAttribute("hidden", true);
+}
+
+function scheduleResizeHoverIntent(resizer: HTMLElement): void {
+  if (resizeDragState) {
+    return;
+  }
+
+  clearResizeHoverIntent();
+  resizeHoverElement = resizer;
+  resizer.dataset.hoverIntent = "false";
+  resizeHoverTimer = window.setTimeout(() => {
+    resizeHoverTimer = null;
+    if (resizeHoverElement === resizer && resizer.isConnected && resizer.matches(":hover")) {
+      resizer.dataset.hoverIntent = "true";
+    }
+  }, RESIZE_HOVER_INTENT_DELAY_MS);
+}
+
+function clearResizeHoverIntent(): void {
+  if (resizeHoverTimer !== null) {
+    window.clearTimeout(resizeHoverTimer);
+    resizeHoverTimer = null;
+  }
+
+  if (resizeHoverElement && resizeHoverElement.dataset.dragging !== "true") {
+    resizeHoverElement.dataset.hoverIntent = "false";
+  }
+  resizeHoverElement = null;
 }
 
 function updateDockPreview(target: DropTarget | null): void {
@@ -986,11 +1085,6 @@ function findDropTargetAtPoint(
     return boundaryTarget;
   }
 
-  const edgeTarget = findAreaEdgeDropTargetAtPoint(x, y, sourceAreaId);
-  if (edgeTarget) {
-    return edgeTarget;
-  }
-
   const area = document
     .elementsFromPoint(x, y)
     .find(
@@ -1014,38 +1108,41 @@ function findDropTargetAtPoint(
 }
 
 function findBoundaryDropTargetAtPoint(x: number, y: number): DropTarget | null {
-  const hitInset = 10;
-  const candidates = [...document.querySelectorAll<HTMLElement>(".editor-v2-split-resizer")]
+  const internalCandidates: BoundaryCandidate[] = [
+    ...document.querySelectorAll<HTMLElement>(".editor-v2-split-resizer"),
+  ]
     .map((element) => {
       const rect = element.getBoundingClientRect();
       const direction: EditorV2SplitDirection =
         element.dataset.direction === "vertical" ? "vertical" : "horizontal";
-      const splitElement = element.closest<HTMLElement>(".editor-v2-split");
-      const splitRect = splitElement?.getBoundingClientRect();
-      const expanded = expandRect(rect, direction === "horizontal" ? hitInset : 0, direction === "vertical" ? hitInset : 0);
+      const expanded = expandRect(
+        rect,
+        direction === "horizontal" ? DOCK_EDGE_HIT_DISTANCE : 0,
+        direction === "vertical" ? DOCK_EDGE_HIT_DISTANCE : 0,
+      );
       const inside =
         x >= expanded.left &&
         x <= expanded.right &&
         y >= expanded.top &&
         y <= expanded.bottom;
 
-      if (!inside || !element.dataset.splitId || !splitRect) {
+      if (!inside || !element.dataset.splitId) {
         return null;
       }
 
       const lineRect =
         direction === "horizontal"
           ? new DOMRect(
-              rect.left + rect.width / 2 - 2,
-              splitRect.top,
-              4,
-              splitRect.height,
+              rect.left + rect.width / 2 - DOCK_LINE_THICKNESS / 2,
+              rect.top,
+              DOCK_LINE_THICKNESS,
+              rect.height,
             )
           : new DOMRect(
-              splitRect.left,
-              rect.top + rect.height / 2 - 2,
-              splitRect.width,
-              4,
+              rect.left,
+              rect.top + rect.height / 2 - DOCK_LINE_THICKNESS / 2,
+              rect.width,
+              DOCK_LINE_THICKNESS,
             );
 
       const distance =
@@ -1054,14 +1151,18 @@ function findBoundaryDropTargetAtPoint(x: number, y: number): DropTarget | null 
           : Math.abs(y - (rect.top + rect.height / 2));
 
       return {
-        element,
+        kind: "boundary" as const,
+        splitId: element.dataset.splitId,
         rect: lineRect,
         direction,
         distance,
-        span: direction === "horizontal" ? splitRect.height : splitRect.width,
+        span: direction === "horizontal" ? rect.height : rect.width,
       };
     })
-    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+
+  const workspaceCandidate = findWorkspaceBoundaryCandidateAtPoint(x, y);
+  const candidates = [...internalCandidates, ...(workspaceCandidate ? [workspaceCandidate] : [])]
     .sort((a, b) => a.distance - b.distance || b.span - a.span);
 
   const candidate = candidates[0];
@@ -1078,85 +1179,127 @@ function findBoundaryDropTargetAtPoint(x: number, y: number): DropTarget | null 
         ? "before"
         : "after";
 
+  if (candidate.kind === "boundary") {
+    return {
+      kind: "boundary",
+      splitId: candidate.splitId,
+      side: cursorSide === "before" ? "first" : "second",
+      direction: candidate.direction,
+      rect: candidate.rect,
+      cursorSide,
+    };
+  }
+
   return {
-    kind: "boundary",
-    splitId: candidate.element.dataset.splitId!,
-    side: cursorSide === "before" ? "first" : "second",
+    kind: "workspace-boundary",
+    edge: candidate.edge,
     direction: candidate.direction,
     rect: candidate.rect,
     cursorSide,
   };
 }
 
-function findAreaEdgeDropTargetAtPoint(
+function findWorkspaceBoundaryCandidateAtPoint(
   x: number,
   y: number,
-  sourceAreaId: string,
-): DropTarget | null {
-  const hitInset = 12;
-  const candidates = [...document.querySelectorAll<HTMLElement>(".editor-v2-area")]
-    .filter((element) => element.dataset.areaId !== sourceAreaId)
-    .map((element) => {
-      const areaId = element.dataset.areaId;
-      if (!areaId) {
-        return null;
-      }
+): BoundaryCandidate | null {
+  const workspace = document.querySelector<HTMLElement>(".editor-v2-workspace");
+  const root = workspace?.firstElementChild;
+  if (!(workspace && root instanceof HTMLElement)) {
+    return null;
+  }
 
-      const rect = element.getBoundingClientRect();
-      const options = [
-        { edge: "left" as const, distance: Math.abs(x - rect.left), span: rect.height },
-        { edge: "right" as const, distance: Math.abs(x - rect.right), span: rect.height },
-        { edge: "top" as const, distance: Math.abs(y - rect.top), span: rect.width },
-        { edge: "bottom" as const, distance: Math.abs(y - rect.bottom), span: rect.width },
-      ].sort((a, b) => a.distance - b.distance || b.span - a.span);
-      const closest = options[0];
-      if (!closest || closest.distance > hitInset) {
-        return null;
-      }
+  const workspaceRect = workspace.getBoundingClientRect();
+  const rootRect = root.getBoundingClientRect();
+  const leftPadding = rootRect.left - workspaceRect.left;
+  const rightPadding = workspaceRect.right - rootRect.right;
+  const topPadding = rootRect.top - workspaceRect.top;
+  const bottomPadding = workspaceRect.bottom - rootRect.bottom;
+  const options = [
+    {
+      edge: "left" as const,
+      distance: Math.abs(x - rootRect.left),
+      inside:
+        x >= workspaceRect.left &&
+        x <= rootRect.left + DOCK_EDGE_HIT_DISTANCE &&
+        y >= rootRect.top &&
+        y <= rootRect.bottom,
+      direction: "horizontal" as const,
+      rect: new DOMRect(
+        workspaceRect.left + leftPadding / 2 - DOCK_LINE_THICKNESS / 2,
+        rootRect.top,
+        DOCK_LINE_THICKNESS,
+        rootRect.height,
+      ),
+      span: rootRect.height,
+    },
+    {
+      edge: "right" as const,
+      distance: Math.abs(x - rootRect.right),
+      inside:
+        x >= rootRect.right - DOCK_EDGE_HIT_DISTANCE &&
+        x <= workspaceRect.right &&
+        y >= rootRect.top &&
+        y <= rootRect.bottom,
+      direction: "horizontal" as const,
+      rect: new DOMRect(
+        rootRect.right + rightPadding / 2 - DOCK_LINE_THICKNESS / 2,
+        rootRect.top,
+        DOCK_LINE_THICKNESS,
+        rootRect.height,
+      ),
+      span: rootRect.height,
+    },
+    {
+      edge: "top" as const,
+      distance: Math.abs(y - rootRect.top),
+      inside:
+        y >= workspaceRect.top &&
+        y <= rootRect.top + DOCK_EDGE_HIT_DISTANCE &&
+        x >= rootRect.left &&
+        x <= rootRect.right,
+      direction: "vertical" as const,
+      rect: new DOMRect(
+        rootRect.left,
+        workspaceRect.top + topPadding / 2 - DOCK_LINE_THICKNESS / 2,
+        rootRect.width,
+        DOCK_LINE_THICKNESS,
+      ),
+      span: rootRect.width,
+    },
+    {
+      edge: "bottom" as const,
+      distance: Math.abs(y - rootRect.bottom),
+      inside:
+        y >= rootRect.bottom - DOCK_EDGE_HIT_DISTANCE &&
+        y <= workspaceRect.bottom &&
+        x >= rootRect.left &&
+        x <= rootRect.right,
+      direction: "vertical" as const,
+      rect: new DOMRect(
+        rootRect.left,
+        rootRect.bottom + bottomPadding / 2 - DOCK_LINE_THICKNESS / 2,
+        rootRect.width,
+        DOCK_LINE_THICKNESS,
+      ),
+      span: rootRect.width,
+    },
+  ]
+    .filter((option) => option.inside)
+    .sort((a, b) => a.distance - b.distance || b.span - a.span);
 
-      return {
-        areaId,
-        rect,
-        edge: closest.edge,
-        cursorSide: (
-          closest.edge === "left" || closest.edge === "right"
-            ? x < rect.left + rect.width / 2
-              ? "before"
-              : "after"
-            : y < rect.top + rect.height / 2
-              ? "before"
-              : "after"
-        ) as "before" | "after",
-        distance: closest.distance,
-        span: closest.span,
-      };
-    })
-    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
-    .sort((a, b) => {
-      const aDistance =
-        a.edge === "left" || a.edge === "right"
-          ? Math.abs(x - (a.edge === "left" ? a.rect.left : a.rect.right))
-          : Math.abs(y - (a.edge === "top" ? a.rect.top : a.rect.bottom));
-      const bDistance =
-        b.edge === "left" || b.edge === "right"
-          ? Math.abs(x - (b.edge === "left" ? b.rect.left : b.rect.right))
-          : Math.abs(y - (b.edge === "top" ? b.rect.top : b.rect.bottom));
-      const aSpan = a.edge === "left" || a.edge === "right" ? a.rect.height : a.rect.width;
-      const bSpan = b.edge === "left" || b.edge === "right" ? b.rect.height : b.rect.width;
-      return aDistance - bDistance || bSpan - aSpan;
-    });
-
-  const candidate = candidates[0];
+  const candidate = options[0];
   if (!candidate) {
     return null;
   }
 
   return {
-    kind: "area-edge",
-    areaId: candidate.areaId,
+    kind: "workspace-boundary",
     edge: candidate.edge,
+    direction: candidate.direction,
     rect: candidate.rect,
-    cursorSide: candidate.cursorSide,
+    distance: candidate.distance,
+    span: candidate.span,
   };
 }
 
@@ -1170,7 +1313,7 @@ function expandRect(rect: DOMRect, horizontal: number, vertical: number): DOMRec
 }
 
 function getDropTargetLineRect(target: DropTarget): DOMRect {
-  if (target.kind === "boundary") {
+  if (target.kind === "boundary" || target.kind === "workspace-boundary") {
     return target.rect;
   }
 
@@ -1206,6 +1349,8 @@ function getDropTargetLineRect(target: DropTarget): DOMRect {
         thickness,
       );
   }
+
+  return target.rect;
 }
 
 function getDropArrowPlacement(
@@ -1220,12 +1365,12 @@ function getDropArrowPlacement(
     if (target.direction === "horizontal") {
       return target.cursorSide === "before"
         ? {
-            direction: "left",
+            direction: "right",
             left: lineRect.left - gap - size,
             top: lineRect.top + lineRect.height / 2 - size / 2,
           }
         : {
-            direction: "right",
+            direction: "left",
             left: lineRect.right + gap,
             top: lineRect.top + lineRect.height / 2 - size / 2,
           };
@@ -1233,21 +1378,21 @@ function getDropArrowPlacement(
 
     return target.cursorSide === "before"
       ? {
-          direction: "up",
+          direction: "down",
           left: lineRect.left + lineRect.width / 2 - size / 2,
           top: lineRect.top - gap - size,
         }
       : {
-          direction: "down",
+          direction: "up",
           left: lineRect.left + lineRect.width / 2 - size / 2,
           top: lineRect.bottom + gap,
         };
   }
 
-  if (target.kind === "area-edge" || target.kind === "area") {
+  if (target.kind === "area" || target.kind === "workspace-boundary") {
     if (target.edge === "left") {
       return {
-        direction: "right",
+        direction: "left",
         left: lineRect.right + arrowGap,
         top: lineRect.top + lineRect.height / 2 - size / 2,
       };
@@ -1255,7 +1400,7 @@ function getDropArrowPlacement(
 
     if (target.edge === "right") {
       return {
-        direction: "left",
+        direction: "right",
         left: lineRect.left - arrowGap - size,
         top: lineRect.top + lineRect.height / 2 - size / 2,
       };
@@ -1263,7 +1408,7 @@ function getDropArrowPlacement(
 
     if (target.edge === "top") {
       return {
-        direction: "down",
+        direction: "up",
         left: lineRect.left + lineRect.width / 2 - size / 2,
         top: lineRect.bottom + arrowGap,
       };
@@ -1271,7 +1416,7 @@ function getDropArrowPlacement(
 
     if (target.edge === "bottom") {
       return {
-        direction: "up",
+        direction: "down",
         left: lineRect.left + lineRect.width / 2 - size / 2,
         top: lineRect.top - arrowGap - size,
       };
@@ -1469,5 +1614,24 @@ function installDebugHook(): void {
         layout: cloneEditorV2Layout(entry.layout),
       })),
     getFingerprint: () => createLayoutFingerprint(layout),
+    getDropTargetAtPoint: (x, y, sourceAreaId) => {
+      const target = findDropTargetAtPoint(x, y, sourceAreaId);
+      return target
+        ? {
+            kind: target.kind,
+            edge: target.kind === "boundary" ? undefined : target.edge,
+            direction:
+              target.kind === "area"
+                ? undefined
+                : target.direction,
+            rect: {
+              x: target.rect.x,
+              y: target.rect.y,
+              width: target.rect.width,
+              height: target.rect.height,
+            },
+          }
+        : null;
+    },
   };
 }
